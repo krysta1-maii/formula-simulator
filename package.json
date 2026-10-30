@@ -1,0 +1,14 @@
+{
+  "name": "formula-simulator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "方程式赛车动力学模拟器 · 阶段一静态底盘演示",
+  "type": "module",
+  "scripts": {
+    "build": "node tools/build.mjs",
+    "dev": "node tools/dev-server.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

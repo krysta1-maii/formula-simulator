@@ -1,0 +1,500 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#070a0f">
+<meta name="fs-stage" content="1">
+<meta name="description" content="Formula Simulator FS-01：方程式赛车静态底盘与倾斜路面四角载荷演示。阶段一交付。">
+<title>FS-01 静态底盘台 · Formula Simulator</title>
+<style>/*__STYLES__*/</style>
+</head>
+<body>
+<div id="app">
+  <main id="viewport" aria-label="三维静态底盘演示场景">
+    <div class="scene-wash" aria-hidden="true"></div>
+    <div id="labelLayer" class="label-layer" aria-hidden="true"></div>
+    <div class="grain" aria-hidden="true"></div>
+    <div class="corner-mark tl" aria-hidden="true"></div>
+    <div class="corner-mark br" aria-hidden="true"></div>
+  </main>
+
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 44 44" role="img">
+          <path d="M7 27.5h12.4L33 12h5.4L24.6 32H7z" fill="currentColor" opacity=".95"/>
+          <path d="M9 21.5h8.2L25 8.5h5L16.7 25.5H9z" fill="currentColor" opacity=".5"/>
+          <path d="M25.5 32h11.8l2.7-4H28.2z" fill="var(--accent)"/>
+        </svg>
+      </div>
+      <div class="brand-text">
+        <div class="brand-kicker">FORMULA SIMULATOR <span class="kicker-sep"></span> STATIC RIG 01</div>
+        <h1>FS-01 <span>静态底盘台</span></h1>
+      </div>
+    </div>
+
+    <div class="topbar-center">
+      <span class="phase-pill"><span class="status-dot"></span>阶段一 · 外观与静态底盘</span>
+      <span class="topbar-stat">平面倾角 <b id="topBeta">0.0°</b></span>
+      <span class="topbar-stat">总法向 <b id="topNormal">—</b></span>
+      <span class="topbar-stat topbar-stat-hide">前轴 <b id="topFrontShare">—</b></span>
+    </div>
+
+    <div class="topbar-actions">
+      <button type="button" class="icon-btn" id="btnHelp" title="模型说明与验收 (?)" aria-label="打开模型说明">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.5 2.5 0 1 1 3.5 2.3c-.8.4-1.1.9-1.1 1.8"/><circle cx="12" cy="17.1" r=".9" fill="currentColor" stroke="none"/></svg>
+      </button>
+      <button type="button" class="text-btn is-active" id="btnToggleControls" aria-pressed="true">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg>
+        参数
+      </button>
+      <button type="button" class="text-btn is-active" id="btnToggleTelemetry" aria-pressed="true">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5M4 19h16"/><path d="M7.5 15.5l3.2-4 2.6 2.2 4.2-6"/></svg>
+        遥测
+      </button>
+    </div>
+  </header>
+
+  <aside class="panel panel-left is-open" id="panelControls" aria-label="车辆与路面参数">
+    <div class="panel-head">
+      <div>
+        <div class="panel-kicker">SETUP / 01</div>
+        <h2>车辆与工况</h2>
+      </div>
+      <button type="button" class="panel-close" data-close-panel="panelControls" aria-label="收起参数面板">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+
+    <div class="panel-scroll">
+      <section class="panel-section">
+        <div class="section-head">
+          <h3>路面姿态</h3>
+          <span class="section-hint">WORLD GRAVITY ↓</span>
+        </div>
+        <div class="preset-row" role="group" aria-label="路面预设">
+          <button type="button" class="chip is-active" data-road-preset="level">水平</button>
+          <button type="button" class="chip" data-road-preset="slope">纵坡 8°</button>
+          <button type="button" class="chip" data-road-preset="bank">横坡 7°</button>
+          <button type="button" class="chip" data-road-preset="mixed">复合坡</button>
+        </div>
+
+        <div class="control">
+          <div class="control-head">
+            <label for="slope">纵坡角 <span class="label-note">车头抬高为正</span></label>
+            <output id="slopeOut" for="slope">0.0°</output>
+          </div>
+          <input type="range" id="slope" data-param="slope" data-kind="angle" min="-10" max="10" step="0.1" value="0">
+          <div class="range-scale"><span>−10°</span><span>0</span><span>+10°</span></div>
+        </div>
+
+        <div class="control">
+          <div class="control-head">
+            <label for="bank">横坡角 <span class="label-note">右侧降低为正</span></label>
+            <output id="bankOut" for="bank">0.0°</output>
+          </div>
+          <input type="range" id="bank" data-param="bank" data-kind="angle" min="-10" max="10" step="0.1" value="0">
+          <div class="range-scale"><span>−10°</span><span>0</span><span>+10°</span></div>
+        </div>
+
+        <div class="control">
+          <div class="control-head">
+            <label for="friction">路面附着系数 <span class="label-note">μ</span></label>
+            <output id="frictionOut" for="friction">1.40</output>
+          </div>
+          <input type="range" id="friction" data-param="friction" data-kind="decimal2" min="0.4" max="1.8" step="0.01" value="1.4">
+        </div>
+      </section>
+
+      <section class="panel-section">
+        <div class="section-head">
+          <h3>质量与质心</h3>
+          <span class="section-hint">INERTIA STATIC</span>
+        </div>
+
+        <div class="control">
+          <div class="control-head">
+            <label for="mass">总质量 <span class="label-note">含驾驶员</span></label>
+            <output id="massOut" for="mass">798 kg</output>
+          </div>
+          <input type="range" id="mass" data-param="mass" data-kind="int" data-unit="kg" min="600" max="1000" step="1" value="798">
+        </div>
+
+        <div class="control">
+          <div class="control-head">
+            <label for="frontWeightPct">前轴静载比 <span class="label-note">决定质心纵向位置</span></label>
+            <output id="frontWeightPctOut" for="frontWeightPct">45.5%</output>
+          </div>
+          <input type="range" id="frontWeightPct" data-param="frontWeightPct" data-kind="decimal1" min="40" max="55" step="0.1" value="45.5">
+          <div class="range-scale"><span>40%</span><span>质心后移</span><span>55%</span></div>
+        </div>
+
+        <div class="control">
+          <div class="control-head">
+            <label for="cgHeight">质心高度 <span class="label-note">距路面</span></label>
+            <output id="cgHeightOut" for="cgHeight">0.300 m</output>
+          </div>
+          <input type="range" id="cgHeight" data-param="cgHeight" data-kind="m3" min="0.15" max="0.6" step="0.005" value="0.3">
+        </div>
+
+        <div class="control">
+          <div class="control-head">
+            <label for="cgLateral">质心横向偏移 <span class="label-note">向右为正</span></label>
+            <output id="cgLateralOut" for="cgLateral">+0.000 m</output>
+          </div>
+          <input type="range" id="cgLateral" data-param="cgLateral" data-kind="signedM3" min="-0.12" max="0.12" step="0.005" value="0">
+        </div>
+      </section>
+
+      <details class="panel-section details-section" open>
+        <summary>
+          <div class="section-head">
+            <h3>显示与剖视</h3>
+            <span class="section-hint">VIEW</span>
+          </div>
+          <span class="summary-chevron" aria-hidden="true"></span>
+        </summary>
+        <div class="details-body">
+          <label class="switch-row">
+            <span><b>轮载矢量</b><small>箭头长度正比于四轮法向力</small></span>
+            <span class="switch"><input type="checkbox" id="showLoads" data-param="showLoads" checked><i></i></span>
+          </label>
+          <label class="switch-row">
+            <span><b>质心与重力线</b><small>世界竖直投影，不随路面法向变化</small></span>
+            <span class="switch"><input type="checkbox" id="showCG" data-param="showCG" checked><i></i></span>
+          </label>
+          <label class="switch-row">
+            <span><b>三维载荷标注</b><small>在箭头端显示 N / kg 数值</small></span>
+            <span class="switch"><input type="checkbox" id="showLabels" data-param="showLabels"><i></i></span>
+          </label>
+          <label class="switch-row">
+            <span><b>车身剖视</b><small>透视车壳，检查摇臂、弹簧与防倾杆</small></span>
+            <span class="switch"><input type="checkbox" id="xray" data-param="xray"><i></i></span>
+          </label>
+          <label class="switch-row">
+            <span><b>机构标注</b><small>剖视时标出转向、传动与防倾杆位置</small></span>
+            <span class="switch"><input type="checkbox" id="showParts" data-param="showParts" checked><i></i></span>
+          </label>
+        </div>
+      </details>
+      <details class="panel-section details-section">
+        <summary>
+          <div class="section-head">
+            <h3>车辆尺寸</h3>
+            <span class="section-hint">GEOMETRY</span>
+          </div>
+          <span class="summary-chevron" aria-hidden="true"></span>
+        </summary>
+        <div class="details-body">
+          <div class="control">
+            <div class="control-head">
+              <label for="wheelbase">轴距</label>
+              <output id="wheelbaseOut" for="wheelbase">3.550 m</output>
+            </div>
+            <input type="range" id="wheelbase" data-param="wheelbase" data-kind="m3" data-rebuild="1" min="3.2" max="3.9" step="0.01" value="3.55">
+          </div>
+          <div class="control split-2">
+            <div>
+              <div class="control-head"><label for="trackFront">前轮距</label><output id="trackFrontOut" for="trackFront">1.620 m</output></div>
+              <input type="range" id="trackFront" data-param="trackFront" data-kind="m3" data-rebuild="1" min="1.45" max="1.75" step="0.005" value="1.62">
+            </div>
+            <div>
+              <div class="control-head"><label for="trackRear">后轮距</label><output id="trackRearOut" for="trackRear">1.580 m</output></div>
+              <input type="range" id="trackRear" data-param="trackRear" data-kind="m3" data-rebuild="1" min="1.4" max="1.72" step="0.005" value="1.58">
+            </div>
+          </div>
+          <div class="control">
+            <div class="control-head">
+              <label for="wheelRadius">轮胎半径 <span class="label-note">18 英寸轮辋等效</span></label>
+              <output id="wheelRadiusOut" for="wheelRadius">0.360 m</output>
+            </div>
+            <input type="range" id="wheelRadius" data-param="wheelRadius" data-kind="m3" data-rebuild="1" min="0.31" max="0.39" step="0.005" value="0.36">
+          </div>
+        </div>
+      </details>
+
+      <details class="panel-section details-section">
+        <summary>
+          <div class="section-head">
+            <h3>悬架与转向</h3>
+            <span class="section-hint">STATIC SUPPORT</span>
+          </div>
+          <span class="summary-chevron" aria-hidden="true"></span>
+        </summary>
+        <div class="details-body">
+          <div class="control split-2">
+            <div>
+              <div class="control-head"><label for="wheelRateF">前轮心率</label><output id="wheelRateFOut" for="wheelRateF">140 N/mm</output></div>
+              <input type="range" id="wheelRateF" data-param="wheelRateF" data-kind="int" min="50" max="320" step="1" value="140">
+            </div>
+            <div>
+              <div class="control-head"><label for="wheelRateR">后轮心率</label><output id="wheelRateROut" for="wheelRateR">160 N/mm</output></div>
+              <input type="range" id="wheelRateR" data-param="wheelRateR" data-kind="int" min="50" max="320" step="1" value="160">
+            </div>
+          </div>
+          <div class="control split-2">
+            <div>
+              <div class="control-head"><label for="arbFront">前防倾杆硬度</label><output id="arbFrontOut" for="arbFront">60%</output></div>
+              <input type="range" id="arbFront" data-param="arbFront" data-kind="int" min="0" max="100" step="1" value="60">
+            </div>
+            <div>
+              <div class="control-head"><label for="arbRear">后防倾杆硬度</label><output id="arbRearOut" for="arbRear">60%</output></div>
+              <input type="range" id="arbRear" data-param="arbRear" data-kind="int" min="0" max="100" step="1" value="60">
+            </div>
+          </div>
+          <div class="inline-note">
+            <span class="note-dot"></span>
+            横向扭杆 + 同向杠杆臂 + 连接杆。滑块改变叶片绕纵轴的转角：0% 叶片放平（最软），100% 叶片立起（最硬）；等效轮心刚度计入静力方程。
+          </div>
+          <div class="control">
+            <div class="control-head">
+              <label for="steer">前轮转角 <span class="label-note">仅机构展示</span></label>
+              <output id="steerOut" for="steer">0.0°</output>
+            </div>
+            <input type="range" id="steer" data-param="steer" data-kind="angle" min="-18" max="18" step="0.5" value="0">
+          </div>
+          <div class="inline-note">
+            <span class="note-dot"></span>
+            阶段一仅计算静态支撑；转向只驱动前轮、转向横拉杆及轮胎姿态，不产生侧向力。
+          </div>
+        </div>
+      </details>
+
+    </div>
+
+    <div class="panel-foot">
+      <button type="button" class="btn btn-ghost" id="btnResetAll">恢复默认</button>
+      <button type="button" class="btn btn-ghost" id="btnCopyConfig">复制参数</button>
+      <button type="button" class="btn btn-accent" id="btnScreenshot">保存截图</button>
+    </div>
+  </aside>
+
+  <aside class="panel panel-right is-open" id="panelTelemetry" aria-label="静态载荷遥测">
+    <div class="panel-head">
+      <div>
+        <div class="panel-kicker">TELEMETRY / STATIC</div>
+        <h2>静态载荷</h2>
+      </div>
+      <div class="panel-head-right">
+        <div class="unit-toggle" role="group" aria-label="载荷单位">
+          <button type="button" class="is-active" data-units="N">N</button>
+          <button type="button" data-units="kg">kg</button>
+        </div>
+        <button type="button" class="panel-close" data-close-panel="panelTelemetry" aria-label="收起遥测面板">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="panel-scroll">
+      <div class="solver-warning" id="solverWarning" hidden>
+        <b>线性静力模型超出范围</b>
+        <span></span>
+      </div>
+
+      <div class="corner-grid" aria-label="四角静态载荷">
+        <article class="corner-card" id="cornerFL">
+          <div class="corner-head"><span class="corner-code"><i></i>FL</span><span class="corner-name">左前</span></div>
+          <div class="corner-value"><b id="loadFL">—</b><span data-unit-label>N</span></div>
+          <div class="corner-sub"><span id="massEqFL">—</span><span class="corner-delta" id="deltaFL">±0</span></div>
+          <div class="corner-bar"><i id="barFL"></i></div>
+        </article>
+        <article class="corner-card" id="cornerFR">
+          <div class="corner-head"><span class="corner-code"><i></i>FR</span><span class="corner-name">右前</span></div>
+          <div class="corner-value"><b id="loadFR">—</b><span data-unit-label>N</span></div>
+          <div class="corner-sub"><span id="massEqFR">—</span><span class="corner-delta" id="deltaFR">±0</span></div>
+          <div class="corner-bar"><i id="barFR"></i></div>
+        </article>
+        <article class="corner-card" id="cornerRL">
+          <div class="corner-head"><span class="corner-code"><i></i>RL</span><span class="corner-name">左后</span></div>
+          <div class="corner-value"><b id="loadRL">—</b><span data-unit-label>N</span></div>
+          <div class="corner-sub"><span id="massEqRL">—</span><span class="corner-delta" id="deltaRL">±0</span></div>
+          <div class="corner-bar"><i id="barRL"></i></div>
+        </article>
+        <article class="corner-card" id="cornerRR">
+          <div class="corner-head"><span class="corner-code"><i></i>RR</span><span class="corner-name">右后</span></div>
+          <div class="corner-value"><b id="loadRR">—</b><span data-unit-label>N</span></div>
+          <div class="corner-sub"><span id="massEqRR">—</span><span class="corner-delta" id="deltaRR">±0</span></div>
+          <div class="corner-bar"><i id="barRR"></i></div>
+        </article>
+      </div>
+
+      <div class="telemetry-block">
+        <div class="dist-head"><span>前轴 / 后轴</span><b><span id="frontShare">—</span><span class="muted"> / </span><span id="rearShare">—</span></b></div>
+        <div class="dist-track front-rear"><i id="frontShareBar"></i></div>
+        <div class="dist-head dist-head-secondary"><span>左 / 右</span><b><span id="leftShare">—</span><span class="muted"> / </span><span id="rightShare">—</span></b></div>
+        <div class="dist-track left-right"><i id="leftShareBar"></i></div>
+      </div>
+
+      <div class="total-strip">
+        <div><span>总法向力</span><b id="totalNormal">—</b><small>mg cosβ</small></div>
+        <div><span>整车重量</span><b id="totalWeight">—</b><small>mg</small></div>
+        <div><span>坡面附着需求</span><b id="frictionDemand">—</b><small>tanβ</small></div>
+      </div>
+
+      <div class="checks" id="checkList" aria-label="静态校核"></div>
+
+      <details class="telemetry-details">
+        <summary><span>详细状态</span><span class="summary-chevron" aria-hidden="true"></span></summary>
+        <dl class="data-list">
+          <div><dt>平面法向倾角 β</dt><dd id="planeTilt">—</dd></div>
+          <div><dt>质心纵向 x<sub>CG</sub></dt><dd id="cgLong">—</dd></div>
+          <div><dt>质心竖直投影偏移</dt><dd id="cgProjection">—</dd></div>
+          <div><dt>车体升沉 h</dt><dd id="bodyHeave">—</dd></div>
+          <div><dt>车体俯仰 / 侧倾</dt><dd id="bodyAttitude">—</dd></div>
+          <div><dt>四角行程 FL / FR / RL / RR</dt><dd class="mono" id="cornerTravel">—</dd></div>
+          <div><dt>悬架杆件端点</dt><dd id="linkStatus">—</dd></div>
+          <div><dt>防倾杆 F / R</dt><dd id="arbStatus">—</dd></div>
+          <div><dt>模型自检</dt><dd id="selfTestStatus">—</dd></div>
+        </dl>
+      </details>
+
+      <div class="level-compare">
+        <div class="level-compare-head"><span>水平路面基准</span><button type="button" class="link-btn" id="btnLevelSnapshot">归零路面</button></div>
+        <div class="level-compare-grid">
+          <span>FL <b id="levelFL">—</b></span><span>FR <b id="levelFR">—</b></span>
+          <span>RL <b id="levelRL">—</b></span><span>RR <b id="levelRR">—</b></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel-foot panel-foot-telemetry">
+      <span class="live-dot"></span><span>实时求解</span><span class="foot-sep"></span><span>阶段一 / 静力</span>
+    </div>
+  </aside>
+
+  <div class="bottom-bar" role="toolbar" aria-label="视角与显示工具">
+    <div class="tool-group camera-group" role="group" aria-label="相机预设">
+      <button type="button" class="tool-btn is-active" data-camera="threeQuarter">三分之四</button>
+      <button type="button" class="tool-btn" data-camera="side">侧视</button>
+      <button type="button" class="tool-btn" data-camera="front">前视</button>
+      <button type="button" class="tool-btn" data-camera="rear">后视</button>
+      <button type="button" class="tool-btn" data-camera="top">顶视</button>
+      <button type="button" class="tool-btn" id="btnInspect" title="机构剖视 (M)"><span class="tool-glyph">⌬</span>机构</button>
+    </div>
+    <span class="tool-sep"></span>
+    <div class="tool-group">
+      <button type="button" class="tool-btn" id="btnXray" aria-pressed="false"><span class="tool-glyph">◫</span>透视</button>
+      <button type="button" class="tool-btn" id="btnAutoRotate" aria-pressed="false"><span class="tool-glyph">↻</span>环绕</button>
+    </div>
+    <span class="tool-sep"></span>
+    <div class="tool-group">
+      <button type="button" class="tool-btn" id="btnResetView"><span class="tool-glyph">⌂</span>重置视角</button>
+      <button type="button" class="tool-btn tool-btn-accent" id="btnScreenshotBottom"><span class="tool-glyph">▣</span>截图</button>
+    </div>
+  </div>
+
+  <div class="viewport-hint">
+    <span>拖动旋转</span><span>滚轮缩放</span><span>右键平移</span><span>R 重置 · H 水平</span>
+  </div>
+
+  <div class="loading" id="loading" aria-live="polite">
+    <div class="loading-inner">
+      <div class="loading-mark">
+        <svg viewBox="0 0 44 44" aria-hidden="true">
+          <path d="M7 27.5h12.4L33 12h5.4L24.6 32H7z" fill="currentColor"/>
+          <path d="M9 21.5h8.2L25 8.5h5L16.7 25.5H9z" fill="currentColor" opacity=".45"/>
+          <path d="M25.5 32h11.8l2.7-4H28.2z" fill="var(--accent)"/>
+        </svg>
+      </div>
+      <div class="loading-title">FS-01 <span>静态底盘台</span></div>
+      <div class="loading-sub">正在构建几何与静力模型</div>
+      <div class="loading-bar"><i></i></div>
+    </div>
+  </div>
+
+  <div class="error-screen" id="errorScreen" hidden>
+    <div class="error-card">
+      <div class="error-code">WEBGL / INIT ERROR</div>
+      <h2>三维场景未能启动</h2>
+      <p id="errorMessage">当前浏览器无法创建 WebGL 上下文。请使用最新版 Chrome、Edge 或 Firefox 打开，并确认硬件加速已开启。</p>
+      <button type="button" class="btn btn-accent" onclick="location.reload()">重新加载</button>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <div class="modal" id="modelModal" role="dialog" aria-modal="true" aria-labelledby="modalTitle" hidden>
+    <div class="modal-backdrop" data-close-modal></div>
+    <div class="modal-card">
+      <div class="modal-head">
+        <div>
+          <div class="modal-kicker">MODEL NOTES / STAGE 01</div>
+          <h2 id="modalTitle">阶段一：外观与静态底盘</h2>
+        </div>
+        <button type="button" class="icon-btn" data-close-modal aria-label="关闭">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="modal-cols">
+          <section>
+            <h3><span>01</span>本期范围</h3>
+            <p>本页面是 <b>DESIGN.md</b> 阶段一的交互演示：建立可辨认的现代开轮方程式赛车外观与主要尺寸，建立可整体倾斜的路面、质心与四轮静态位置，并计算水平及倾斜路面上的四角静态法向载荷。</p>
+            <ul class="check-list-static">
+              <li>程序化车体、前后翼、Halo、侧箱、底板与扩散器</li>
+              <li>前后双横臂、推杆/拉杆、摇臂、弹簧—阻尼器、转向机与扭杆式防倾杆</li>
+              <li>前轴转向柱与左右横拉杆、后轴差速器与左右半轴、四个独立车轮</li>
+              <li>双轴倾斜路面，重力方向保持世界竖直</li>
+              <li>四角轮载、轴荷分配、附着需求与模型自检实时显示</li>
+            </ul>
+            <p class="muted-note">阶段二至四（六自由度动态、轮胎滑移与驱动、空气动力学调参）尚未接入。当前悬架杆件为视觉运动学绑定，不强制刚性杆长约束；阶段二将由共享几何模块替换。</p>
+          </section>
+
+          <section>
+            <h3><span>02</span>静力求解</h3>
+            <p>路面局部坐标取 x 向前、y 沿法向、z 向右。设平面法向与竖直方向夹角为 β，车重 mg 在路面法向的分量为 N<sub>tot</sub> = mg cosβ。重力线在路面上的投影点为 P：</p>
+            <div class="eq">P = CG + t·g<sub>road</sub>，t = −h<sub>CG</sub> / g<sub>road,y</sub></div>
+            <p>四角支反力满足力与力矩平衡：</p>
+            <div class="eq">ΣN<sub>i</sub> = N<sub>tot</sub><br>Σx<sub>i</sub>N<sub>i</sub> = N<sub>tot</sub>P<sub>x</sub><br>Σz<sub>i</sub>N<sub>i</sub> = N<sub>tot</sub>P<sub>z</sub></div>
+            <p>每个角由等效轮心弹簧支撑，弹簧力 N<sub>i</sub> = N<sub>i0</sub> − k<sub>i</sub>(h + x<sub>i</sub>p − z<sub>i</sub>r) + F<sub>arb,i</sub>，其中 h、p、r 为车体相对路面的升沉、俯仰和侧倾。防倾杆在左右轮心产生等大反向的附加力，只进入侧倾方程，其等效侧倾刚度为 K<sub>arb</sub> = k<sub>aF</sub>t<sub>F</sub><sup>2</sup> + k<sub>aR</sub>t<sub>R</sub><sup>2</sup>。将弹簧力代入平衡式，得到关于姿态的三元一次方程组；四角载荷由此唯一确定。水平路面上解为设计姿态，轮载等于由质心位置分配得到的静态角重量。</p>
+            <p>防倾杆不是连接左右车轮的刚性横梁：它是一根横置扭杆，两端杠杆臂朝同一侧伸出，经连接杆接到摇臂吊耳。左右同向运动时扭杆自由转动，单轮跳动或侧倾时才受扭。可调式的一根杠杆臂为扁平弹簧钢叶片，绕自身纵轴旋转改变弯曲刚度；页面以 0–100% 硬度表示这一调节，叶片转角按 θ = arccos√p 计算。</p>
+            <p>切向重力分量 mg sinβ 由轮胎静摩擦承担。页面按各轮法向载荷比例分配切向力，并给出均匀附着需求 μ<sub>req</sub> = tanβ；该简化不校核坡面偏航和四轮独立附着。</p>
+          </section>
+        </div>
+
+        <section class="modal-wide">
+          <h3><span>03</span>阶段一验收映射</h3>
+          <div class="acceptance-grid">
+            <div class="acceptance-item"><span class="acc-num">A</span><div><b>外观与主要尺寸</b><p>可辨识的开轮单座方程式赛车；轴距、前后轮距、轮胎半径可调。</p></div></div>
+            <div class="acceptance-item"><span class="acc-num">B</span><div><b>倾斜路面与静态位置</b><p>纵坡/横坡独立调整；四轮接触点位于路面，重力保持世界竖直。</p></div></div>
+            <div class="acceptance-item"><span class="acc-num">C</span><div><b>水平与倾斜静态轮载</b><p>水平状态按质心分配；倾斜后轮载满足法向力与力矩平衡，并显示对水平基准的变化。</p></div></div>
+            <div class="acceptance-item"><span class="acc-num">D</span><div><b>悬架与车轮连接</b><p>杆件端点实时绑定车体与立柱；四轮接地；剖视可检查内部摇臂、弹簧、转向机、半轴与防倾杆。</p></div></div>
+            <div class="acceptance-item"><span class="acc-num">E</span><div><b>转向、传动与防倾杆</b><p>前轴齿轮齿条、转向柱和横拉杆；后轴差速器与半轴；横向扭杆、同向杠杆臂、连接杆和叶片式硬度调节。</p></div></div>
+          </div>
+        </section>
+
+        <div class="modal-cols">
+          <section>
+            <h3><span>04</span>模型自检</h3>
+            <div class="selftest-summary" id="selfTestSummary">未运行</div>
+            <ul class="selftest-list" id="selfTestList"></ul>
+          </section>
+          <section>
+            <h3><span>05</span>操作与约定</h3>
+            <ul class="key-list">
+              <li><span>拖动</span> 环绕观察，滚轮缩放，右键或 Shift+拖动平移</li>
+              <li><span>1 – 5</span> 切换相机预设，<span>R</span> 重置视角</li>
+              <li><span>X</span> 切换车身剖视，<span>M</span> 机构剖视（转向 → 传动 → 前/后防倾杆），<span>R</span> 返回总览</li>
+              <li><span>F</span> 轮载矢量，<span>G</span> 质心，<span>H</span> 水平路面</li>
+              <li><span>单位</span> 遥测面板可在 N 与 kg 等效之间切换；kg 值按 g = 9.80665 m/s² 换算</li>
+              <li><span>保存</span> 参数会写入浏览器本地存储；“复制参数”输出当前状态的 JSON</li>
+            </ul>
+            <p class="muted-note">所有几何、纹理和渲染均在本地生成，页面不依赖网络。使用 Three.js r149（MIT License）。</p>
+          </section>
+        </div>
+        <div class="modal-foot">
+          <span>Formula Simulator · 阶段一演示 v0.1.0 · <a href="DESIGN.md" target="_blank" rel="noopener">DESIGN.md</a></span>
+          <span>静态底盘 / 双横臂 / 前推杆后拉杆 / 扭杆防倾杆</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mobile-scrim" id="mobileScrim" hidden></div>
+</div>
+<script>/*__THREE__*/</script>
+/*__APP__*/
+</body>
+</html>
