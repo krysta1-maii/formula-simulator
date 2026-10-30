@@ -503,7 +503,8 @@ function refreshChecks(model) {
   const tests = UI.selfTests;
   const passed = tests.filter((test) => test.ok).length;
   const forceOk = model.equilibriumOk && model.liftedCount === 0;
-  const linksOk = diag.linkCount > 0 && diag.maxGapMm < 0.02;
+  const linksOk = diag.linkCount > 0 && diag.maxSuspLinkStretchMm < 1 && diag.rockerSolveOk;
+  const steerOk = diag.tieRodStretchMm < 5 && diag.rockerSolveOk;
   const arbOk = diag.arbCount === 2 && diag.arbFront && diag.arbRear && diag.arbStretchMm < 0.5;
   const contactOk = model.contactOk;
   const frictionOk = model.frictionOk;
@@ -513,17 +514,22 @@ function refreshChecks(model) {
     {
       ok: forceOk,
       name: '法向力平衡',
-      value: `ΣN 误差 ${model.forceError < 0.01 ? '<0.01' : model.forceError.toFixed(2)} N`
+      value: `ΣN ${model.forceError < 0.01 ? '<0.01' : model.forceError.toFixed(2)} N · M ${model.momentXError < 0.01 && model.momentZError < 0.01 ? '<0.01' : Math.max(model.momentXError, model.momentZError).toFixed(2)} N·m`
     },
     {
       ok: contactOk,
       name: '四轮接地',
-      value: `${4 - model.liftedCount} / 4 · 最小 ${loadDisplay(model.minLoad)} ${unitDisplay()}`
+      value: `${diag.contactCount} / 4 · 最小 ${loadDisplay(model.minLoad)} ${unitDisplay()}`
     },
     {
       ok: linksOk,
-      name: '杆件端点绑定',
-      value: `${diag.linkCount} 根 / ${diag.jointCount} 点`
+      name: '悬架杆长偏差',
+      value: `${diag.linkCount} 根 / ${diag.jointCount} 点 · ${diag.maxSuspLinkStretchMm.toFixed(3)} mm`
+    },
+    {
+      ok: steerOk,
+      name: '齿条 / 横拉杆',
+      value: `齿条 ${formatSigned(diag.rackTravelMm, 1)} mm · 横拉杆 ${diag.tieRodStretchMm.toFixed(3)} mm`
     },
     {
       ok: arbOk,
@@ -563,6 +569,7 @@ function refreshChecks(model) {
 function refreshTelemetry(model) {
   UI.lastModel = model;
   if (!model) return;
+  UI.selfTests = runSelfTests(state);
 
   setText('topBeta', model.frame.betaDeg.toFixed(1) + '°');
   setText('topNormal', `${loadDisplay(model.totalNormal)} ${unitDisplay()}`);
@@ -593,7 +600,8 @@ function refreshTelemetry(model) {
         deltaEl.textContent = '±0';
         deltaEl.className = 'corner-delta';
       } else {
-        deltaEl.textContent = `Δ ${formatSigned(Math.abs(delta) < 0.05 ? 0 : delta, state.units === 'kg' ? 1 : 0)} ${unitDisplay()}`;
+        const shownDelta = state.units === 'kg' ? delta / GRAVITY : delta;
+        deltaEl.textContent = `Δ ${formatSigned(shownDelta, state.units === 'kg' ? 1 : 0)} ${unitDisplay()}`;
         deltaEl.className = 'corner-delta ' + (delta >= 0 ? 'is-up' : 'is-down');
       }
     }
@@ -628,7 +636,11 @@ function refreshTelemetry(model) {
   setText('cornerTravel', model.travelMm.map((value) => formatSigned(value, 2)).join(' / ') + ' mm');
 
   const diag = getCarDiagnostics();
-  setText('linkStatus', `${diag.linkCount} 根 · ${diag.jointCount} 点 · ${diag.maxGapMm.toFixed(3)} mm`);
+  setText('linkStatus', `${diag.linkCount} 根 · ${diag.jointCount} 点 · 悬架杆长偏差 ${diag.maxSuspLinkStretchMm.toFixed(3)} mm`);
+  setText(
+    'steerStatus',
+    `齿条 ${formatSigned(diag.rackTravelMm, 1)} mm · 横拉杆 ${diag.tieRodStretchMm.toFixed(3)} mm · 推杆 ${diag.pushRodStretchMm.toFixed(3)} mm`
+  );
   setText(
     'arbStatus',
     `${formatInt(model.arbRate.front / 1000)} / ${formatInt(model.arbRate.rear / 1000)} N/mm · 扭转 ${diag.arbTwistDeg.toFixed(2)}° · 叶片 ${diag.arbBladeFrontDeg.toFixed(0)}° / ${diag.arbBladeRearDeg.toFixed(0)}°`

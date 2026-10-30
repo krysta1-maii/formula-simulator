@@ -19,7 +19,7 @@ const CORNERS = [
 const NUM_LIMITS = {
   slope: [-10, 10],
   bank: [-10, 10],
-  friction: [0.4, 1.8],
+  friction: [0.2, 1.8],
   mass: [600, 1000],
   frontWeightPct: [40, 55],
   cgHeight: [0.15, 0.6],
@@ -460,8 +460,6 @@ function runSelfTests(source = state) {
   const level = computeStatic(Object.assign({}, source, { slope: 0, bank: 0 }));
   const slope = computeStatic(Object.assign({}, source, { slope: 7, bank: 0 }));
   const bank = computeStatic(Object.assign({}, source, { slope: 0, bank: 7 }));
-  const steerLeft = computeStatic(Object.assign({}, source, { steer: -12 }));
-  const steerRight = computeStatic(Object.assign({}, source, { steer: 12 }));
 
   const levelSum = level.loads.reduce((a, v) => a + v, 0);
   record('水平总法向力 = mg', Math.abs(levelSum - level.totalWeight) < 0.05, `${formatInt(levelSum)} N`);
@@ -488,8 +486,9 @@ function runSelfTests(source = state) {
   const bankRightGain = bank.rightLoad - level.rightLoad;
   record('右倾时载荷右移', bankRightGain > 0.1, `右轮 +${formatInt(bankRightGain)} N`);
 
-  const steerDelta = Math.max(...steerLeft.loads.map((v, i) => Math.abs(v - steerRight.loads[i])));
-  record('转向不改变静态轮载', steerDelta < 1e-6, `Δmax ${steerDelta.toExponential(1)} N`);
+  const doubled = computeStatic(Object.assign({}, source, { slope: 0, bank: 0, mass: source.mass * 2 }));
+  const massDelta = Math.max(...doubled.loads.map((value, i) => Math.abs(value - level.loads[i] * 2)));
+  record('质量缩放保持载荷比例', massDelta < 1e-6, `Δmax ${massDelta.toExponential(1)} N`);
 
   const levelFullArb = computeStatic(Object.assign({}, source, {
     slope: 0,
@@ -517,6 +516,41 @@ function runSelfTests(source = state) {
     '防倾杆降低侧倾角',
     rollDrop > 1e-4 && bankFullArb.momentZError < 0.05,
     `${formatSigned(bankNoArb.poseDeg.roll, 3)}° → ${formatSigned(bankFullArb.poseDeg.roll, 3)}°`
+  );
+
+  const frontOnly = computeStatic(Object.assign({}, source, { slope: 0, bank: 7, arbFront: 100, arbRear: 0 }));
+  const rearOnly = computeStatic(Object.assign({}, source, { slope: 0, bank: 7, arbFront: 0, arbRear: 100 }));
+  const frontOnlyFront = frontOnly.loads[1] - frontOnly.loads[0];
+  const frontOnlyRear = frontOnly.loads[3] - frontOnly.loads[2];
+  const rearOnlyFront = rearOnly.loads[1] - rearOnly.loads[0];
+  const rearOnlyRear = rearOnly.loads[3] - rearOnly.loads[2];
+  const arbMomentOk = Math.abs(frontOnly.normalMomentZ - frontOnly.totalNormal * frontOnly.pz) < 0.05 &&
+    Math.abs(rearOnly.normalMomentZ - rearOnly.totalNormal * rearOnly.pz) < 0.05;
+  record(
+    '防倾杆前后分配侧倾载荷转移',
+    frontOnlyFront > rearOnlyFront + 5 && frontOnlyRear < rearOnlyRear - 5 && arbMomentOk,
+    `前 ${formatFixed(frontOnlyFront, 0)} → ${formatFixed(rearOnlyFront, 0)} N`
+  );
+
+  const lowMu = computeStatic(Object.assign({}, source, { slope: 10, bank: 10, friction: 0.2 }));
+  record(
+    '低附着工况触发附着警告',
+    lowMu.frictionOk === false && lowMu.frictionDemand > 0.2,
+    `μreq ${lowMu.frictionDemand.toFixed(3)} / 0.20`
+  );
+
+  const lift = computeStatic(Object.assign({}, source, {
+    slope: 35,
+    bank: 35,
+    cgHeight: 0.9,
+    cgLateral: 0.3,
+    trackFront: 1.2,
+    trackRear: 1.2
+  }));
+  record(
+    '超包线输入触发负载荷保护',
+    lift.liftedCount > 0 && lift.rawLoads.some((value) => value < 0) && lift.loads.every((value) => value >= 0) && lift.contactOk === false,
+    `${lift.liftedCount} 轮卸载 · raw min ${formatFixed(lift.minRawLoad, 0)} N`
   );
 
   const contact = level.contactOk && slope.contactOk && bank.contactOk;

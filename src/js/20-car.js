@@ -23,6 +23,7 @@ const CAR = {
     differential: false,
     arbFront: false,
     arbRear: false,
+    rackGroup: null,
     steeringPoint: null,
     diffPoint: null,
     arbPoints: {}
@@ -32,8 +33,12 @@ const CAR = {
   diag: {
     linkCount: 0,
     jointCount: 0,
-    maxGapMm: 0,
-    contactGapMm: 0,
+    maxLinkStretchMm: 0,
+    maxSuspLinkStretchMm: 0,
+    tieRodStretchMm: 0,
+    pushRodStretchMm: 0,
+    rackTravelMm: 0,
+    rockerSolveOk: true,
     wheelCount: 0,
     contactCount: 0,
     steeringLinks: 0,
@@ -1005,7 +1010,7 @@ function buildBodywork(model) {
       const geo = new THREE.ExtrudeGeometry(shape, { depth: 0.010, bevelEnabled: false });
       geo.translate(0, 0, -0.005);
       const vane = new THREE.Mesh(geo, MAT.carbonMatte);
-      vane.position.set(lead + 0.66, 0.08, sign * 0.38);
+      vane.position.set(lead + 0.12, 0.058, sign * 0.72);
       vane.rotation.y = sign < 0 ? Math.PI : 0;
       addBodyMesh(vane);
     }

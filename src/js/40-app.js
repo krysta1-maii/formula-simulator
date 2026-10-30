@@ -133,7 +133,7 @@ function exportScreenshot() {
   ctx.fillStyle = vignette;
   ctx.fillRect(0, 0, width, height);
 
-  const scale = Math.max(1, height / 1000);
+  const scale = Math.max(0.55, Math.min(1.6, Math.min(width / 470, height / 1000)));
   const pad = Math.round(34 * scale);
   ctx.textBaseline = 'alphabetic';
   ctx.fillStyle = 'rgba(236,241,246,0.95)';
@@ -200,7 +200,8 @@ function exportScreenshot() {
   ctx.textAlign = 'right';
   ctx.fillStyle = 'rgba(133,149,168,0.55)';
   ctx.font = `500 ${Math.round(9 * scale)}px ui-monospace, monospace`;
-  ctx.fillText('FORMULA SIMULATOR  ·  DESIGN.md v0.2  ·  THREE.JS r149', width - pad, height - pad);
+  const creditY = cardX + cardW > width - 260 * scale ? cardY - 10 * scale : height - pad;
+  ctx.fillText('FORMULA SIMULATOR  ·  DESIGN.md v0.2  ·  THREE.JS r149', width - pad, creditY);
   ctx.textAlign = 'left';
 
   const link = document.createElement('a');

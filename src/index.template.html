@@ -103,7 +103,7 @@
             <label for="friction">路面附着系数 <span class="label-note">μ</span></label>
             <output id="frictionOut" for="friction">1.40</output>
           </div>
-          <input type="range" id="friction" data-param="friction" data-kind="decimal2" min="0.4" max="1.8" step="0.01" value="1.4">
+          <input type="range" id="friction" data-param="friction" data-kind="decimal2" min="0.2" max="1.8" step="0.01" value="1.4">
         </div>
       </section>
 
@@ -345,6 +345,7 @@
           <div><dt>车体俯仰 / 侧倾</dt><dd id="bodyAttitude">—</dd></div>
           <div><dt>四角行程 FL / FR / RL / RR</dt><dd class="mono" id="cornerTravel">—</dd></div>
           <div><dt>悬架杆件端点</dt><dd id="linkStatus">—</dd></div>
+          <div><dt>转向齿条 / 横拉杆</dt><dd id="steerStatus">—</dd></div>
           <div><dt>防倾杆 F / R</dt><dd id="arbStatus">—</dd></div>
           <div><dt>模型自检</dt><dd id="selfTestStatus">—</dd></div>
         </dl>
@@ -439,7 +440,7 @@
               <li>双轴倾斜路面，重力方向保持世界竖直</li>
               <li>四角轮载、轴荷分配、附着需求与模型自检实时显示</li>
             </ul>
-            <p class="muted-note">阶段二至四（六自由度动态、轮胎滑移与驱动、空气动力学调参）尚未接入。当前悬架杆件为视觉运动学绑定，不强制刚性杆长约束；阶段二将由共享几何模块替换。</p>
+            <p class="muted-note">阶段二至四（六自由度动态、轮胎滑移与驱动、空气动力学调参）尚未接入。当前横臂仍为端点绑定的视觉运动学；前轮绕主销转动，齿条随转向平移，推杆—摇臂按定长闭合，等转角约束下横拉杆残差约 3.7 mm；阶段二将由共享几何模块替换。</p>
           </section>
 
           <section>

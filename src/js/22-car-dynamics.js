@@ -6,11 +6,10 @@ const _vecA = new THREE.Vector3();
 const _vecB = new THREE.Vector3();
 const _vecC = new THREE.Vector3();
 const _vecD = new THREE.Vector3();
+const _vecE = new THREE.Vector3();
 const _dir = new THREE.Vector3();
 const _mid = new THREE.Vector3();
-const _q = new THREE.Quaternion();
-const _qYaw = new THREE.Quaternion();
-const _qCamber = new THREE.Quaternion();
+const _qSteer = new THREE.Quaternion();
 const _qPitch = new THREE.Quaternion();
 const _qRoll = new THREE.Quaternion();
 const _axisY = new THREE.Vector3(0, 1, 0);
@@ -45,6 +44,7 @@ function buildCornerData(model) {
       damper: V(wheel.x + (front ? -0.80 : 0.68), front ? 0.49 : 0.46, zSign * (front ? 0.10 : 0.09)),
       diff: V(wheel.x + 0.08, 0.30, zSign * 0.17)
     };
+    body.trackBase = body.track.clone();
     const wheelLocal = {
       lower: V(0.015, -0.215, -zSign * 0.105),
       upper: V(-0.010, 0.215, -zSign * 0.105),
@@ -64,6 +64,9 @@ function buildCornerData(model) {
       mesh: null,
       axle: null
     };
+    const camber = -zSign * (front ? 1.15 : 0.8) * DEG;
+    const restCenter = V(wheel.x, model.dims.R, wheel.z);
+    const restQuat = new THREE.Quaternion().setFromAxisAngle(_axisX, camber);
     return {
       key: wheel.key,
       index,
@@ -73,12 +76,18 @@ function buildCornerData(model) {
       body,
       wheelLocal,
       rocker,
+      restCenter,
+      restQuat,
       wheelRoot: null,
       wheelLocalPoints: null,
       pushTip: new THREE.Vector3(),
       damperTip: new THREE.Vector3(),
       arbTip: new THREE.Vector3(),
-      angle: rocker.baseAngle
+      angle: rocker.baseAngle,
+      tieRodLength0: 0,
+      pushRodLength0: 0,
+      rackShift: 0,
+      rockerSolveFailed: false
     };
   });
 }
@@ -646,8 +655,9 @@ function createBellows(length, radius, material = MAT.rubber) {
 
 /**
  * Front steering: rack-and-pinion housing, pinion, steering column, rack boots and
- * tie-rod boots. The tie rods themselves remain four-bar-grade dynamic links so
- * they follow the uprights when the wheels are steered.
+ * tie rods. The rack slides along z; the tie rods keep their design length; the
+ * front uprights rotate about the kingpin axis defined by the lower and upper
+ * ball joints.
  */
 function buildSteeringMechanics(corners, group) {
   const front = corners.find((corner) => corner.front);
@@ -657,7 +667,23 @@ function buildSteeringMechanics(corners, group) {
   const rackY = 0.315;
   const rackHalf = 0.26;
 
-  addStaticRod(group, V(rackX, rackY, -rackHalf), V(rackX, rackY, rackHalf), 0.022, MAT.steel);
+  const rackGroup = new THREE.Group();
+  rackGroup.name = 'steeringRack';
+  rackGroup.position.set(rackX, rackY, 0);
+  group.add(rackGroup);
+  const rackRod = new THREE.Mesh(CAR.shared.cylinder, MAT.steel);
+  rackRod.scale.set(0.022, rackHalf * 2, 0.022);
+  rackRod.rotation.x = Math.PI / 2;
+  rackRod.castShadow = true;
+  rackGroup.add(rackRod);
+  for (const sign of [-1, 1]) {
+    const socket = new THREE.Mesh(CAR.shared.joint, MAT.steel);
+    socket.scale.setScalar(0.018);
+    socket.position.set(0, 0, sign * 0.315);
+    socket.castShadow = true;
+    rackGroup.add(socket);
+  }
+  CAR.mechanics.rackGroup = rackGroup;
 
   // Centre pinion housing and column.
   const pinion = makeRoundedBox(0.11, 0.10, 0.11, 0.025, MAT.darkMetal);
@@ -687,7 +713,6 @@ function buildSteeringMechanics(corners, group) {
     boot.position.set(rackX, rackY, sign * 0.315);
     boot.quaternion.setFromUnitVectors(_axisY, _axisZ);
     group.add(boot);
-    addStaticJoint(group, V(rackX, rackY, sign * 0.315), 0.018, MAT.steel);
     const mount = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.035, 0.05), MAT.darkMetal);
     mount.position.set(rackX, rackY - 0.045, sign * 0.16);
     mount.castShadow = true;
@@ -781,6 +806,15 @@ function resolveAnchor(anchor, corner, bodyMatrix, wheelMatrix) {
   return new THREE.Vector3();
 }
 
+function designAnchorPosition(spec, corner) {
+  if (!spec) return new THREE.Vector3();
+  if (spec.type === 'body') return spec.local.clone();
+  if (spec.type === 'wheel') return spec.local.clone().applyQuaternion(corner.restQuat).add(corner.restCenter);
+  if (spec.type === 'pushTip') return rockerBodyPoint(corner, corner.rocker.pushArm, corner.rocker.baseAngle);
+  if (spec.type === 'damperTip') return rockerBodyPoint(corner, corner.rocker.damperArm, corner.rocker.baseAngle);
+  return new THREE.Vector3();
+}
+
 function addLink(corner, aSpec, bSpec, { radius = 0.019, material = MAT.carbon, jointRadius = 0.016, kind = 'rod' } = {}) {
   const mesh = new THREE.Mesh(CAR.shared.rod, material);
   mesh.castShadow = true;
@@ -794,7 +828,23 @@ function addLink(corner, aSpec, bSpec, { radius = 0.019, material = MAT.carbon, 
   jointB.scale.setScalar(jointRadius);
   jointB.castShadow = true;
   CAR.dynamicGroup.add(jointB);
-  const link = { corner, aSpec, bSpec, mesh, jointA, jointB, radius, kind, lastA: new THREE.Vector3(), lastB: new THREE.Vector3() };
+  const length0 = designAnchorPosition(aSpec, corner).distanceTo(designAnchorPosition(bSpec, corner));
+  const link = {
+    corner,
+    aSpec,
+    bSpec,
+    mesh,
+    jointA,
+    jointB,
+    radius,
+    kind,
+    length0,
+    stretchMm: 0,
+    lastA: new THREE.Vector3(),
+    lastB: new THREE.Vector3()
+  };
+  if (kind === 'steer') corner.tieRodLength0 = length0;
+  if (kind === 'pushrod' || kind === 'pullrod') corner.pushRodLength0 = length0;
   CAR.links.push(link);
   CAR.joints.push(
     { mesh: jointA, corner, anchor: aSpec },
@@ -904,16 +954,98 @@ function buildSuspensionLinks(corners) {
   }
 }
 
+function updateSteeringRack(model, bodyMatrix) {
+  const rackGroup = CAR.mechanics.rackGroup;
+  const frontCorners = CAR.corners.filter((corner) => corner.front);
+  if (!rackGroup || frontCorners.length === 0) {
+    CAR.diag.rackTravelMm = 0;
+    CAR.diag.tieRodStretchMm = 0;
+    return;
+  }
+  const bodyZ = _vecC.set(0, 0, 1).transformDirection(bodyMatrix);
+  let shiftSum = 0;
+  for (const corner of frontCorners) {
+    corner.wheelRoot.updateMatrix();
+    const inner = _vecA.copy(corner.body.trackBase).applyMatrix4(bodyMatrix);
+    const outer = _vecB.copy(corner.wheelLocal.track).applyMatrix4(corner.wheelRoot.matrix);
+    const v = _vecD.subVectors(inner, outer);
+    const b = 2 * bodyZ.dot(v);
+    const c = v.lengthSq() - corner.tieRodLength0 * corner.tieRodLength0;
+    const disc = b * b - 4 * c;
+    let ideal = 0;
+    if (disc >= 0) {
+      const root = Math.sqrt(disc);
+      const s1 = (-b + root) * 0.5;
+      const s2 = (-b - root) * 0.5;
+      ideal = Math.abs(s1 - corner.rackShift) <= Math.abs(s2 - corner.rackShift) ? s1 : s2;
+    }
+    shiftSum += ideal;
+  }
+  const shift = shiftSum / frontCorners.length;
+  for (const corner of frontCorners) {
+    corner.rackShift = shift;
+    corner.body.track.z = corner.body.trackBase.z + shift;
+  }
+  rackGroup.position.z = shift;
+  CAR.diag.rackTravelMm = shift * 1000;
+}
+
+function solveRockerAngle(corner, bodyMatrix, wheelMatrix, fallback) {
+  const target = corner.pushRodLength0;
+  if (!target) return fallback;
+  const wheelPush = _vecA.copy(corner.wheelLocal.push).applyMatrix4(wheelMatrix);
+  const pivot = corner.rocker.pivot;
+  const arm = corner.rocker.pushArm;
+  const distanceAt = (angle) => {
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    _vecB.set(
+      pivot.x + arm.x * cos - arm.y * sin,
+      pivot.y + arm.x * sin + arm.y * cos,
+      pivot.z + arm.z
+    ).applyMatrix4(bodyMatrix);
+    return _vecB.distanceTo(wheelPush);
+  };
+  let angle = fallback;
+  if (Math.abs(distanceAt(angle) - target) < 1e-6) {
+    corner.rockerSolveFailed = false;
+    return angle;
+  }
+  for (let i = 0; i < 10; i += 1) {
+    const error = distanceAt(angle) - target;
+    if (Math.abs(error) < 1e-7) {
+      corner.rockerSolveFailed = false;
+      return angle;
+    }
+    const h = 1e-4;
+    const derivative = (distanceAt(angle + h) - distanceAt(angle - h)) / (2 * h);
+    if (!Number.isFinite(derivative) || Math.abs(derivative) < 1e-8) break;
+    angle -= clamp(error / derivative, -0.35, 0.35);
+    if (!Number.isFinite(angle)) break;
+  }
+  if (Math.abs(distanceAt(angle) - target) < 1e-5) {
+    corner.rockerSolveFailed = false;
+    return angle;
+  }
+  corner.rockerSolveFailed = true;
+  return fallback;
+}
+
 function updateSuspension(model) {
   const bodyMatrix = S.bodyPivot.matrix;
-  let maxGapSq = 0;
+  updateSteeringRack(model, bodyMatrix);
+  let maxLinkStretch = 0;
+  let maxSuspLinkStretch = 0;
+  let maxTieRodStretch = 0;
+  let maxPushRodStretch = 0;
 
   for (let i = 0; i < CAR.corners.length; i += 1) {
     const corner = CAR.corners[i];
     corner.wheelRoot.updateMatrix();
     const wheelMatrix = corner.wheelRoot.matrix;
     const travel = -model.cornerY[i];
-    corner.angle = corner.rocker.baseAngle + travel * corner.rocker.gain;
+    const fallbackAngle = corner.rocker.baseAngle + travel * corner.rocker.gain;
+    corner.angle = solveRockerAngle(corner, bodyMatrix, wheelMatrix, fallbackAngle);
     corner.rocker.mesh.rotation.z = corner.angle;
     // Rocker arm tips in body-local coordinates.
     const cos = Math.cos(corner.angle);
@@ -949,9 +1081,12 @@ function updateSuspension(model) {
       setRodTransform(link.mesh, a, b, link.radius);
       link.jointA.position.copy(a);
       link.jointB.position.copy(b);
-      const gapA = link.jointA.position.distanceToSquared(a);
-      const gapB = link.jointB.position.distanceToSquared(b);
-      maxGapSq = Math.max(maxGapSq, gapA, gapB);
+      const stretch = Math.abs(a.distanceTo(b) - link.length0) * 1000;
+      link.stretchMm = stretch;
+      maxLinkStretch = Math.max(maxLinkStretch, stretch);
+      if (link.kind === 'steer') maxTieRodStretch = Math.max(maxTieRodStretch, stretch);
+      else maxSuspLinkStretch = Math.max(maxSuspLinkStretch, stretch);
+      if (link.kind === 'pushrod' || link.kind === 'pullrod') maxPushRodStretch = Math.max(maxPushRodStretch, stretch);
     }
 
     for (const spring of CAR.springs) {
@@ -976,11 +1111,6 @@ function updateSuspension(model) {
       }
       spring.jointDamper.position.copy(b);
       spring.jointMount.position.copy(a);
-      maxGapSq = Math.max(
-        maxGapSq,
-        spring.jointDamper.position.distanceToSquared(b),
-        spring.jointMount.position.distanceToSquared(a)
-      );
     }
 
     for (const shaft of CAR.driveshafts) {
@@ -1031,10 +1161,13 @@ function updateSuspension(model) {
     CAR.driveshafts.length === 2 &&
     CAR.arbs.length === 2
   );
-  CAR.diag.maxGapMm = Math.sqrt(maxGapSq) * 1000;
+  CAR.diag.maxLinkStretchMm = maxLinkStretch;
+  CAR.diag.maxSuspLinkStretchMm = maxSuspLinkStretch;
+  CAR.diag.tieRodStretchMm = maxTieRodStretch;
+  CAR.diag.pushRodStretchMm = maxPushRodStretch;
+  CAR.diag.rockerSolveOk = CAR.corners.every((corner) => !corner.rockerSolveFailed);
   CAR.diag.wheelCount = 4;
-  CAR.diag.contactCount = 4;
-  CAR.diag.contactGapMm = 0;
+  CAR.diag.contactCount = 4 - (model.liftedCount || 0);
 }
 
 /* ------------------------------ car lifecycle ------------------------------ */
@@ -1050,12 +1183,17 @@ function updateCar(model) {
   for (const corner of CAR.corners) {
     const root = corner.wheelRoot;
     if (!root) continue;
-    corner.wheelRoot.position.set(corner.wheel.x, model.dims.R, corner.wheel.z);
-    const yaw = corner.front ? state.steer * DEG : 0;
-    const camber = -corner.zSign * (corner.front ? 1.15 : 0.8) * DEG;
-    _qYaw.setFromAxisAngle(_axisY, yaw);
-    _qCamber.setFromAxisAngle(_axisX, camber);
-    root.quaternion.copy(_qYaw).multiply(_qCamber);
+    if (corner.front) {
+      const axisLocal = _vecC.copy(corner.wheelLocal.upper).sub(corner.wheelLocal.lower).normalize();
+      const axisWorld = _vecD.copy(axisLocal).applyQuaternion(corner.restQuat);
+      const pivot = _vecE.copy(corner.wheelLocal.lower).applyQuaternion(corner.restQuat).add(corner.restCenter);
+      _qSteer.setFromAxisAngle(axisWorld, state.steer * DEG);
+      root.position.copy(corner.restCenter).sub(pivot).applyQuaternion(_qSteer).add(pivot);
+      root.quaternion.copy(_qSteer).multiply(corner.restQuat);
+    } else {
+      root.position.copy(corner.restCenter);
+      root.quaternion.copy(corner.restQuat);
+    }
     root.updateMatrix();
     root.updateMatrixWorld(true);
   }
@@ -1088,6 +1226,7 @@ function buildCar(model) {
     differential: false,
     arbFront: false,
     arbRear: false,
+    rackGroup: null,
     steeringPoint: null,
     columnPoint: null,
     diffPoint: null,
