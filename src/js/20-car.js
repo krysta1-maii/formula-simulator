@@ -457,7 +457,7 @@ function textMaterialNumberNose() {
     ctx.fillText('01', 0, 10);
     ctx.fillStyle = 'rgba(255,255,255,0.55)';
     ctx.font = '600 34px ui-monospace, monospace';
-    ctx.fillText('FSR  ·  STATIC 01', 0, 158);
+    ctx.fillText('FSR  ·  DYNAMIC 02', 0, 158);
     ctx.restore();
   });
 }

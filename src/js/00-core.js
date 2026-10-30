@@ -1,13 +1,13 @@
 /* =========================================================================
-   FS-01 · Stage 01 static rig
+   FS-01 · Stage 02 dynamic chassis
    00-core.js — constants, state schema, road frame and static load solver
    ========================================================================= */
 
 const GRAVITY = 9.80665;
 const DEG = Math.PI / 180;
 const RAD = 180 / Math.PI;
-const STORAGE_KEY = 'fs01.static.setup.v1';
-const APP_VERSION = '0.1.0';
+const STORAGE_KEY = 'fs01.dynamic.setup.v1';
+const APP_VERSION = '0.2.0';
 
 const CORNERS = [
   { key: 'FL', zh: '左前', axle: 'front', side: 'left', zSign: -1 },
@@ -30,6 +30,10 @@ const NUM_LIMITS = {
   wheelRadius: [0.31, 0.39],
   wheelRateF: [50, 320],
   wheelRateR: [50, 320],
+  dampingF: [0.05, 1.2],
+  dampingR: [0.05, 1.2],
+  motionRatioF: [0.3, 0.9],
+  motionRatioR: [0.3, 0.9],
   arbFront: [0, 100],
   arbRear: [0, 100],
   steer: [-18, 18]
@@ -54,6 +58,10 @@ const DEFAULTS = Object.freeze({
   tireWidthR: 0.405,
   wheelRateF: 140,
   wheelRateR: 160,
+  dampingF: 0.35,
+  dampingR: 0.38,
+  motionRatioF: 0.58,
+  motionRatioR: 0.62,
   arbFront: 60,
   arbRear: 60,
   slope: 0,
@@ -135,6 +143,24 @@ function computeDims(source = state) {
     zF: tf / 2,
     zR: tr / 2,
     xCG: (source.frontWeightPct / 100 - 0.5) * L
+  };
+}
+
+/**
+ * Equivalent body inertia about the centre of mass. The car is treated as a
+ * filled box whose length, width and height follow the current dimensions. The
+ * values are deliberately modest but physically sized: the roll inertia is
+ * dominated by the track, the pitch and yaw inertias by the wheelbase.
+ */
+function computeBodyInertia(source, dims) {
+  const mass = source.mass;
+  const length = dims.L + 0.7;
+  const width = Math.max(dims.tf, dims.tr) + 0.18;
+  const height = 0.86;
+  return {
+    Ixx: (mass / 12) * (height * height + width * width),
+    Iyy: (mass / 12) * (length * length + width * width),
+    Izz: (mass / 12) * (length * length + height * height)
   };
 }
 
@@ -337,6 +363,38 @@ function computeStatic(source = state) {
   const levelLeft = levelLoads[0] + levelLoads[2];
   const levelRight = levelLoads[1] + levelLoads[3];
 
+  // Stage-02 dynamic reference. The wheel rate remains the primary spring
+  // parameter; the motion ratio maps it to the coil spring and to the damper
+  // shaft. Damping is specified as a fraction of critical damping at the wheel,
+  // which keeps the transient response readable when mass or wheel rate moves.
+  const motionRatio = {
+    front: clamp(Number.isFinite(source.motionRatioF) ? source.motionRatioF : DEFAULTS.motionRatioF, 0.3, 0.9),
+    rear: clamp(Number.isFinite(source.motionRatioR) ? source.motionRatioR : DEFAULTS.motionRatioR, 0.3, 0.9)
+  };
+  const dampingRatio = {
+    front: clamp(Number.isFinite(source.dampingF) ? source.dampingF : DEFAULTS.dampingF, 0.02, 1.5),
+    rear: clamp(Number.isFinite(source.dampingR) ? source.dampingR : DEFAULTS.dampingR, 0.02, 1.5)
+  };
+  const cornerMass = baseLoads.map((value) => value / GRAVITY);
+  const criticalDamping = k.map((ki, i) => 2 * Math.sqrt(ki * Math.max(cornerMass[i], 1e-6)));
+  const damperRateWheel = k.map((ki, i) => {
+    const ratio = wheels[i].axle === 'front' ? dampingRatio.front : dampingRatio.rear;
+    return ratio * criticalDamping[i];
+  });
+  const springRateCoil = k.map((ki, i) => ki / Math.pow(wheels[i].axle === 'front' ? motionRatio.front : motionRatio.rear, 2));
+  const damperRateShaft = damperRateWheel.map((ci, i) => ci / Math.pow(wheels[i].axle === 'front' ? motionRatio.front : motionRatio.rear, 2));
+  const inertia = computeBodyInertia(source, dims);
+  const heaveStiffness = sumK;
+  const rollStiffnessSpring = wheels.reduce((acc, wheel, i) => acc + k[i] * Math.pow(wheel.z - zCG, 2), 0);
+  const rollStiffness = rollStiffnessSpring + arbRollStiffness;
+  const pitchStiffness = wheels.reduce((acc, wheel, i) => acc + k[i] * Math.pow(wheel.x - xCG, 2), 0);
+  const criticalHeave = 2 * Math.sqrt(Math.max(heaveStiffness * mass, 1e-9));
+  const frequencies = {
+    heave: Math.sqrt(Math.max(heaveStiffness / mass, 0)) / (2 * Math.PI),
+    roll: Math.sqrt(Math.max(rollStiffness / inertia.Ixx, 0)) / (2 * Math.PI),
+    pitch: Math.sqrt(Math.max(pitchStiffness / inertia.Izz, 0)) / (2 * Math.PI)
+  };
+
   const denom = sumLoads > 1e-9 ? sumLoads : 1;
   const frontShare = frontLoad / denom;
   const leftShare = leftLoad / denom;
@@ -365,6 +423,22 @@ function computeStatic(source = state) {
       right: levelRight
     },
     springRates: k,
+    cornerMass,
+    dampingRatio,
+    criticalDamping,
+    damperRateWheel,
+    damperRateShaft,
+    springRateCoil,
+    motionRatio,
+    inertia,
+    stiffness: {
+      heave: heaveStiffness,
+      rollSpring: rollStiffnessSpring,
+      roll: rollStiffness,
+      pitch: pitchStiffness
+    },
+    frequencies,
+    heaveDampingRatio: damperRateWheel.reduce((acc, value) => acc + value, 0) / criticalHeave,
     arbRate,
     arbMaxRate: ARB_MAX_RATE,
     arbRollStiffness,

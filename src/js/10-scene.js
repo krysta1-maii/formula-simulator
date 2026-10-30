@@ -369,7 +369,7 @@ function createBaseGaugeTexture() {
   ctx.fillStyle = 'rgba(159,176,196,0.26)';
   ctx.font = '600 18px ui-monospace, monospace';
   ctx.textAlign = 'center';
-  ctx.fillText('STATIC LOAD RIG  ·  FS-01  ·  TILT TABLE', 0, 70);
+  ctx.fillText('DYNAMIC LOAD RIG  ·  FS-01  ·  TILT TABLE', 0, 70);
   ctx.font = '14px ui-monospace, monospace';
   ctx.fillStyle = 'rgba(159,176,196,0.16)';
   ctx.fillText('SLOPE / BANK DEGREE INDEX', 0, 100);
@@ -441,10 +441,10 @@ function createMaterials() {
   plateCtx.clearRect(0, 0, 512, 96);
   plateCtx.fillStyle = 'rgba(214,208,196,0.56)';
   plateCtx.font = '600 28px ui-monospace, monospace';
-  plateCtx.fillText('STATIC  LOAD  RIG  /  FS-01', 14, 40);
+  plateCtx.fillText('DYNAMIC  LOAD  RIG  /  FS-01', 14, 40);
   plateCtx.fillStyle = 'rgba(214,208,196,0.25)';
   plateCtx.font = '16px ui-monospace, monospace';
-  plateCtx.fillText('TILT TABLE  ·  STAGE 01  ·  LOAD CALIBRATION', 16, 70);
+  plateCtx.fillText('TILT TABLE  ·  STAGE 02  ·  DYNAMIC CALIBRATION', 16, 70);
   TEX.padPlate = canvasTexture(plateCanvas);
 
   MAT.paint = new THREE.MeshPhysicalMaterial({
@@ -1031,14 +1031,21 @@ function updateOverlays(model) {
   S.loadOverlay.visible = visible;
   const avgCorner = model.totalWeight / 4;
   const maxLoad = Math.max(...model.loads, 1);
+  const yaw = model.bodyYaw || 0;
+  const lateralX = Math.sin(yaw);
+  const lateralZ = Math.cos(yaw);
+  const forwardX = Math.cos(yaw);
+  const forwardZ = -Math.sin(yaw);
 
   for (let i = 0; i < 4; i += 1) {
     const wheel = model.wheels[i];
+    const contact = (model.contactPoints && model.contactPoints[i]) || { x: wheel.x, z: wheel.z };
     const load = model.loads[i];
     const axleWidth = wheel.axle === 'front' ? model.dims.wF : model.dims.wR;
     const outward = wheel.zSign * (axleWidth / 2 + 0.26);
-    const baseZ = wheel.z + outward;
-    const baseX = wheel.x + (wheel.axle === 'front' ? 0.24 : -0.24);
+    const fore = wheel.axle === 'front' ? 0.24 : -0.24;
+    const baseX = contact.x + forwardX * fore + lateralX * outward;
+    const baseZ = contact.z + forwardZ * fore + lateralZ * outward;
     const arrowHeight = clamp(0.26 + 0.56 * (load / Math.max(avgCorner, 1)), 0.2, 0.88);
     const arrow = S.loadArrows[i];
     const shaftLength = Math.max(0.02, arrowHeight - arrow.arrow.head);
@@ -1053,12 +1060,12 @@ function updateOverlays(model) {
     arrow.arrow.tip.material = MAT.loadArrow;
 
     arrow.contactRing.visible = visible;
-    arrow.contactRing.position.set(wheel.x, 0.018, wheel.z);
+    arrow.contactRing.position.set(contact.x, 0.018, contact.z);
     arrow.contactRing.material.opacity = 0.12 + 0.24 * hueScale;
 
     // Thin leader on the pad from the contact patch to the annotation.
     const positions = arrow.leader.geometry.attributes.position;
-    positions.setXYZ(0, wheel.x, 0.017, wheel.z);
+    positions.setXYZ(0, contact.x, 0.017, contact.z);
     positions.setXYZ(1, baseX, 0.017, baseZ);
     positions.needsUpdate = true;
     arrow.leader.visible = visible;
@@ -1097,17 +1104,28 @@ function updateOverlays(model) {
     S.cgProjectionCross.visible = cgVisible;
   }
 
-  // Gather anchors for DOM labels.
-  const normal = S.roadGroup.quaternion;
+  // Gather anchors for DOM labels. The anchor follows the live contact patch
+  // so translation, yaw and a slide keep the labels attached to the wheels.
   S.labelAnchors = model.wheels.map((wheel, i) => {
+    const contact = (model.contactPoints && model.contactPoints[i]) || { x: wheel.x, z: wheel.z };
     const axleWidth = wheel.axle === 'front' ? model.dims.wF : model.dims.wR;
-    const baseZ = wheel.z + wheel.zSign * (axleWidth / 2 + 0.30);
-    const baseX = wheel.x + (wheel.axle === 'front' ? 0.24 : -0.24);
+    const outward = wheel.zSign * (axleWidth / 2 + 0.30);
+    const fore = wheel.axle === 'front' ? 0.24 : -0.24;
+    const baseX = contact.x + forwardX * fore + lateralX * outward;
+    const baseZ = contact.z + forwardZ * fore + lateralZ * outward;
     const h = clamp(0.26 + 0.56 * (model.loads[i] / Math.max(avgCorner, 1)), 0.2, 0.88);
     const local = new THREE.Vector3(baseX, 0.04 + h + 0.10, baseZ);
     const world = S.roadGroup.localToWorld(local.clone());
     return { key: wheel.key, load: model.loads[i], world };
   });
+
+  if (S.contactBlob) {
+    const body = model.bodyPos || { x: 0, z: 0 };
+    S.contactBlob.position.set(body.x, 0.011, body.z);
+    S.contactBlob.quaternion.copy(
+      new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw)
+    ).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2));
+  }
 }
 
 /* ------------------------------ camera ------------------------------ */
@@ -1555,7 +1573,7 @@ function initScene() {
   S.renderer.toneMappingExposure = 0.72;
   S.renderer.shadowMap.enabled = true;
   S.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  S.renderer.domElement.setAttribute('aria-label', '方程式赛车三维静态底盘台');
+  S.renderer.domElement.setAttribute('aria-label', '方程式赛车三维动态底盘台');
   S.renderer.domElement.setAttribute('tabindex', '0');
   S.host.appendChild(S.renderer.domElement);
 

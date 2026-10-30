@@ -12,6 +12,7 @@ const _mid = new THREE.Vector3();
 const _qSteer = new THREE.Quaternion();
 const _qPitch = new THREE.Quaternion();
 const _qRoll = new THREE.Quaternion();
+const _qYaw = new THREE.Quaternion();
 const _axisY = new THREE.Vector3(0, 1, 0);
 const _axisX = new THREE.Vector3(1, 0, 0);
 const _axisZ = new THREE.Vector3(0, 0, 1);
@@ -1174,10 +1175,19 @@ function updateSuspension(model) {
 
 function updateCar(model) {
   if (!CAR.built) return;
-  S.bodyPivot.position.set(0, model.heave, 0);
-  _qPitch.setFromAxisAngle(_axisZ, model.pitch);
-  _qRoll.setFromAxisAngle(_axisX, model.roll);
-  S.bodyPivot.quaternion.copy(_qRoll).multiply(_qPitch);
+  const bodyPos = model.bodyPos || { x: 0, y: model.heave || 0, z: 0 };
+  const yaw = model.bodyYaw || 0;
+  _qYaw.setFromAxisAngle(_axisY, yaw);
+
+  if (model.bodyQuat) {
+    S.bodyPivot.position.set(bodyPos.x, bodyPos.y, bodyPos.z);
+    S.bodyPivot.quaternion.set(model.bodyQuat[1], model.bodyQuat[2], model.bodyQuat[3], model.bodyQuat[0]);
+  } else {
+    S.bodyPivot.position.set(bodyPos.x, bodyPos.y, bodyPos.z);
+    _qPitch.setFromAxisAngle(_axisZ, model.pitch);
+    _qRoll.setFromAxisAngle(_axisX, model.roll);
+    S.bodyPivot.quaternion.copy(_qYaw).multiply(_qRoll).multiply(_qPitch);
+  }
   S.bodyPivot.updateMatrix();
 
   for (const corner of CAR.corners) {
@@ -1188,11 +1198,19 @@ function updateCar(model) {
       const axisWorld = _vecD.copy(axisLocal).applyQuaternion(corner.restQuat);
       const pivot = _vecE.copy(corner.wheelLocal.lower).applyQuaternion(corner.restQuat).add(corner.restCenter);
       _qSteer.setFromAxisAngle(axisWorld, state.steer * DEG);
-      root.position.copy(corner.restCenter).sub(pivot).applyQuaternion(_qSteer).add(pivot);
-      root.quaternion.copy(_qSteer).multiply(corner.restQuat);
+      // The body's planar pose carries the wheel with it. Pitch and roll move
+      // the body relative to the contact plane and therefore load the springs,
+      // but the contact patch itself stays on the road.
+      const pivotPlan = _vecA.set(bodyPos.x, 0, bodyPos.z)
+        .add(_vecB.set(pivot.x, 0, pivot.z).applyQuaternion(_qYaw));
+      pivotPlan.y = pivot.y;
+      const offset = _vecC.copy(corner.restCenter).sub(pivot).applyQuaternion(_qSteer).applyQuaternion(_qYaw);
+      root.position.copy(pivotPlan).add(offset);
+      root.quaternion.copy(_qYaw).multiply(_qSteer).multiply(corner.restQuat);
     } else {
-      root.position.copy(corner.restCenter);
-      root.quaternion.copy(corner.restQuat);
+      const offset = _vecA.set(corner.restCenter.x, 0, corner.restCenter.z).applyQuaternion(_qYaw);
+      root.position.set(bodyPos.x + offset.x, model.dims.R, bodyPos.z + offset.z);
+      root.quaternion.copy(_qYaw).multiply(corner.restQuat);
     }
     root.updateMatrix();
     root.updateMatrixWorld(true);
@@ -1238,8 +1256,13 @@ function buildCar(model) {
   CAR.dims = model.dims;
   CAR.built = false;
 
-  S.bodyPivot.position.set(0, model.heave, 0);
-  S.bodyPivot.quaternion.identity();
+  const initialPos = model.bodyPos || { x: 0, y: model.heave || 0, z: 0 };
+  S.bodyPivot.position.set(initialPos.x, initialPos.y, initialPos.z);
+  if (model.bodyQuat) {
+    S.bodyPivot.quaternion.set(model.bodyQuat[1], model.bodyQuat[2], model.bodyQuat[3], model.bodyQuat[0]);
+  } else {
+    S.bodyPivot.quaternion.identity();
+  }
 
   buildBodywork(model);
 

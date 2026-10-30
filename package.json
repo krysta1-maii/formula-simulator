@@ -1,13 +1,17 @@
 {
   "name": "formula-simulator",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "方程式赛车动力学模拟器 · 阶段一静态底盘演示",
+  "description": "方程式赛车动力学模拟器 · 阶段二六自由度车身与动态悬架",
   "type": "module",
   "scripts": {
     "build": "node tools/build.mjs",
-    "test": "node tools/test-core.mjs",
+    "test": "node tools/test-core.mjs && node tools/test-dynamics.mjs",
+    "test:core": "node tools/test-core.mjs",
+    "test:dynamics": "node tools/test-dynamics.mjs",
+    "test:browser": "node tools/test-dynamics-browser.mjs",
     "test:camera": "node tools/test-camera.mjs",
+    "docs:capture": "node tools/build.mjs && node tools/capture-docs.mjs",
     "dev": "node tools/dev-server.mjs"
   },
   "engines": {

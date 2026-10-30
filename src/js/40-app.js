@@ -15,6 +15,11 @@ let loaderShownAt = 0;
 let lastFrameTime = 0;
 let screenshotCount = 0;
 
+function liveModel() {
+  if (!SIM) return computeStatic(state);
+  return simBuildModel(SIM, state);
+}
+
 function updateSceneFromModel(model) {
   if (typeof applyXray === 'function') applyXray();
   S.roadGroup.quaternion.copy(model.frame.q);
@@ -34,9 +39,11 @@ function requestRebuild(model) {
 function processPendingRebuild(now) {
   if (!PENDING.rebuild || !PENDING.model) return;
   if (now - PENDING.lastBuildAt < 85) return;
-  const model = PENDING.model;
   PENDING.rebuild = false;
   PENDING.lastBuildAt = now;
+  if (!SIM) SIM = simCreate(state);
+  simReset(SIM, state, { settle: 0.5 });
+  const model = simBuildModel(SIM, state);
   buildCar(model);
   applyXray();
   S.roadGroup.quaternion.copy(model.frame.q);
@@ -45,14 +52,17 @@ function processPendingRebuild(now) {
   S.scene.updateMatrixWorld(true);
   updateOverlays(model);
   S.scene.updateMatrixWorld(true);
-  UI.refreshSelfTests();
+  UI.refreshSelfTests({ dynamic: false });
   UI.refreshTelemetry(model);
   UI.updateLabelPositions();
 }
 
 function refreshAll({ rebuild = false } = {}) {
   if (!booted) return;
-  const model = computeStatic(state);
+  const reference = computeStatic(state);
+  if (!SIM) SIM = simCreate(state);
+  SIM.reference = reference;
+  const model = simBuildModel(SIM, state);
   if (rebuild) {
     requestRebuild(model);
     UI.refreshTelemetry(model);
@@ -95,7 +105,7 @@ function formatLocalDate(date = new Date()) {
 
 function exportScreenshot() {
   if (!S.renderer) return false;
-  const model = computeStatic(state);
+  const model = liveModel();
   updateSceneFromModel(model);
   S.renderer.render(S.scene, S.camera);
 
@@ -138,15 +148,15 @@ function exportScreenshot() {
   ctx.textBaseline = 'alphabetic';
   ctx.fillStyle = 'rgba(236,241,246,0.95)';
   ctx.font = `600 ${Math.round(22 * scale)}px "Helvetica Neue", Arial, sans-serif`;
-  ctx.fillText('FS-01  /  STATIC CHASSIS RIG', pad, pad + 26 * scale);
+  ctx.fillText('FS-01  /  DYNAMIC CHASSIS RIG', pad, pad + 26 * scale);
   ctx.fillStyle = 'rgba(255,103,56,0.95)';
   ctx.fillRect(pad, pad + 37 * scale, 38 * scale, 3 * scale);
   ctx.fillStyle = 'rgba(151,167,185,0.8)';
   ctx.font = `500 ${Math.round(11 * scale)}px ui-monospace, monospace`;
-  ctx.fillText('STAGE 01  ·  TILT-PLANE STATIC LOADS  ·  ' + formatLocalDate(), pad, pad + 58 * scale);
+  ctx.fillText('STAGE 02  ·  SIX-DOF · SPRING-DAMPER  ·  ' + formatLocalDate(), pad, pad + 58 * scale);
 
   const cardW = Math.round(392 * scale);
-  const cardH = Math.round(198 * scale);
+  const cardH = Math.round(216 * scale);
   const cardX = pad;
   const cardY = height - pad - cardH;
   ctx.fillStyle = 'rgba(6,10,15,0.82)';
@@ -159,7 +169,7 @@ function exportScreenshot() {
   ctx.fillRect(cardX + 16 * scale, cardY + 17 * scale, 26 * scale, 2 * scale);
   ctx.fillStyle = 'rgba(160,177,195,0.82)';
   ctx.font = `500 ${Math.round(10 * scale)}px ui-monospace, monospace`;
-  ctx.fillText('STATIC CORNER LOADS', cardX + 50 * scale, cardY + 22 * scale);
+  ctx.fillText('DYNAMIC CORNER LOADS', cardX + 50 * scale, cardY + 22 * scale);
   ctx.strokeStyle = 'rgba(255,255,255,0.08)';
   ctx.beginPath();
   ctx.moveTo(cardX + cardW / 2, cardY + 38 * scale);
@@ -192,9 +202,14 @@ function exportScreenshot() {
   ctx.fillStyle = 'rgba(156,173,191,0.8)';
   ctx.font = `500 ${Math.round(9.5 * scale)}px ui-monospace, monospace`;
   ctx.fillText(
-    `ΣN ${loadDisplay(model.totalNormal)} ${unit}    ·    β ${model.frame.betaDeg.toFixed(2)}°    ·    μreq ${model.frictionDemand.toFixed(3)}`,
+    `ΣN ${loadDisplay(model.sumLoads)} ${unit}    ·    β ${model.frame.betaDeg.toFixed(2)}°    ·    μreq ${model.frictionDemand.toFixed(3)}`,
     cardX + 16 * scale,
-    cardY + 186 * scale
+    cardY + 184 * scale
+  );
+  ctx.fillText(
+    `h ${formatSigned(model.heave * 1000, 1)} mm    ·    θ ${formatSigned(model.poseDeg.pitch, 2)}°    ·    φ ${formatSigned(model.poseDeg.roll, 2)}°    ·    ${model.sim ? (model.sim.running ? 'RUN' : 'PAUSE') : 'STATIC'}`,
+    cardX + 16 * scale,
+    cardY + 201 * scale
   );
 
   ctx.textAlign = 'right';
@@ -220,7 +235,7 @@ function showFatalError(error) {
   const message = document.getElementById('errorMessage');
   if (screen) screen.hidden = false;
   if (message && error && error.message) {
-    message.textContent = '当前浏览器无法启动三维静态底盘演示：' + error.message;
+    message.textContent = '当前浏览器无法启动三维动态底盘演示：' + error.message;
   }
 }
 
@@ -230,7 +245,7 @@ function bindGlobalAPI() {
     version: APP_VERSION,
     getState: () => cloneState(state),
     getSnapshot: () => {
-      const model = UI.lastModel || computeStatic(state);
+      const model = liveModel();
       const tests = UI.selfTests.length ? UI.selfTests : runSelfTests(state);
       const diag = getCarDiagnostics();
       return {
@@ -239,7 +254,7 @@ function bindGlobalAPI() {
         loads: model.loads.slice(),
         rawLoads: model.rawLoads.slice(),
         levelLoads: model.levelLoads.slice(),
-        totalNormal: model.totalNormal,
+        totalNormal: model.sumLoads,
         totalWeight: model.totalWeight,
         betaDeg: model.frame.betaDeg,
         frictionDemand: model.frictionDemand,
@@ -255,6 +270,23 @@ function bindGlobalAPI() {
         heaveMm: model.heave * 1000,
         pitchDeg: model.poseDeg.pitch,
         rollDeg: model.poseDeg.roll,
+        yawDeg: model.poseDeg.yaw,
+        bodyPos: model.bodyPos ? { x: model.bodyPos.x, y: model.bodyPos.y, z: model.bodyPos.z } : null,
+        bodyVelocity: model.bodyVelocity ? { x: model.bodyVelocity.x, y: model.bodyVelocity.y, z: model.bodyVelocity.z } : null,
+        bodyRatesDeg: model.bodyRatesDeg || null,
+        travelMm: model.travelMm.slice(),
+        springCompressionMm: model.springCompressionMm ? model.springCompressionMm.slice() : null,
+        damperCompressionRate: model.damperCompressionRate ? model.damperCompressionRate.slice() : null,
+        springForce: model.springForce ? model.springForce.slice() : null,
+        dampingForce: model.dampingForce ? model.dampingForce.slice() : null,
+        arbForce: model.arbForce ? model.arbForce.slice() : null,
+        inertia: model.inertia ? Object.assign({}, model.inertia) : null,
+        frequencies: model.frequencies ? Object.assign({}, model.frequencies) : null,
+        motionRatio: model.motionRatio ? Object.assign({}, model.motionRatio) : null,
+        springRateCoil: model.springRateCoil ? model.springRateCoil.slice() : null,
+        damperRateWheel: model.damperRateWheel ? model.damperRateWheel.slice() : null,
+        damperRateShaft: model.damperRateShaft ? model.damperRateShaft.slice() : null,
+        sim: model.sim ? Object.assign({}, model.sim) : null,
         arbRate: Object.assign({}, model.arbRate),
         arbBladeAngleDeg: Object.assign({}, model.arbBladeAngleDeg),
         arbRollStiffness: model.arbRollStiffness,
@@ -283,7 +315,8 @@ function bindGlobalAPI() {
           target: CAMERA.target.toArray(),
           transition: Boolean(CAMERA.transition)
         },
-        pendingRebuild: PENDING.rebuild
+        pendingRebuild: PENDING.rebuild,
+        frameCount: UI.frameCount || 0
       };
     },
     setState: (patch, options = {}) => {
@@ -302,9 +335,46 @@ function bindGlobalAPI() {
       resetAll();
       return window.FSApp.getSnapshot();
     },
+    setSimRunning: (running) => {
+      if (SIM) SIM.running = Boolean(running);
+      if (UI.syncSimControls) UI.syncSimControls();
+      return window.FSApp.getSnapshot();
+    },
+    toggleSimRunning: () => {
+      if (SIM) SIM.running = !SIM.running;
+      if (UI.syncSimControls) UI.syncSimControls();
+      return window.FSApp.getSnapshot();
+    },
+    resetDynamics: (options = {}) => {
+      if (!SIM) SIM = simCreate(state);
+      const settle = Number.isFinite(options.settle) ? options.settle : 0;
+      simReset(SIM, state, { settle });
+      const model = simBuildModel(SIM, state);
+      updateSceneFromModel(model);
+      UI.refreshTelemetry(model);
+      if (UI.syncSimControls) UI.syncSimControls();
+      return window.FSApp.getSnapshot();
+    },
+    impulse: (kind = 'heave') => {
+      if (!SIM) SIM = simCreate(state);
+      simApplyImpulse(SIM, kind);
+      if (UI.syncSimControls) UI.syncSimControls();
+      return window.FSApp.getSnapshot();
+    },
+    advanceSimulation: (seconds = 0.5) => {
+      if (!SIM) SIM = simCreate(state);
+      const duration = clamp(Number(seconds) || 0, 0, 10);
+      simRunFor(SIM, duration);
+      const model = simBuildModel(SIM, state);
+      updateSceneFromModel(model);
+      UI.refreshTelemetry(model);
+      if (UI.syncSimControls) UI.syncSimControls();
+      return window.FSApp.getSnapshot();
+    },
     openModel: UI.openModelModal,
     closeModel: UI.closeModelModal,
     runSelfTests: () => runSelfTests(state),
+    runDynamicSelfTests: () => runDynamicSelfTests(state),
     exportScreenshot,
     setCameraPreset,
     setCameraProjection
@@ -318,8 +388,22 @@ function animate(now) {
   const dt = lastFrameTime ? clamp((now - lastFrameTime) / 1000, 0, 0.05) : 0;
   lastFrameTime = now;
 
+  UI.frameCount = (UI.frameCount || 0) + 1;
   updateCamera(dt);
   processPendingRebuild(now);
+
+  if (booted && SIM) {
+    const steps = simAdvance(SIM, dt);
+    if (steps > 0 || !UI.lastDynamicUpdate) {
+      const model = simBuildModel(SIM, state);
+      updateSceneFromModel(model);
+      UI.lastDynamicUpdate = now;
+      if (!UI.lastTelemetryAt || now - UI.lastTelemetryAt > 110) {
+        UI.lastTelemetryAt = now;
+        UI.refreshTelemetry(model);
+      }
+    }
+  }
 
   // Camera and scene matrices are current before projecting the DOM labels.
   S.scene.updateMatrixWorld(false);
@@ -349,7 +433,8 @@ function boot() {
     if (restored) Object.assign(state, restored);
 
     initScene();
-    const initialModel = computeStatic(state);
+    SIM = simCreate(state, { settle: 1.8 });
+    const initialModel = simBuildModel(SIM, state);
     S.roadGroup.quaternion.copy(initialModel.frame.q);
     S.roadGroup.updateMatrixWorld(true);
     buildCar(initialModel);
@@ -357,7 +442,7 @@ function boot() {
 
     initUI();
     UI.refreshTelemetry(initialModel);
-    UI.refreshSelfTests();
+    UI.refreshSelfTests({ dynamic: false });
     syncControlsFromState();
     persistState();
     bindGlobalAPI();
@@ -366,7 +451,7 @@ function boot() {
     lastFrameTime = 0;
     requestAnimationFrame(animate);
 
-    console.info(`[FS-01] stage 01 static rig v${APP_VERSION} ready`);
+    console.info('[FS-01] stage 02 dynamic chassis v' + APP_VERSION + ' ready');
   } catch (error) {
     showFatalError(error);
   }

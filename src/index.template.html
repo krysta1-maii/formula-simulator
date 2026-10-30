@@ -4,14 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#070a0f">
-<meta name="fs-stage" content="1">
-<meta name="description" content="Formula Simulator FS-01：方程式赛车静态底盘与倾斜路面四角载荷演示。阶段一交付。">
-<title>FS-01 静态底盘台 · Formula Simulator</title>
+<meta name="fs-stage" content="2">
+<meta name="description" content="Formula Simulator FS-01：方程式赛车六自由度车身与动态悬架演示。阶段二交付。">
+<title>FS-01 动态底盘台 · Formula Simulator</title>
 <style>/*__STYLES__*/</style>
 </head>
 <body>
 <div id="app">
-  <main id="viewport" aria-label="三维静态底盘演示场景">
+  <main id="viewport" aria-label="三维动态底盘演示场景">
     <div class="scene-wash" aria-hidden="true"></div>
     <div id="labelLayer" class="label-layer" aria-hidden="true"></div>
     <div class="grain" aria-hidden="true"></div>
@@ -29,15 +29,15 @@
         </svg>
       </div>
       <div class="brand-text">
-        <div class="brand-kicker">FORMULA SIMULATOR <span class="kicker-sep"></span> STATIC RIG 01</div>
-        <h1>FS-01 <span>静态底盘台</span></h1>
+        <div class="brand-kicker">FORMULA SIMULATOR <span class="kicker-sep"></span> DYNAMIC RIG 02</div>
+        <h1>FS-01 <span>动态底盘台</span></h1>
       </div>
     </div>
 
     <div class="topbar-center">
-      <span class="phase-pill"><span class="status-dot"></span>阶段一 · 外观与静态底盘</span>
+      <span class="phase-pill"><span class="status-dot"></span>阶段二 · 六自由度与动态悬架</span>
       <span class="topbar-stat">平面倾角 <b id="topBeta">0.0°</b></span>
-      <span class="topbar-stat">总法向 <b id="topNormal">—</b></span>
+      <span class="topbar-stat">动态总法向 <b id="topNormal">—</b></span>
       <span class="topbar-stat topbar-stat-hide">前轴 <b id="topFrontShare">—</b></span>
     </div>
 
@@ -59,8 +59,8 @@
   <aside class="panel panel-left is-open" id="panelControls" aria-label="车辆与路面参数">
     <div class="panel-head">
       <div>
-        <div class="panel-kicker">SETUP / 01</div>
-        <h2>车辆与工况</h2>
+        <div class="panel-kicker">SETUP / 02</div>
+        <h2>车辆与动态工况</h2>
       </div>
       <button type="button" class="panel-close" data-close-panel="panelControls" aria-label="收起参数面板">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
@@ -78,6 +78,7 @@
           <button type="button" class="chip" data-road-preset="slope">纵坡 8°</button>
           <button type="button" class="chip" data-road-preset="bank">横坡 7°</button>
           <button type="button" class="chip" data-road-preset="mixed">复合坡</button>
+          <button type="button" class="chip" data-road-preset="lowGrip">低附着滑移</button>
         </div>
 
         <div class="control">
@@ -110,7 +111,7 @@
       <section class="panel-section">
         <div class="section-head">
           <h3>质量与质心</h3>
-          <span class="section-hint">INERTIA STATIC</span>
+          <span class="section-hint">6-DOF INERTIA</span>
         </div>
 
         <div class="control">
@@ -214,11 +215,11 @@
         </div>
       </details>
 
-      <details class="panel-section details-section">
+      <details class="panel-section details-section" open>
         <summary>
           <div class="section-head">
             <h3>悬架与转向</h3>
-            <span class="section-hint">STATIC SUPPORT</span>
+            <span class="section-hint">DYNAMIC SUPPORT</span>
           </div>
           <span class="summary-chevron" aria-hidden="true"></span>
         </summary>
@@ -235,6 +236,26 @@
           </div>
           <div class="control split-2">
             <div>
+              <div class="control-head"><label for="dampingF">前阻尼比</label><output id="dampingFOut" for="dampingF">0.35 ζ</output></div>
+              <input type="range" id="dampingF" data-param="dampingF" data-kind="decimal2" min="0.05" max="1.2" step="0.01" value="0.35">
+            </div>
+            <div>
+              <div class="control-head"><label for="dampingR">后阻尼比</label><output id="dampingROut" for="dampingR">0.38 ζ</output></div>
+              <input type="range" id="dampingR" data-param="dampingR" data-kind="decimal2" min="0.05" max="1.2" step="0.01" value="0.38">
+            </div>
+          </div>
+          <div class="control split-2">
+            <div>
+              <div class="control-head"><label for="motionRatioF">前运动比</label><output id="motionRatioFOut" for="motionRatioF">0.58</output></div>
+              <input type="range" id="motionRatioF" data-param="motionRatioF" data-kind="decimal2" min="0.3" max="0.9" step="0.01" value="0.58">
+            </div>
+            <div>
+              <div class="control-head"><label for="motionRatioR">后运动比</label><output id="motionRatioROut" for="motionRatioR">0.62</output></div>
+              <input type="range" id="motionRatioR" data-param="motionRatioR" data-kind="decimal2" min="0.3" max="0.9" step="0.01" value="0.62">
+            </div>
+          </div>
+          <div class="control split-2">
+            <div>
               <div class="control-head"><label for="arbFront">前防倾杆硬度</label><output id="arbFrontOut" for="arbFront">60%</output></div>
               <input type="range" id="arbFront" data-param="arbFront" data-kind="int" min="0" max="100" step="1" value="60">
             </div>
@@ -245,7 +266,7 @@
           </div>
           <div class="inline-note">
             <span class="note-dot"></span>
-            横向扭杆 + 同向杠杆臂 + 连接杆。滑块改变叶片绕纵轴的转角：0% 叶片放平（最软），100% 叶片立起（最硬）；等效轮心刚度计入静力方程。
+            轮心率是轮心等效刚度；运动比 i 将其换算为弹簧刚度 k<sub>s</sub> = k<sub>w</sub>/i² 和阻尼器轴端阻尼。阻尼滑块给出轮心阻尼比 ζ，0.35 对应欠阻尼衰减。
           </div>
           <div class="control">
             <div class="control-head">
@@ -256,10 +277,34 @@
           </div>
           <div class="inline-note">
             <span class="note-dot"></span>
-            阶段一仅计算静态支撑；转向只驱动前轮、转向横拉杆及轮胎姿态，不产生侧向力。
+            转向只驱动前轮、转向横拉杆及轮胎姿态，不产生侧向力。轮胎滑移、纵向驱动与空气动力分别在阶段三、四接入。
           </div>
         </div>
       </details>
+
+      <section class="panel-section">
+        <div class="section-head">
+          <h3>动态试验</h3>
+          <span class="section-hint">SIX-DOF</span>
+        </div>
+        <div class="sim-readout">
+          <span class="live-dot" id="simLiveDot"></span>
+          <b id="simStatus">运行</b>
+          <span id="simClock">0.00 s</span>
+        </div>
+        <div class="sim-grid">
+          <button type="button" class="btn btn-ghost" id="btnSimToggle">暂停</button>
+          <button type="button" class="btn btn-ghost" id="btnSimReset">重置姿态</button>
+          <button type="button" class="btn btn-ghost" id="btnImpulseHeave">垂向脉冲</button>
+          <button type="button" class="btn btn-ghost" id="btnImpulseRoll">侧倾脉冲</button>
+          <button type="button" class="btn btn-ghost" id="btnImpulsePitch">俯仰脉冲</button>
+          <button type="button" class="btn btn-ghost" id="btnSimSettle">回到平衡</button>
+        </div>
+        <div class="inline-note">
+          <span class="note-dot"></span>
+          物理步长固定为 2 ms，渲染帧率只决定每帧执行多少子步。脉冲在 0.12 s 内作用，用于观察弹簧—阻尼器与防倾杆的瞬态响应。
+        </div>
+      </section>
 
     </div>
 
@@ -273,8 +318,8 @@
   <aside class="panel panel-right is-open" id="panelTelemetry" aria-label="静态载荷遥测">
     <div class="panel-head">
       <div>
-        <div class="panel-kicker">TELEMETRY / STATIC</div>
-        <h2>静态载荷</h2>
+        <div class="panel-kicker">TELEMETRY / DYNAMIC</div>
+        <h2>动态载荷</h2>
       </div>
       <div class="panel-head-right">
         <div class="unit-toggle" role="group" aria-label="载荷单位">
@@ -289,11 +334,25 @@
 
     <div class="panel-scroll">
       <div class="solver-warning" id="solverWarning" hidden>
-        <b>线性静力模型超出范围</b>
+        <b>动态载荷超出范围</b>
         <span></span>
       </div>
 
-      <div class="corner-grid" aria-label="四角静态载荷">
+      <div class="sim-readout sim-readout-telemetry">
+        <span class="live-dot" id="telemetrySimDot"></span>
+        <b id="telemetrySimState">运行</b>
+        <span id="telemetrySimTime">0.00 s</span>
+        <span id="telemetrySimSteps">—</span>
+      </div>
+
+      <div class="motion-strip" aria-label="车身六自由度姿态">
+        <div><span>升沉 h</span><b id="dynHeave">—</b><small>mm</small></div>
+        <div><span>俯仰 θ</span><b id="dynPitch">—</b><small>°</small></div>
+        <div><span>侧倾 φ</span><b id="dynRoll">—</b><small>°</small></div>
+        <div><span>横摆 ψ</span><b id="dynYaw">—</b><small>°</small></div>
+      </div>
+
+      <div class="corner-grid" aria-label="四角动态载荷">
         <article class="corner-card" id="cornerFL">
           <div class="corner-head"><span class="corner-code"><i></i>FL</span><span class="corner-name">左前</span></div>
           <div class="corner-value"><b id="loadFL">—</b><span data-unit-label>N</span></div>
@@ -328,7 +387,7 @@
       </div>
 
       <div class="total-strip">
-        <div><span>总法向力</span><b id="totalNormal">—</b><small>mg cosβ</small></div>
+        <div><span>动态总法向</span><b id="totalNormal">—</b><small>ΣN</small></div>
         <div><span>整车重量</span><b id="totalWeight">—</b><small>mg</small></div>
         <div><span>坡面附着需求</span><b id="frictionDemand">—</b><small>tanβ</small></div>
       </div>
@@ -341,9 +400,14 @@
           <div><dt>平面法向倾角 β</dt><dd id="planeTilt">—</dd></div>
           <div><dt>质心纵向 x<sub>CG</sub></dt><dd id="cgLong">—</dd></div>
           <div><dt>质心竖直投影偏移</dt><dd id="cgProjection">—</dd></div>
-          <div><dt>车体升沉 h</dt><dd id="bodyHeave">—</dd></div>
-          <div><dt>车体俯仰 / 侧倾</dt><dd id="bodyAttitude">—</dd></div>
-          <div><dt>四角行程 FL / FR / RL / RR</dt><dd class="mono" id="cornerTravel">—</dd></div>
+          <div><dt>仿真状态</dt><dd id="simDetail">—</dd></div>
+          <div><dt>车身位置 x / y / z</dt><dd class="mono" id="bodyPosition">—</dd></div>
+          <div><dt>车体升沉 h / 俯仰 / 侧倾</dt><dd id="bodyAttitude">—</dd></div>
+          <div><dt>车体角速度</dt><dd class="mono" id="bodyRates">—</dd></div>
+          <div><dt>四角行程 / 弹簧压缩</dt><dd class="mono" id="cornerTravel">—</dd></div>
+          <div><dt>弹簧 / 阻尼 / 防倾杆</dt><dd class="mono" id="cornerForces">—</dd></div>
+          <div><dt>固有频率 h / θ / φ</dt><dd id="dynFreq">—</dd></div>
+          <div><dt>惯量 I<sub>xx</sub> / I<sub>yy</sub> / I<sub>zz</sub></dt><dd id="dynInertia">—</dd></div>
           <div><dt>悬架杆件端点</dt><dd id="linkStatus">—</dd></div>
           <div><dt>转向齿条 / 横拉杆</dt><dd id="steerStatus">—</dd></div>
           <div><dt>防倾杆 F / R</dt><dd id="arbStatus">—</dd></div>
@@ -361,7 +425,7 @@
     </div>
 
     <div class="panel-foot panel-foot-telemetry">
-      <span class="live-dot"></span><span>实时求解</span><span class="foot-sep"></span><span>阶段一 / 静力</span>
+      <span class="live-dot"></span><span>固定步长 500 Hz</span><span class="foot-sep"></span><span>阶段二 / 动力学</span>
     </div>
   </aside>
 
@@ -388,7 +452,7 @@
   </div>
 
   <div class="viewport-hint">
-    <span>拖动旋转</span><span>滚轮缩放至光标</span><span>右键平移</span><span>双击重置 · O 正交 · H 水平</span>
+    <span>拖动旋转</span><span>滚轮缩放至光标</span><span>右键平移</span><span>双击重置 · O 正交 · H 水平 · 空格 暂停</span>
   </div>
 
   <div class="loading" id="loading" aria-live="polite">
@@ -400,8 +464,8 @@
           <path d="M25.5 32h11.8l2.7-4H28.2z" fill="var(--accent)"/>
         </svg>
       </div>
-      <div class="loading-title">FS-01 <span>静态底盘台</span></div>
-      <div class="loading-sub">正在构建几何与静力模型</div>
+      <div class="loading-title">FS-01 <span>动态底盘台</span></div>
+      <div class="loading-sub">正在构建几何与动力学模型</div>
       <div class="loading-bar"><i></i></div>
     </div>
   </div>
@@ -422,8 +486,8 @@
     <div class="modal-card">
       <div class="modal-head">
         <div>
-          <div class="modal-kicker">MODEL NOTES / STAGE 01</div>
-          <h2 id="modalTitle">阶段一：外观与静态底盘</h2>
+          <div class="modal-kicker">MODEL NOTES / STAGE 02</div>
+          <h2 id="modalTitle">阶段二：六自由度与动态悬架</h2>
         </div>
         <button type="button" class="icon-btn" data-close-modal aria-label="关闭">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
@@ -433,37 +497,37 @@
         <div class="modal-cols">
           <section>
             <h3><span>01</span>本期范围</h3>
-            <p>本页面是 <b>DESIGN.md</b> 阶段一的交互演示：建立可辨认的现代开轮方程式赛车外观与主要尺寸，建立可整体倾斜的路面、质心与四轮静态位置，并计算水平及倾斜路面上的四角静态法向载荷。</p>
+            <p>本页面是 <b>DESIGN.md</b> 阶段二的交互演示：在阶段一的外观、倾斜路面和静态四角载荷之上，加入车体六自由度、四角弹簧—阻尼器、等效运动比和前后防倾杆动态。车体不再直接贴合路面，而是在悬挂力、重力和接触摩擦作用下积分升沉、俯仰、侧倾、纵移、横移与横摆。</p>
             <ul class="check-list-static">
-              <li>程序化车体、前后翼、Halo、侧箱、底板与扩散器</li>
-              <li>前后双横臂、推杆/拉杆、摇臂、弹簧—阻尼器、转向机与扭杆式防倾杆</li>
-              <li>前轴转向柱与左右横拉杆、后轴差速器与左右半轴、四个独立车轮</li>
-              <li>双轴倾斜路面，重力方向保持世界竖直</li>
-              <li>四角轮载、轴荷分配、附着需求与模型自检实时显示</li>
+              <li>六自由度刚体：三轴平动、三轴转动，四元数姿态，固定步长 2 ms 半隐式积分</li>
+              <li>四角等效轮心弹簧与阻尼器，运动比换算弹簧刚度与阻尼器轴端阻尼</li>
+              <li>前后横向扭杆式防倾杆按左右行程差产生等大反向作用力</li>
+              <li>四轮接地点保持在倾斜平面内，切向库仑摩擦承担坡面驻车与滑移</li>
+              <li>车身、车轮、摇臂、推杆、弹簧—阻尼器与载荷箭头共享同一动态姿态</li>
             </ul>
-            <p class="muted-note">阶段二至四（六自由度动态、轮胎滑移与驱动、空气动力学调参）尚未接入。当前横臂仍为端点绑定的视觉运动学；前轮绕主销转动，齿条随转向平移，推杆—摇臂按定长闭合，等转角约束下横拉杆残差约 3.7 mm；阶段二将由共享几何模块替换。</p>
+            <p class="muted-note">阶段三、四（轮胎侧偏/纵滑、后轴驱动、空气动力学）尚未接入。当前悬架仍为等效轮心力学加端点绑定的视觉运动学；横臂不参与载荷计算，轮胎切向力只用于驻车/滑移，不产生侧偏力。转向只驱动前轮和拉杆，不产生侧向力。</p>
           </section>
 
           <section>
-            <h3><span>02</span>静力求解</h3>
-            <p>路面局部坐标取 x 向前、y 沿法向、z 向右。设平面法向与竖直方向夹角为 β，车重 mg 在路面法向的分量为 N<sub>tot</sub> = mg cosβ。重力线在路面上的投影点为 P：</p>
-            <div class="eq">P = CG + t·g<sub>road</sub>，t = −h<sub>CG</sub> / g<sub>road,y</sub></div>
-            <p>四角支反力满足力与力矩平衡：</p>
-            <div class="eq">ΣN<sub>i</sub> = N<sub>tot</sub><br>Σx<sub>i</sub>N<sub>i</sub> = N<sub>tot</sub>P<sub>x</sub><br>Σz<sub>i</sub>N<sub>i</sub> = N<sub>tot</sub>P<sub>z</sub></div>
-            <p>每个角由等效轮心弹簧支撑，弹簧力 N<sub>i</sub> = N<sub>i0</sub> − k<sub>i</sub>(h + x<sub>i</sub>p − z<sub>i</sub>r) + F<sub>arb,i</sub>，其中 h、p、r 为车体相对路面的升沉、俯仰和侧倾。防倾杆在左右轮心产生等大反向的附加力，只进入侧倾方程，其等效侧倾刚度为 K<sub>arb</sub> = k<sub>aF</sub>t<sub>F</sub><sup>2</sup> + k<sub>aR</sub>t<sub>R</sub><sup>2</sup>。将弹簧力代入平衡式，得到关于姿态的三元一次方程组；四角载荷由此唯一确定。水平路面上解为设计姿态，轮载等于由质心位置分配得到的静态角重量。</p>
-            <p>防倾杆不是连接左右车轮的刚性横梁：它是一根横置扭杆，两端杠杆臂朝同一侧伸出，经连接杆接到摇臂吊耳。左右同向运动时扭杆自由转动，单轮跳动或侧倾时才受扭。可调式的一根杠杆臂为扁平弹簧钢叶片，绕自身纵轴旋转改变弯曲刚度；页面以 0–100% 硬度表示这一调节，叶片转角按 θ = arccos√p 计算。</p>
-            <p>切向重力分量 mg sinβ 由轮胎静摩擦承担。页面按各轮法向载荷比例分配切向力，并给出均匀附着需求 μ<sub>req</sub> = tanβ；该简化不校核坡面偏航和四轮独立附着。</p>
+            <h3><span>02</span>动力学求解</h3>
+            <p>路面局部坐标取 x 向前、y 沿法向、z 向右。车体状态为参考点位置 <b>r</b> = (x, y, z)、速度 <b>v</b>、姿态四元数 q 和车体角速度 <b>ω</b>。四元数按 q̇ = ½ q ⊗ (0, <b>ω</b>) 推进，欧拉角按 R = R<sub>y</sub>(ψ)R<sub>z</sub>(θ)R<sub>x</sub>(φ) 提取；正俯仰抬车头，正侧倾压低右侧，正横摆向左转。</p>
+            <div class="eq">m dv/dt = m g + ΣN<sub>i</sub> e<sub>y</sub> + Σf<sub>i</sub> + F<sub>impulse</sub><br>I<sub>CG</sub> dω/dt + ω × (I<sub>CG</sub>ω) = Σ(r<sub>i</sub> − r<sub>CG</sub>) × F<sub>i</sub></div>
+            <p>每个角的弹簧力为 N<sub>i</sub> = N<sub>i0</sub> − k<sub>w,i</sub>δ<sub>i</sub> − c<sub>w,i</sub>δ̇<sub>i</sub> + F<sub>arb,i</sub>，其中 δ<sub>i</sub> 是车体在轮心处的法向位移，负值表示弹簧压缩；N<sub>i0</sub> 是设计姿态角重量，k<sub>w</sub> 是轮心等效刚度，c<sub>w</sub> = 2ζ√(k<sub>w</sub>m<sub>i</sub>) 由阻尼比 ζ 换算。防倾杆取左右行程差 Δ = δ<sub>L</sub> − δ<sub>R</sub>：</p>
+            <div class="eq">F<sub>arb,L</sub> = −k<sub>a</sub>Δ，F<sub>arb,R</sub> = +k<sub>a</sub>Δ</div>
+            <p>运动比 i 把轮心量换算到弹簧和阻尼器轴端：k<sub>s</sub> = k<sub>w</sub>/i<sup>2</sup>，c<sub>s</sub> = c<sub>w</sub>/i<sup>2</sup>，弹簧压缩量 s = i·δ。页面中的运动比同时也是遥测换算值；可见杆件仍由端点绑定和定长闭合驱动。</p>
+            <p>车轮中心保持在路面上方一个轮胎半径处，车身相对路面的姿态产生四角行程。积分采用半隐式欧拉，步长固定为 1/500 s；渲染帧只累积并执行整数个子步，因此改变刷新率不会改变物理结果。脉冲试验在 0.12 s 内施加垂向力，用来观察弹簧—阻尼器和防倾杆的瞬态。</p>
+            <p>切向接触使用简化的库仑摩擦：静止且所需切向力不超过 μΣN<sub>i</sub> 时按法向载荷比例分配静摩擦并保持平面速度为零；超过容量或已经滑移时按 μN<sub>i</sub> 施加动摩擦。该模型只承担坡面驻车与滑移，不产生轮胎侧偏力，阶段三将替换为完整的轮胎滑移模型。</p>
           </section>
         </div>
 
         <section class="modal-wide">
-          <h3><span>03</span>阶段一验收映射</h3>
+          <h3><span>03</span>阶段二验收映射</h3>
           <div class="acceptance-grid">
-            <div class="acceptance-item"><span class="acc-num">A</span><div><b>外观与主要尺寸</b><p>可辨识的开轮单座方程式赛车；轴距、前后轮距、轮胎半径可调。</p></div></div>
-            <div class="acceptance-item"><span class="acc-num">B</span><div><b>倾斜路面与静态位置</b><p>纵坡/横坡独立调整；四轮接触点位于路面，重力保持世界竖直。</p></div></div>
-            <div class="acceptance-item"><span class="acc-num">C</span><div><b>水平与倾斜静态轮载</b><p>水平状态按质心分配；倾斜后轮载满足法向力与力矩平衡，并显示对水平基准的变化。</p></div></div>
-            <div class="acceptance-item"><span class="acc-num">D</span><div><b>悬架与车轮连接</b><p>杆件端点实时绑定车体与立柱；四轮接地；剖视可检查内部摇臂、弹簧、转向机、半轴与防倾杆。</p></div></div>
-            <div class="acceptance-item"><span class="acc-num">E</span><div><b>转向、传动与防倾杆</b><p>前轴齿轮齿条、转向柱和横拉杆；后轴差速器与半轴；横向扭杆、同向杠杆臂、连接杆和叶片式硬度调节。</p></div></div>
+            <div class="acceptance-item"><span class="acc-num">A</span><div><b>六自由度车体</b><p>位置、速度、四元数姿态与角速度完整积分；水平路面收敛到设计姿态，倾斜路面收敛到与静力解一致的载荷。</p></div></div>
+            <div class="acceptance-item"><span class="acc-num">B</span><div><b>四角弹簧—阻尼器</b><p>轮心等效刚度、运动比和阻尼比可调；脉冲后按阻尼比衰减，不出现非预期持续振荡或发散。</p></div></div>
+            <div class="acceptance-item"><span class="acc-num">C</span><div><b>防倾杆动态</b><p>左右同向行程不产生扭转；反向行程产生等大反向力；提高硬度抑制侧倾，并改变前后轴侧倾载荷转移。</p></div></div>
+            <div class="acceptance-item"><span class="acc-num">D</span><div><b>机构与视觉同步</b><p>车身六自由度带动车轮平面位置与横摆；杆件端点跟随车体与立柱；弹簧、摇臂、推杆与载荷箭头使用同一次求解结果。</p></div></div>
+            <div class="acceptance-item"><span class="acc-num">E</span><div><b>数值与交互</b><p>固定步长 500 Hz，渲染帧率不改变结果；暂停、重置、三种脉冲可复现；低附着时六自由度滑移并给出警告。</p></div></div>
           </div>
         </section>
 
@@ -480,7 +544,8 @@
               <li><span>1 – 5</span> 切换三分之四、侧视、前视、后视、顶视；三视使用水平正交投影，顶视为正交俯视，<span>O</span> 切换投影，<span>R</span> 重置视角</li>
               <li><span>取景</span> 视线不滚转，相机不低于台面水平面；手动缩放范围 0.9 – 14 m 可视高度，窄屏按车宽自动退距</li>
               <li><span>X</span> 切换车身剖视，<span>M</span> 机构剖视（转向 → 传动 → 前/后防倾杆），<span>R</span> 返回总览</li>
-              <li><span>F</span> 轮载矢量，<span>G</span> 质心，<span>H</span> 水平路面</li>
+              <li><span>F</span> 轮载矢量，<span>G</span> 质心，<span>H</span> 水平路面，<span>空格</span> 暂停/继续仿真</li>
+              <li><span>动态</span> 参数面板底部可暂停、重置姿态，或施加垂向、侧倾、俯仰脉冲</li>
               <li><span>单位</span> 遥测面板可在 N 与 kg 等效之间切换；kg 值按 g = 9.80665 m/s² 换算</li>
               <li><span>保存</span> 参数会写入浏览器本地存储；“复制参数”输出当前状态的 JSON</li>
             </ul>
@@ -488,8 +553,8 @@
           </section>
         </div>
         <div class="modal-foot">
-          <span>Formula Simulator · 阶段一演示 v0.1.0 · <a href="DESIGN.md" target="_blank" rel="noopener">DESIGN.md</a></span>
-          <span>静态底盘 / 双横臂 / 前推杆后拉杆 / 扭杆防倾杆</span>
+          <span>Formula Simulator · 阶段二演示 v0.2.0 · <a href="DESIGN.md" target="_blank" rel="noopener">DESIGN.md</a></span>
+          <span>六自由度 / 弹簧阻尼器 / 扭杆防倾杆 / 固定步长</span>
         </div>
       </div>
     </div>

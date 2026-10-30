@@ -51,6 +51,12 @@ function formatOutputValue(param, value) {
     case 'wheelRateF':
     case 'wheelRateR':
       return formatInt(value) + ' N/mm';
+    case 'dampingF':
+    case 'dampingR':
+      return Number(value).toFixed(2) + ' ζ';
+    case 'motionRatioF':
+    case 'motionRatioR':
+      return Number(value).toFixed(2);
     case 'arbFront':
     case 'arbRear':
       return formatInt(value) + '%';
@@ -108,32 +114,35 @@ function syncControlsFromState() {
   updateRoadChips();
 }
 
-function updateRoadChips() {
-  const presets = {
-    level: [0, 0],
-    slope: [8, 0],
-    bank: [0, 7],
-    mixed: [6, 5]
+function roadPresetTable() {
+  return {
+    level: { slope: 0, bank: 0 },
+    slope: { slope: 8, bank: 0 },
+    bank: { slope: 0, bank: 7 },
+    mixed: { slope: 6, bank: 5 },
+    lowGrip: { slope: 10, bank: 10, friction: 0.2 }
   };
+}
+
+function updateRoadChips() {
+  const presets = roadPresetTable();
   $$('[data-road-preset]').forEach((button) => {
     const target = presets[button.dataset.roadPreset];
-    const matches = target && Math.abs(state.slope - target[0]) < 0.001 && Math.abs(state.bank - target[1]) < 0.001;
+    const matches = target &&
+      Math.abs(state.slope - target.slope) < 0.001 &&
+      Math.abs(state.bank - target.bank) < 0.001 &&
+      (target.friction == null || Math.abs(state.friction - target.friction) < 0.001);
     button.classList.toggle('is-active', Boolean(matches));
   });
 }
 
 function applyRoadPreset(name) {
-  const presets = {
-    level: { slope: 0, bank: 0 },
-    slope: { slope: 8, bank: 0 },
-    bank: { slope: 0, bank: 7 },
-    mixed: { slope: 6, bank: 5 }
-  };
-  const target = presets[name];
+  const target = roadPresetTable()[name];
   if (!target) return;
   Object.assign(state, target);
   syncParamOutput('slope');
   syncParamOutput('bank');
+  if (target.friction != null) syncParamOutput('friction');
   updateRoadChips();
   persistState();
   refreshAll({ rebuild: false });
@@ -186,9 +195,39 @@ function setAutoRotate(enabled) {
   }
 }
 
+function simulationReset({ settle = 0, toast = '姿态已重置到平衡位置' } = {}) {
+  if (!SIM) SIM = simCreate(state);
+  simReset(SIM, state, { settle });
+  SIM.running = true;
+  const model = simBuildModel(SIM, state);
+  updateSceneFromModel(model);
+  refreshTelemetry(model);
+  syncSimControls(model);
+  if (toast) showToast(toast);
+}
+
+function simulationToggle() {
+  if (!SIM) SIM = simCreate(state);
+  SIM.running = !SIM.running;
+  syncSimControls(UI.lastModel);
+  showToast(SIM.running ? '动力学仿真继续' : '动力学仿真已暂停');
+}
+
+function simulationImpulse(kind) {
+  if (!SIM) SIM = simCreate(state);
+  const labels = { heave: '垂向脉冲', roll: '侧倾脉冲', pitch: '俯仰脉冲' };
+  if (!simApplyImpulse(SIM, kind)) return;
+  syncSimControls(UI.lastModel);
+  showToast(`已施加${labels[kind] || '脉冲'}，观察弹簧—阻尼器响应`);
+}
+
 function resetAll() {
   copyDefaults();
   autoRotate = false;
+  if (SIM) {
+    SIM.running = true;
+    simReset(SIM, state, { settle: 1.0 });
+  }
   syncControlsFromState();
   setAutoRotate(false);
   applyXray();
@@ -204,17 +243,41 @@ function buildConfigPayload() {
   return {
     app: 'FS-01 Formula Simulator',
     version: APP_VERSION,
-    stage: 'static-rig-stage-1',
+    stage: 'dynamic-rig-stage-2',
     exportedAt: new Date().toISOString(),
     setup: cloneState(state),
     summary: model ? {
-      totalNormalN: Number(model.totalNormal.toFixed(3)),
+      totalNormalN: Number(model.sumLoads.toFixed(3)),
       cornerLoadsN: model.loads.map((value) => Number(value.toFixed(3))),
       planeBetaDeg: Number(model.frame.betaDeg.toFixed(4)),
       frictionDemand: Number(model.frictionDemand.toFixed(4)),
       bodyPitchDeg: Number(model.poseDeg.pitch.toFixed(5)),
       bodyRollDeg: Number(model.poseDeg.roll.toFixed(5)),
+      bodyYawDeg: Number(model.poseDeg.yaw.toFixed(5)),
       heaveMm: Number((model.heave * 1000).toFixed(4)),
+      travelMm: model.travelMm.map((value) => Number(value.toFixed(4))),
+      bodyVelocity: model.bodyVelocity ? {
+        x: Number(model.bodyVelocity.x.toFixed(5)),
+        y: Number(model.bodyVelocity.y.toFixed(5)),
+        z: Number(model.bodyVelocity.z.toFixed(5))
+      } : null,
+      inertia: model.inertia ? {
+        Ixx: Number(model.inertia.Ixx.toFixed(3)),
+        Iyy: Number(model.inertia.Iyy.toFixed(3)),
+        Izz: Number(model.inertia.Izz.toFixed(3))
+      } : null,
+      frequenciesHz: model.frequencies ? {
+        heave: Number(model.frequencies.heave.toFixed(4)),
+        roll: Number(model.frequencies.roll.toFixed(4)),
+        pitch: Number(model.frequencies.pitch.toFixed(4))
+      } : null,
+      sim: model.sim ? {
+        timeS: Number(model.sim.time.toFixed(4)),
+        running: model.sim.running,
+        holding: model.sim.holding,
+        sliding: model.sim.sliding,
+        stepHz: model.sim.stepHz
+      } : null,
       arbFrontRateNPerM: Number(model.arbRate.front.toFixed(3)),
       arbRearRateNPerM: Number(model.arbRate.rear.toFixed(3)),
       arbTwistDeg: Number((getCarDiagnostics().arbTwistDeg || 0).toFixed(4))
@@ -319,9 +382,11 @@ function closeModelModal() {
   }
 }
 
-function refreshSelfTests() {
-  const tests = runSelfTests(state);
-  UI.selfTests = tests;
+function refreshSelfTests({ dynamic = true } = {}) {
+  const staticTests = runSelfTests(state);
+  UI.selfTests = staticTests;
+  if (dynamic || !UI.dynamicTests) UI.dynamicTests = runDynamicSelfTests(state);
+  const tests = staticTests.concat(UI.dynamicTests);
   const passed = tests.filter((test) => test.ok).length;
   const total = tests.length;
 
@@ -330,21 +395,23 @@ function refreshSelfTests() {
 
   const summary = document.getElementById('selfTestSummary');
   if (summary) {
-    summary.textContent = `${passed} / ${total} 项通过`;
+    summary.textContent = `${passed} / ${total} 项通过 · 静态 ${staticTests.length} / 动态 ${UI.dynamicTests.length}`;
     summary.style.color = passed === total ? 'var(--ok)' : 'var(--warn)';
   }
 
   const list = document.getElementById('selfTestList');
   if (list) {
     list.textContent = '';
-    tests.forEach((test) => {
+    const labelled = staticTests.map((test) => ({ ...test, group: '静态' }))
+      .concat(UI.dynamicTests.map((test) => ({ ...test, group: '动态' })));
+    labelled.forEach((test) => {
       const item = document.createElement('li');
       if (!test.ok) item.className = 'is-fail';
       const mark = document.createElement('span');
       mark.className = 'st-mark';
       mark.textContent = test.ok ? '✓' : '!';
       const name = document.createElement('span');
-      name.textContent = test.name;
+      name.textContent = test.group + ' · ' + test.name;
       const detail = document.createElement('span');
       detail.className = 'st-detail';
       detail.textContent = test.detail;
@@ -501,20 +568,33 @@ function refreshChecks(model) {
   if (!container) return;
   const diag = getCarDiagnostics();
   const tests = UI.selfTests;
+  const dynamicTests = UI.dynamicTests || [];
   const passed = tests.filter((test) => test.ok).length;
-  const forceOk = model.equilibriumOk && model.liftedCount === 0;
+  const dynamicPassed = dynamicTests.filter((test) => test.ok).length;
+  const sim = model.sim || {
+    time: 0,
+    running: true,
+    holding: true,
+    sliding: false,
+    finite: true,
+    recovered: false,
+    stepHz: 500,
+    substeps: 0
+  };
   const linksOk = diag.linkCount > 0 && diag.maxSuspLinkStretchMm < 1 && diag.rockerSolveOk;
   const steerOk = diag.tieRodStretchMm < 5 && diag.rockerSolveOk;
   const arbOk = diag.arbCount === 2 && diag.arbFront && diag.arbRear && diag.arbStretchMm < 0.5;
   const contactOk = model.contactOk;
-  const frictionOk = model.frictionOk;
+  const frictionOk = model.frictionDemand <= model.frictionCapacity + 1e-9;
   const testsOk = tests.length > 0 && passed === tests.length;
+  const dynamicOk = dynamicTests.length > 0 && dynamicPassed === dynamicTests.length;
+  const frictionState = sim.sliding ? '滑移' : sim.holding ? '静摩擦' : '—';
 
   const rows = [
     {
-      ok: forceOk,
-      name: '法向力平衡',
-      value: `ΣN ${model.forceError < 0.01 ? '<0.01' : model.forceError.toFixed(2)} N · M ${model.momentXError < 0.01 && model.momentZError < 0.01 ? '<0.01' : Math.max(model.momentXError, model.momentZError).toFixed(2)} N·m`
+      ok: sim.finite && !sim.recovered,
+      name: '六自由度积分',
+      value: `t ${sim.time.toFixed(2)} s · ${sim.stepHz} Hz · ${sim.substeps} 子步`
     },
     {
       ok: contactOk,
@@ -538,13 +618,18 @@ function refreshChecks(model) {
     },
     {
       ok: frictionOk,
-      name: '坡面静摩擦',
-      value: `μ_req ${model.frictionDemand.toFixed(3)} / ${model.frictionCapacity.toFixed(2)}`
+      name: '坡面摩擦',
+      value: `μ_req ${model.frictionDemand.toFixed(3)} / ${model.frictionCapacity.toFixed(2)} · ${frictionState}`
     },
     {
       ok: testsOk,
-      name: '静力求解自检',
+      name: '静力自检',
       value: tests.length ? `${passed} / ${tests.length} 通过` : '待运行'
+    },
+    {
+      ok: dynamicOk,
+      name: '动态自检',
+      value: dynamicTests.length ? `${dynamicPassed} / ${dynamicTests.length} 通过` : '待运行'
     }
   ];
 
@@ -566,19 +651,47 @@ function refreshChecks(model) {
   });
 }
 
+function syncSimControls(model = UI.lastModel) {
+  const sim = model && model.sim ? model.sim : null;
+  const running = SIM ? SIM.running : sim ? sim.running : true;
+  const simTime = SIM ? SIM.time : sim ? sim.time : 0;
+  const substeps = running ? (SIM ? SIM.lastSubsteps : sim ? sim.substeps : 0) : 0;
+  const sliding = SIM ? SIM.flags.sliding : Boolean(sim && sim.sliding);
+  setText('simStatus', running ? '运行' : '暂停');
+  setText('simClock', `${simTime.toFixed(2)} s`);
+  const toggle = document.getElementById('btnSimToggle');
+  if (toggle) toggle.textContent = running ? '暂停' : '继续';
+  const readout = document.querySelector('.sim-readout');
+  if (readout) {
+    readout.classList.toggle('is-paused', !running);
+    readout.classList.toggle('is-sliding', sliding);
+  }
+  const telemetryReadout = document.querySelector('.sim-readout-telemetry');
+  if (telemetryReadout) {
+    telemetryReadout.classList.toggle('is-paused', !running);
+    telemetryReadout.classList.toggle('is-sliding', sliding);
+  }
+  setText('telemetrySimState', sim || SIM ? (running ? '运行' : '暂停') : '静态');
+  setText('telemetrySimTime', `${simTime.toFixed(2)} s`);
+  setText('telemetrySimSteps', sim || SIM ? `${sim ? sim.stepHz : Math.round(1 / SIM_DT)} Hz · ${substeps} 子步/帧` : '—');
+}
+
 function refreshTelemetry(model) {
   UI.lastModel = model;
   if (!model) return;
   UI.selfTests = runSelfTests(state);
+  const sim = model.sim || null;
+  const loads = model.loads.slice();
+  const sumLoads = loads.reduce((acc, value) => acc + value, 0);
 
   setText('topBeta', model.frame.betaDeg.toFixed(1) + '°');
-  setText('topNormal', `${loadDisplay(model.totalNormal)} ${unitDisplay()}`);
+  setText('topNormal', `${loadDisplay(sumLoads)} ${unitDisplay()}`);
   setText('topFrontShare', (model.frontShare * 100).toFixed(1) + '%');
 
-  const maxLoad = Math.max(...model.loads, 1);
-  const avgLoad = model.sumLoads / 4;
+  const maxLoad = Math.max(...loads, 1);
+  const avgLoad = sumLoads / 4;
   CORNERS.forEach((corner, index) => {
-    const load = model.loads[index];
+    const load = loads[index];
     const levelLoad = model.levelLoads[index];
     const delta = load - levelLoad;
     const card = document.getElementById('corner' + corner.key);
@@ -610,7 +723,7 @@ function refreshTelemetry(model) {
       bar.style.width = width.toFixed(1) + '%';
     }
     if (card) {
-      card.classList.toggle('is-max', load === Math.max(...model.loads) && load > 0);
+      card.classList.toggle('is-max', load === maxLoad && load > 0);
       card.classList.toggle('is-low', load < avgLoad * 0.78);
     }
   });
@@ -624,16 +737,50 @@ function refreshTelemetry(model) {
   const leftBar = document.getElementById('leftShareBar');
   if (leftBar) leftBar.style.width = (model.leftShare * 100).toFixed(1) + '%';
 
-  setText('totalNormal', `${loadDisplay(model.totalNormal)} ${unitDisplay()}`);
+  setText('totalNormal', `${loadDisplay(sumLoads)} ${unitDisplay()}`);
   setText('totalWeight', `${loadDisplay(model.totalWeight)} ${unitDisplay()}`);
   setText('frictionDemand', model.frictionDemand.toFixed(3));
+
+  setText('dynHeave', formatSigned(model.heave * 1000, 1));
+  setText('dynPitch', formatSigned(model.poseDeg.pitch, 2));
+  setText('dynRoll', formatSigned(model.poseDeg.roll, 2));
+  setText('dynYaw', formatSigned(model.poseDeg.yaw, 2));
 
   setText('planeTilt', model.frame.betaDeg.toFixed(2) + '°');
   setText('cgLong', `${formatSigned(model.xCG * 1000, 0)} mm`);
   setText('cgProjection', `Δx ${formatSigned((model.px - model.xCG) * 1000, 1)} / Δz ${formatSigned((model.pz - model.zCG) * 1000, 1)} mm`);
   setText('bodyHeave', `${formatSigned(model.heave * 1000, 2)} mm`);
-  setText('bodyAttitude', `${formatSigned(model.poseDeg.pitch, 2)}° / ${formatSigned(model.poseDeg.roll, 2)}°`);
+  setText('bodyAttitude', `${formatSigned(model.heave * 1000, 2)} mm / ${formatSigned(model.poseDeg.pitch, 2)}° / ${formatSigned(model.poseDeg.roll, 2)}°`);
+  const bodyPos = model.bodyPos || { x: 0, y: 0, z: 0 };
+  setText('bodyPosition', `${formatSigned(bodyPos.x * 1000, 1)} / ${formatSigned(bodyPos.y * 1000, 1)} / ${formatSigned(bodyPos.z * 1000, 1)} mm`);
+  if (model.bodyRatesDeg) {
+    setText('bodyRates', `φ̇ ${formatSigned(model.bodyRatesDeg.roll, 2)} · ψ̇ ${formatSigned(model.bodyRatesDeg.yaw, 2)} · θ̇ ${formatSigned(model.bodyRatesDeg.pitch, 2)} °/s`);
+  } else {
+    setText('bodyRates', '—');
+  }
   setText('cornerTravel', model.travelMm.map((value) => formatSigned(value, 2)).join(' / ') + ' mm');
+  if (model.springCompressionMm && model.dampingForce && model.arbForce) {
+    const maxDamping = Math.max(...model.dampingForce.map((value) => Math.abs(value)));
+    const maxArb = Math.max(...model.arbForce.map((value) => Math.abs(value)));
+    setText(
+      'cornerForces',
+      `压缩 ${model.springCompressionMm.map((value) => value.toFixed(1)).join(' / ')} mm · 阻尼 ${formatInt(maxDamping)} N · ARB ${formatInt(maxArb)} N`
+    );
+  } else {
+    setText('cornerForces', '—');
+  }
+  if (model.frequencies) {
+    setText('dynFreq', `${model.frequencies.heave.toFixed(2)} / ${model.frequencies.roll.toFixed(2)} / ${model.frequencies.pitch.toFixed(2)} Hz`);
+  }
+  if (model.inertia) {
+    setText('dynInertia', `${model.inertia.Ixx.toFixed(0)} / ${model.inertia.Iyy.toFixed(0)} / ${model.inertia.Izz.toFixed(0)} kg·m²`);
+  }
+  if (sim) {
+    const stateText = sim.sliding ? '切向滑移' : sim.holding ? '静摩擦保持' : '瞬态';
+    setText('simDetail', `${sim.running ? '运行' : '暂停'} · t ${sim.time.toFixed(2)} s · ${sim.stepHz} Hz · ${stateText}`);
+  } else {
+    setText('simDetail', '静态参考');
+  }
 
   const diag = getCarDiagnostics();
   setText('linkStatus', `${diag.linkCount} 根 · ${diag.jointCount} 点 · 悬架杆长偏差 ${diag.maxSuspLinkStretchMm.toFixed(3)} mm`);
@@ -646,9 +793,14 @@ function refreshTelemetry(model) {
     `${formatInt(model.arbRate.front / 1000)} / ${formatInt(model.arbRate.rear / 1000)} N/mm · 扭转 ${diag.arbTwistDeg.toFixed(2)}° · 叶片 ${diag.arbBladeFrontDeg.toFixed(0)}° / ${diag.arbBladeRearDeg.toFixed(0)}°`
   );
   const tests = UI.selfTests;
+  const dynamicTests = UI.dynamicTests || [];
   if (tests.length) {
     const passed = tests.filter((test) => test.ok).length;
-    setText('selfTestStatus', `${passed} / ${tests.length} 通过`);
+    const dynamicPassed = dynamicTests.filter((test) => test.ok).length;
+    setText(
+      'selfTestStatus',
+      `静力 ${passed} / ${tests.length}${dynamicTests.length ? ` · 动态 ${dynamicPassed} / ${dynamicTests.length}` : ''}`
+    );
   }
 
   ['FL', 'FR', 'RL', 'RR'].forEach((key, index) => {
@@ -657,15 +809,26 @@ function refreshTelemetry(model) {
 
   const warning = document.getElementById('solverWarning');
   if (warning) {
+    const title = warning.querySelector('b');
+    const detail = warning.querySelector('span');
     if (model.liftedCount > 0) {
       warning.hidden = false;
-      warning.querySelector('b').textContent = `${model.liftedCount} 个车轮出现负法向载荷`;
-      warning.querySelector('span').textContent = '线性静力模型已超出单侧接触范围，显示值已截断为 0；请减小倾角、质心高度或横向偏移。';
+      title.textContent = `${model.liftedCount} 个车轮卸载`;
+      detail.textContent = '等效悬挂力已截断为 0；请减小倾角、质心高度或横向偏移，或提高轮心率。';
+    } else if (sim && sim.boundary) {
+      warning.hidden = false;
+      title.textContent = '车辆到达试验台边界';
+      detail.textContent = '平面自由度已停在台面边界，按“重置姿态”回到中心。';
+    } else if (sim && sim.sliding) {
+      warning.hidden = false;
+      title.textContent = '切向摩擦不足，车辆滑移';
+      detail.textContent = `μ_req ${model.frictionDemand.toFixed(3)} > μ ${model.frictionCapacity.toFixed(2)}；阶段二使用库仑摩擦，按“重置姿态”可回到台面中心。`;
     } else {
       warning.hidden = true;
     }
   }
 
+  syncSimControls(model);
   refreshChecks(model);
   refreshLabelContent(model);
 }
@@ -788,6 +951,22 @@ function bindControls() {
   const btnInspect = document.getElementById('btnInspect');
   if (btnInspect) btnInspect.addEventListener('click', cycleInspectView);
 
+  const btnSimToggle = document.getElementById('btnSimToggle');
+  if (btnSimToggle) btnSimToggle.addEventListener('click', simulationToggle);
+  const btnSimReset = document.getElementById('btnSimReset');
+  if (btnSimReset) btnSimReset.addEventListener('click', () => simulationReset({ settle: 0 }));
+  const btnSimSettle = document.getElementById('btnSimSettle');
+  if (btnSimSettle) btnSimSettle.addEventListener('click', () => simulationReset({ settle: 2, toast: '已回到静力平衡姿态' }));
+  const impulseButtons = [
+    ['btnImpulseHeave', 'heave'],
+    ['btnImpulseRoll', 'roll'],
+    ['btnImpulsePitch', 'pitch']
+  ];
+  for (const [id, kind] of impulseButtons) {
+    const button = document.getElementById(id);
+    if (button) button.addEventListener('click', () => simulationImpulse(kind));
+  }
+
   const btnResetView = document.getElementById('btnResetView');
   if (btnResetView) btnResetView.addEventListener('click', () => {
     resetCamera();
@@ -854,7 +1033,13 @@ function bindKeyboard() {
     if (event.ctrlKey || event.metaKey || event.altKey) return;
 
     const key = event.key.toLowerCase();
-    if (key === 'r') {
+    if (event.code === 'Space') {
+      simulationToggle();
+      event.preventDefault();
+    } else if (key === 'i') {
+      simulationImpulse('heave');
+      event.preventDefault();
+    } else if (key === 'r') {
       resetCamera();
       resetInspectButton();
       showToast('视角已重置');
@@ -940,6 +1125,7 @@ function initUI() {
   bindControls();
   syncControlsFromState();
   refreshSelfTests();
+  syncSimControls();
   CAMERA.onChange = (reason) => {
     if (reason === 'preset') {
       syncCameraButtonActive(CAMERA.preset || '');
@@ -961,6 +1147,7 @@ UI.refreshSelfTests = refreshSelfTests;
 UI.openModelModal = openModelModal;
 UI.closeModelModal = closeModelModal;
 UI.syncControls = syncControlsFromState;
+UI.syncSimControls = syncSimControls;
 UI.applyStateChange = applyStateChange;
 UI.copyConfig = copyConfig;
 UI.resetAll = resetAll;

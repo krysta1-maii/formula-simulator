@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#070a0f">
-<meta name="fs-stage" content="1">
-<meta name="description" content="Formula Simulator FS-01：方程式赛车静态底盘与倾斜路面四角载荷演示。阶段一交付。">
-<title>FS-01 静态底盘台 · Formula Simulator</title>
+<meta name="fs-stage" content="2">
+<meta name="description" content="Formula Simulator FS-01：方程式赛车六自由度车身与动态悬架演示。阶段二交付。">
+<title>FS-01 动态底盘台 · Formula Simulator</title>
 <style>:root {
   --bg: #06090d;
   --bg-deep: #040609;
@@ -718,6 +718,42 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 6px 
 .total-strip span { color: var(--faint); font-size: 8px; white-space: nowrap; }
 .total-strip b { color: var(--text); font-family: var(--mono); font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .total-strip small { color: var(--faint); font-family: var(--mono); font-size: 7px; letter-spacing: 0.02em; }
+.sim-readout {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.022);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.02em;
+}
+.sim-readout b { color: var(--text-soft); font-weight: 500; }
+.sim-readout span:last-child { margin-left: auto; color: var(--faint); font-variant-numeric: tabular-nums; }
+.sim-readout .live-dot { align-self: center; }
+.sim-readout.is-paused b { color: var(--warn); }
+.sim-readout.is-sliding b { color: var(--accent-bright); }
+.sim-readout-telemetry { margin-top: 15px; margin-bottom: 12px; }
+.sim-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 10px; }
+.sim-grid .btn { height: 30px; padding: 0 6px; font-size: 9.5px; }
+.motion-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  margin: 4px 0 4px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.motion-strip > div { display: flex; flex-direction: column; gap: 1px; min-width: 0; padding: 0 8px; border-right: 1px solid var(--line); }
+.motion-strip > div:first-child { padding-left: 0; }
+.motion-strip > div:last-child { border-right: none; padding-right: 0; }
+.motion-strip span { color: var(--faint); font-size: 8px; white-space: nowrap; }
+.motion-strip b { color: var(--text); font-family: var(--mono); font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.motion-strip small { color: var(--faint); font-family: var(--mono); font-size: 7px; }
 .checks { margin-top: 12px; display: flex; flex-direction: column; gap: 2px; }
 .check-item {
   display: flex;
@@ -1036,6 +1072,9 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 6px 
   .total-strip { grid-template-columns: 1fr 1fr; row-gap: 10px; }
   .total-strip > div:nth-child(2) { border-right: none; }
   .total-strip > div:nth-child(3) { padding-left: 0; }
+  .motion-strip { grid-template-columns: 1fr 1fr; row-gap: 8px; }
+  .motion-strip > div:nth-child(2) { border-right: none; }
+  .motion-strip > div:nth-child(3) { padding-left: 0; }
 }
 @media (max-height: 700px) {
   .panel { top: 76px; bottom: 72px; }
@@ -1055,7 +1094,7 @@ button:focus-visible, summary:focus-visible, .chip:focus-visible, .tool-btn:focu
 </head>
 <body>
 <div id="app">
-  <main id="viewport" aria-label="三维静态底盘演示场景">
+  <main id="viewport" aria-label="三维动态底盘演示场景">
     <div class="scene-wash" aria-hidden="true"></div>
     <div id="labelLayer" class="label-layer" aria-hidden="true"></div>
     <div class="grain" aria-hidden="true"></div>
@@ -1073,15 +1112,15 @@ button:focus-visible, summary:focus-visible, .chip:focus-visible, .tool-btn:focu
         </svg>
       </div>
       <div class="brand-text">
-        <div class="brand-kicker">FORMULA SIMULATOR <span class="kicker-sep"></span> STATIC RIG 01</div>
-        <h1>FS-01 <span>静态底盘台</span></h1>
+        <div class="brand-kicker">FORMULA SIMULATOR <span class="kicker-sep"></span> DYNAMIC RIG 02</div>
+        <h1>FS-01 <span>动态底盘台</span></h1>
       </div>
     </div>
 
     <div class="topbar-center">
-      <span class="phase-pill"><span class="status-dot"></span>阶段一 · 外观与静态底盘</span>
+      <span class="phase-pill"><span class="status-dot"></span>阶段二 · 六自由度与动态悬架</span>
       <span class="topbar-stat">平面倾角 <b id="topBeta">0.0°</b></span>
-      <span class="topbar-stat">总法向 <b id="topNormal">—</b></span>
+      <span class="topbar-stat">动态总法向 <b id="topNormal">—</b></span>
       <span class="topbar-stat topbar-stat-hide">前轴 <b id="topFrontShare">—</b></span>
     </div>
 
@@ -1103,8 +1142,8 @@ button:focus-visible, summary:focus-visible, .chip:focus-visible, .tool-btn:focu
   <aside class="panel panel-left is-open" id="panelControls" aria-label="车辆与路面参数">
     <div class="panel-head">
       <div>
-        <div class="panel-kicker">SETUP / 01</div>
-        <h2>车辆与工况</h2>
+        <div class="panel-kicker">SETUP / 02</div>
+        <h2>车辆与动态工况</h2>
       </div>
       <button type="button" class="panel-close" data-close-panel="panelControls" aria-label="收起参数面板">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
@@ -1122,6 +1161,7 @@ button:focus-visible, summary:focus-visible, .chip:focus-visible, .tool-btn:focu
           <button type="button" class="chip" data-road-preset="slope">纵坡 8°</button>
           <button type="button" class="chip" data-road-preset="bank">横坡 7°</button>
           <button type="button" class="chip" data-road-preset="mixed">复合坡</button>
+          <button type="button" class="chip" data-road-preset="lowGrip">低附着滑移</button>
         </div>
 
         <div class="control">
@@ -1154,7 +1194,7 @@ button:focus-visible, summary:focus-visible, .chip:focus-visible, .tool-btn:focu
       <section class="panel-section">
         <div class="section-head">
           <h3>质量与质心</h3>
-          <span class="section-hint">INERTIA STATIC</span>
+          <span class="section-hint">6-DOF INERTIA</span>
         </div>
 
         <div class="control">
@@ -1258,11 +1298,11 @@ button:focus-visible, summary:focus-visible, .chip:focus-visible, .tool-btn:focu
         </div>
       </details>
 
-      <details class="panel-section details-section">
+      <details class="panel-section details-section" open>
         <summary>
           <div class="section-head">
             <h3>悬架与转向</h3>
-            <span class="section-hint">STATIC SUPPORT</span>
+            <span class="section-hint">DYNAMIC SUPPORT</span>
           </div>
           <span class="summary-chevron" aria-hidden="true"></span>
         </summary>
@@ -1279,6 +1319,26 @@ button:focus-visible, summary:focus-visible, .chip:focus-visible, .tool-btn:focu
           </div>
           <div class="control split-2">
             <div>
+              <div class="control-head"><label for="dampingF">前阻尼比</label><output id="dampingFOut" for="dampingF">0.35 ζ</output></div>
+              <input type="range" id="dampingF" data-param="dampingF" data-kind="decimal2" min="0.05" max="1.2" step="0.01" value="0.35">
+            </div>
+            <div>
+              <div class="control-head"><label for="dampingR">后阻尼比</label><output id="dampingROut" for="dampingR">0.38 ζ</output></div>
+              <input type="range" id="dampingR" data-param="dampingR" data-kind="decimal2" min="0.05" max="1.2" step="0.01" value="0.38">
+            </div>
+          </div>
+          <div class="control split-2">
+            <div>
+              <div class="control-head"><label for="motionRatioF">前运动比</label><output id="motionRatioFOut" for="motionRatioF">0.58</output></div>
+              <input type="range" id="motionRatioF" data-param="motionRatioF" data-kind="decimal2" min="0.3" max="0.9" step="0.01" value="0.58">
+            </div>
+            <div>
+              <div class="control-head"><label for="motionRatioR">后运动比</label><output id="motionRatioROut" for="motionRatioR">0.62</output></div>
+              <input type="range" id="motionRatioR" data-param="motionRatioR" data-kind="decimal2" min="0.3" max="0.9" step="0.01" value="0.62">
+            </div>
+          </div>
+          <div class="control split-2">
+            <div>
               <div class="control-head"><label for="arbFront">前防倾杆硬度</label><output id="arbFrontOut" for="arbFront">60%</output></div>
               <input type="range" id="arbFront" data-param="arbFront" data-kind="int" min="0" max="100" step="1" value="60">
             </div>
@@ -1289,7 +1349,7 @@ button:focus-visible, summary:focus-visible, .chip:focus-visible, .tool-btn:focu
           </div>
           <div class="inline-note">
             <span class="note-dot"></span>
-            横向扭杆 + 同向杠杆臂 + 连接杆。滑块改变叶片绕纵轴的转角：0% 叶片放平（最软），100% 叶片立起（最硬）；等效轮心刚度计入静力方程。
+            轮心率是轮心等效刚度；运动比 i 将其换算为弹簧刚度 k<sub>s</sub> = k<sub>w</sub>/i² 和阻尼器轴端阻尼。阻尼滑块给出轮心阻尼比 ζ，0.35 对应欠阻尼衰减。
           </div>
           <div class="control">
             <div class="control-head">
@@ -1300,10 +1360,34 @@ button:focus-visible, summary:focus-visible, .chip:focus-visible, .tool-btn:focu
           </div>
           <div class="inline-note">
             <span class="note-dot"></span>
-            阶段一仅计算静态支撑；转向只驱动前轮、转向横拉杆及轮胎姿态，不产生侧向力。
+            转向只驱动前轮、转向横拉杆及轮胎姿态，不产生侧向力。轮胎滑移、纵向驱动与空气动力分别在阶段三、四接入。
           </div>
         </div>
       </details>
+
+      <section class="panel-section">
+        <div class="section-head">
+          <h3>动态试验</h3>
+          <span class="section-hint">SIX-DOF</span>
+        </div>
+        <div class="sim-readout">
+          <span class="live-dot" id="simLiveDot"></span>
+          <b id="simStatus">运行</b>
+          <span id="simClock">0.00 s</span>
+        </div>
+        <div class="sim-grid">
+          <button type="button" class="btn btn-ghost" id="btnSimToggle">暂停</button>
+          <button type="button" class="btn btn-ghost" id="btnSimReset">重置姿态</button>
+          <button type="button" class="btn btn-ghost" id="btnImpulseHeave">垂向脉冲</button>
+          <button type="button" class="btn btn-ghost" id="btnImpulseRoll">侧倾脉冲</button>
+          <button type="button" class="btn btn-ghost" id="btnImpulsePitch">俯仰脉冲</button>
+          <button type="button" class="btn btn-ghost" id="btnSimSettle">回到平衡</button>
+        </div>
+        <div class="inline-note">
+          <span class="note-dot"></span>
+          物理步长固定为 2 ms，渲染帧率只决定每帧执行多少子步。脉冲在 0.12 s 内作用，用于观察弹簧—阻尼器与防倾杆的瞬态响应。
+        </div>
+      </section>
 
     </div>
 
@@ -1317,8 +1401,8 @@ button:focus-visible, summary:focus-visible, .chip:focus-visible, .tool-btn:focu
   <aside class="panel panel-right is-open" id="panelTelemetry" aria-label="静态载荷遥测">
     <div class="panel-head">
       <div>
-        <div class="panel-kicker">TELEMETRY / STATIC</div>
-        <h2>静态载荷</h2>
+        <div class="panel-kicker">TELEMETRY / DYNAMIC</div>
+        <h2>动态载荷</h2>
       </div>
       <div class="panel-head-right">
         <div class="unit-toggle" role="group" aria-label="载荷单位">
@@ -1333,11 +1417,25 @@ button:focus-visible, summary:focus-visible, .chip:focus-visible, .tool-btn:focu
 
     <div class="panel-scroll">
       <div class="solver-warning" id="solverWarning" hidden>
-        <b>线性静力模型超出范围</b>
+        <b>动态载荷超出范围</b>
         <span></span>
       </div>
 
-      <div class="corner-grid" aria-label="四角静态载荷">
+      <div class="sim-readout sim-readout-telemetry">
+        <span class="live-dot" id="telemetrySimDot"></span>
+        <b id="telemetrySimState">运行</b>
+        <span id="telemetrySimTime">0.00 s</span>
+        <span id="telemetrySimSteps">—</span>
+      </div>
+
+      <div class="motion-strip" aria-label="车身六自由度姿态">
+        <div><span>升沉 h</span><b id="dynHeave">—</b><small>mm</small></div>
+        <div><span>俯仰 θ</span><b id="dynPitch">—</b><small>°</small></div>
+        <div><span>侧倾 φ</span><b id="dynRoll">—</b><small>°</small></div>
+        <div><span>横摆 ψ</span><b id="dynYaw">—</b><small>°</small></div>
+      </div>
+
+      <div class="corner-grid" aria-label="四角动态载荷">
         <article class="corner-card" id="cornerFL">
           <div class="corner-head"><span class="corner-code"><i></i>FL</span><span class="corner-name">左前</span></div>
           <div class="corner-value"><b id="loadFL">—</b><span data-unit-label>N</span></div>
@@ -1372,7 +1470,7 @@ button:focus-visible, summary:focus-visible, .chip:focus-visible, .tool-btn:focu
       </div>
 
       <div class="total-strip">
-        <div><span>总法向力</span><b id="totalNormal">—</b><small>mg cosβ</small></div>
+        <div><span>动态总法向</span><b id="totalNormal">—</b><small>ΣN</small></div>
         <div><span>整车重量</span><b id="totalWeight">—</b><small>mg</small></div>
         <div><span>坡面附着需求</span><b id="frictionDemand">—</b><small>tanβ</small></div>
       </div>
@@ -1385,9 +1483,14 @@ button:focus-visible, summary:focus-visible, .chip:focus-visible, .tool-btn:focu
           <div><dt>平面法向倾角 β</dt><dd id="planeTilt">—</dd></div>
           <div><dt>质心纵向 x<sub>CG</sub></dt><dd id="cgLong">—</dd></div>
           <div><dt>质心竖直投影偏移</dt><dd id="cgProjection">—</dd></div>
-          <div><dt>车体升沉 h</dt><dd id="bodyHeave">—</dd></div>
-          <div><dt>车体俯仰 / 侧倾</dt><dd id="bodyAttitude">—</dd></div>
-          <div><dt>四角行程 FL / FR / RL / RR</dt><dd class="mono" id="cornerTravel">—</dd></div>
+          <div><dt>仿真状态</dt><dd id="simDetail">—</dd></div>
+          <div><dt>车身位置 x / y / z</dt><dd class="mono" id="bodyPosition">—</dd></div>
+          <div><dt>车体升沉 h / 俯仰 / 侧倾</dt><dd id="bodyAttitude">—</dd></div>
+          <div><dt>车体角速度</dt><dd class="mono" id="bodyRates">—</dd></div>
+          <div><dt>四角行程 / 弹簧压缩</dt><dd class="mono" id="cornerTravel">—</dd></div>
+          <div><dt>弹簧 / 阻尼 / 防倾杆</dt><dd class="mono" id="cornerForces">—</dd></div>
+          <div><dt>固有频率 h / θ / φ</dt><dd id="dynFreq">—</dd></div>
+          <div><dt>惯量 I<sub>xx</sub> / I<sub>yy</sub> / I<sub>zz</sub></dt><dd id="dynInertia">—</dd></div>
           <div><dt>悬架杆件端点</dt><dd id="linkStatus">—</dd></div>
           <div><dt>转向齿条 / 横拉杆</dt><dd id="steerStatus">—</dd></div>
           <div><dt>防倾杆 F / R</dt><dd id="arbStatus">—</dd></div>
@@ -1405,7 +1508,7 @@ button:focus-visible, summary:focus-visible, .chip:focus-visible, .tool-btn:focu
     </div>
 
     <div class="panel-foot panel-foot-telemetry">
-      <span class="live-dot"></span><span>实时求解</span><span class="foot-sep"></span><span>阶段一 / 静力</span>
+      <span class="live-dot"></span><span>固定步长 500 Hz</span><span class="foot-sep"></span><span>阶段二 / 动力学</span>
     </div>
   </aside>
 
@@ -1432,7 +1535,7 @@ button:focus-visible, summary:focus-visible, .chip:focus-visible, .tool-btn:focu
   </div>
 
   <div class="viewport-hint">
-    <span>拖动旋转</span><span>滚轮缩放至光标</span><span>右键平移</span><span>双击重置 · O 正交 · H 水平</span>
+    <span>拖动旋转</span><span>滚轮缩放至光标</span><span>右键平移</span><span>双击重置 · O 正交 · H 水平 · 空格 暂停</span>
   </div>
 
   <div class="loading" id="loading" aria-live="polite">
@@ -1444,8 +1547,8 @@ button:focus-visible, summary:focus-visible, .chip:focus-visible, .tool-btn:focu
           <path d="M25.5 32h11.8l2.7-4H28.2z" fill="var(--accent)"/>
         </svg>
       </div>
-      <div class="loading-title">FS-01 <span>静态底盘台</span></div>
-      <div class="loading-sub">正在构建几何与静力模型</div>
+      <div class="loading-title">FS-01 <span>动态底盘台</span></div>
+      <div class="loading-sub">正在构建几何与动力学模型</div>
       <div class="loading-bar"><i></i></div>
     </div>
   </div>
@@ -1466,8 +1569,8 @@ button:focus-visible, summary:focus-visible, .chip:focus-visible, .tool-btn:focu
     <div class="modal-card">
       <div class="modal-head">
         <div>
-          <div class="modal-kicker">MODEL NOTES / STAGE 01</div>
-          <h2 id="modalTitle">阶段一：外观与静态底盘</h2>
+          <div class="modal-kicker">MODEL NOTES / STAGE 02</div>
+          <h2 id="modalTitle">阶段二：六自由度与动态悬架</h2>
         </div>
         <button type="button" class="icon-btn" data-close-modal aria-label="关闭">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
@@ -1477,37 +1580,37 @@ button:focus-visible, summary:focus-visible, .chip:focus-visible, .tool-btn:focu
         <div class="modal-cols">
           <section>
             <h3><span>01</span>本期范围</h3>
-            <p>本页面是 <b>DESIGN.md</b> 阶段一的交互演示：建立可辨认的现代开轮方程式赛车外观与主要尺寸，建立可整体倾斜的路面、质心与四轮静态位置，并计算水平及倾斜路面上的四角静态法向载荷。</p>
+            <p>本页面是 <b>DESIGN.md</b> 阶段二的交互演示：在阶段一的外观、倾斜路面和静态四角载荷之上，加入车体六自由度、四角弹簧—阻尼器、等效运动比和前后防倾杆动态。车体不再直接贴合路面，而是在悬挂力、重力和接触摩擦作用下积分升沉、俯仰、侧倾、纵移、横移与横摆。</p>
             <ul class="check-list-static">
-              <li>程序化车体、前后翼、Halo、侧箱、底板与扩散器</li>
-              <li>前后双横臂、推杆/拉杆、摇臂、弹簧—阻尼器、转向机与扭杆式防倾杆</li>
-              <li>前轴转向柱与左右横拉杆、后轴差速器与左右半轴、四个独立车轮</li>
-              <li>双轴倾斜路面，重力方向保持世界竖直</li>
-              <li>四角轮载、轴荷分配、附着需求与模型自检实时显示</li>
+              <li>六自由度刚体：三轴平动、三轴转动，四元数姿态，固定步长 2 ms 半隐式积分</li>
+              <li>四角等效轮心弹簧与阻尼器，运动比换算弹簧刚度与阻尼器轴端阻尼</li>
+              <li>前后横向扭杆式防倾杆按左右行程差产生等大反向作用力</li>
+              <li>四轮接地点保持在倾斜平面内，切向库仑摩擦承担坡面驻车与滑移</li>
+              <li>车身、车轮、摇臂、推杆、弹簧—阻尼器与载荷箭头共享同一动态姿态</li>
             </ul>
-            <p class="muted-note">阶段二至四（六自由度动态、轮胎滑移与驱动、空气动力学调参）尚未接入。当前横臂仍为端点绑定的视觉运动学；前轮绕主销转动，齿条随转向平移，推杆—摇臂按定长闭合，等转角约束下横拉杆残差约 3.7 mm；阶段二将由共享几何模块替换。</p>
+            <p class="muted-note">阶段三、四（轮胎侧偏/纵滑、后轴驱动、空气动力学）尚未接入。当前悬架仍为等效轮心力学加端点绑定的视觉运动学；横臂不参与载荷计算，轮胎切向力只用于驻车/滑移，不产生侧偏力。转向只驱动前轮和拉杆，不产生侧向力。</p>
           </section>
 
           <section>
-            <h3><span>02</span>静力求解</h3>
-            <p>路面局部坐标取 x 向前、y 沿法向、z 向右。设平面法向与竖直方向夹角为 β，车重 mg 在路面法向的分量为 N<sub>tot</sub> = mg cosβ。重力线在路面上的投影点为 P：</p>
-            <div class="eq">P = CG + t·g<sub>road</sub>，t = −h<sub>CG</sub> / g<sub>road,y</sub></div>
-            <p>四角支反力满足力与力矩平衡：</p>
-            <div class="eq">ΣN<sub>i</sub> = N<sub>tot</sub><br>Σx<sub>i</sub>N<sub>i</sub> = N<sub>tot</sub>P<sub>x</sub><br>Σz<sub>i</sub>N<sub>i</sub> = N<sub>tot</sub>P<sub>z</sub></div>
-            <p>每个角由等效轮心弹簧支撑，弹簧力 N<sub>i</sub> = N<sub>i0</sub> − k<sub>i</sub>(h + x<sub>i</sub>p − z<sub>i</sub>r) + F<sub>arb,i</sub>，其中 h、p、r 为车体相对路面的升沉、俯仰和侧倾。防倾杆在左右轮心产生等大反向的附加力，只进入侧倾方程，其等效侧倾刚度为 K<sub>arb</sub> = k<sub>aF</sub>t<sub>F</sub><sup>2</sup> + k<sub>aR</sub>t<sub>R</sub><sup>2</sup>。将弹簧力代入平衡式，得到关于姿态的三元一次方程组；四角载荷由此唯一确定。水平路面上解为设计姿态，轮载等于由质心位置分配得到的静态角重量。</p>
-            <p>防倾杆不是连接左右车轮的刚性横梁：它是一根横置扭杆，两端杠杆臂朝同一侧伸出，经连接杆接到摇臂吊耳。左右同向运动时扭杆自由转动，单轮跳动或侧倾时才受扭。可调式的一根杠杆臂为扁平弹簧钢叶片，绕自身纵轴旋转改变弯曲刚度；页面以 0–100% 硬度表示这一调节，叶片转角按 θ = arccos√p 计算。</p>
-            <p>切向重力分量 mg sinβ 由轮胎静摩擦承担。页面按各轮法向载荷比例分配切向力，并给出均匀附着需求 μ<sub>req</sub> = tanβ；该简化不校核坡面偏航和四轮独立附着。</p>
+            <h3><span>02</span>动力学求解</h3>
+            <p>路面局部坐标取 x 向前、y 沿法向、z 向右。车体状态为参考点位置 <b>r</b> = (x, y, z)、速度 <b>v</b>、姿态四元数 q 和车体角速度 <b>ω</b>。四元数按 q̇ = ½ q ⊗ (0, <b>ω</b>) 推进，欧拉角按 R = R<sub>y</sub>(ψ)R<sub>z</sub>(θ)R<sub>x</sub>(φ) 提取；正俯仰抬车头，正侧倾压低右侧，正横摆向左转。</p>
+            <div class="eq">m dv/dt = m g + ΣN<sub>i</sub> e<sub>y</sub> + Σf<sub>i</sub> + F<sub>impulse</sub><br>I<sub>CG</sub> dω/dt + ω × (I<sub>CG</sub>ω) = Σ(r<sub>i</sub> − r<sub>CG</sub>) × F<sub>i</sub></div>
+            <p>每个角的弹簧力为 N<sub>i</sub> = N<sub>i0</sub> − k<sub>w,i</sub>δ<sub>i</sub> − c<sub>w,i</sub>δ̇<sub>i</sub> + F<sub>arb,i</sub>，其中 δ<sub>i</sub> 是车体在轮心处的法向位移，负值表示弹簧压缩；N<sub>i0</sub> 是设计姿态角重量，k<sub>w</sub> 是轮心等效刚度，c<sub>w</sub> = 2ζ√(k<sub>w</sub>m<sub>i</sub>) 由阻尼比 ζ 换算。防倾杆取左右行程差 Δ = δ<sub>L</sub> − δ<sub>R</sub>：</p>
+            <div class="eq">F<sub>arb,L</sub> = −k<sub>a</sub>Δ，F<sub>arb,R</sub> = +k<sub>a</sub>Δ</div>
+            <p>运动比 i 把轮心量换算到弹簧和阻尼器轴端：k<sub>s</sub> = k<sub>w</sub>/i<sup>2</sup>，c<sub>s</sub> = c<sub>w</sub>/i<sup>2</sup>，弹簧压缩量 s = i·δ。页面中的运动比同时也是遥测换算值；可见杆件仍由端点绑定和定长闭合驱动。</p>
+            <p>车轮中心保持在路面上方一个轮胎半径处，车身相对路面的姿态产生四角行程。积分采用半隐式欧拉，步长固定为 1/500 s；渲染帧只累积并执行整数个子步，因此改变刷新率不会改变物理结果。脉冲试验在 0.12 s 内施加垂向力，用来观察弹簧—阻尼器和防倾杆的瞬态。</p>
+            <p>切向接触使用简化的库仑摩擦：静止且所需切向力不超过 μΣN<sub>i</sub> 时按法向载荷比例分配静摩擦并保持平面速度为零；超过容量或已经滑移时按 μN<sub>i</sub> 施加动摩擦。该模型只承担坡面驻车与滑移，不产生轮胎侧偏力，阶段三将替换为完整的轮胎滑移模型。</p>
           </section>
         </div>
 
         <section class="modal-wide">
-          <h3><span>03</span>阶段一验收映射</h3>
+          <h3><span>03</span>阶段二验收映射</h3>
           <div class="acceptance-grid">
-            <div class="acceptance-item"><span class="acc-num">A</span><div><b>外观与主要尺寸</b><p>可辨识的开轮单座方程式赛车；轴距、前后轮距、轮胎半径可调。</p></div></div>
-            <div class="acceptance-item"><span class="acc-num">B</span><div><b>倾斜路面与静态位置</b><p>纵坡/横坡独立调整；四轮接触点位于路面，重力保持世界竖直。</p></div></div>
-            <div class="acceptance-item"><span class="acc-num">C</span><div><b>水平与倾斜静态轮载</b><p>水平状态按质心分配；倾斜后轮载满足法向力与力矩平衡，并显示对水平基准的变化。</p></div></div>
-            <div class="acceptance-item"><span class="acc-num">D</span><div><b>悬架与车轮连接</b><p>杆件端点实时绑定车体与立柱；四轮接地；剖视可检查内部摇臂、弹簧、转向机、半轴与防倾杆。</p></div></div>
-            <div class="acceptance-item"><span class="acc-num">E</span><div><b>转向、传动与防倾杆</b><p>前轴齿轮齿条、转向柱和横拉杆；后轴差速器与半轴；横向扭杆、同向杠杆臂、连接杆和叶片式硬度调节。</p></div></div>
+            <div class="acceptance-item"><span class="acc-num">A</span><div><b>六自由度车体</b><p>位置、速度、四元数姿态与角速度完整积分；水平路面收敛到设计姿态，倾斜路面收敛到与静力解一致的载荷。</p></div></div>
+            <div class="acceptance-item"><span class="acc-num">B</span><div><b>四角弹簧—阻尼器</b><p>轮心等效刚度、运动比和阻尼比可调；脉冲后按阻尼比衰减，不出现非预期持续振荡或发散。</p></div></div>
+            <div class="acceptance-item"><span class="acc-num">C</span><div><b>防倾杆动态</b><p>左右同向行程不产生扭转；反向行程产生等大反向力；提高硬度抑制侧倾，并改变前后轴侧倾载荷转移。</p></div></div>
+            <div class="acceptance-item"><span class="acc-num">D</span><div><b>机构与视觉同步</b><p>车身六自由度带动车轮平面位置与横摆；杆件端点跟随车体与立柱；弹簧、摇臂、推杆与载荷箭头使用同一次求解结果。</p></div></div>
+            <div class="acceptance-item"><span class="acc-num">E</span><div><b>数值与交互</b><p>固定步长 500 Hz，渲染帧率不改变结果；暂停、重置、三种脉冲可复现；低附着时六自由度滑移并给出警告。</p></div></div>
           </div>
         </section>
 
@@ -1524,7 +1627,8 @@ button:focus-visible, summary:focus-visible, .chip:focus-visible, .tool-btn:focu
               <li><span>1 – 5</span> 切换三分之四、侧视、前视、后视、顶视；三视使用水平正交投影，顶视为正交俯视，<span>O</span> 切换投影，<span>R</span> 重置视角</li>
               <li><span>取景</span> 视线不滚转，相机不低于台面水平面；手动缩放范围 0.9 – 14 m 可视高度，窄屏按车宽自动退距</li>
               <li><span>X</span> 切换车身剖视，<span>M</span> 机构剖视（转向 → 传动 → 前/后防倾杆），<span>R</span> 返回总览</li>
-              <li><span>F</span> 轮载矢量，<span>G</span> 质心，<span>H</span> 水平路面</li>
+              <li><span>F</span> 轮载矢量，<span>G</span> 质心，<span>H</span> 水平路面，<span>空格</span> 暂停/继续仿真</li>
+              <li><span>动态</span> 参数面板底部可暂停、重置姿态，或施加垂向、侧倾、俯仰脉冲</li>
               <li><span>单位</span> 遥测面板可在 N 与 kg 等效之间切换；kg 值按 g = 9.80665 m/s² 换算</li>
               <li><span>保存</span> 参数会写入浏览器本地存储；“复制参数”输出当前状态的 JSON</li>
             </ul>
@@ -1532,8 +1636,8 @@ button:focus-visible, summary:focus-visible, .chip:focus-visible, .tool-btn:focu
           </section>
         </div>
         <div class="modal-foot">
-          <span>Formula Simulator · 阶段一演示 v0.1.0 · <a href="DESIGN.md" target="_blank" rel="noopener">DESIGN.md</a></span>
-          <span>静态底盘 / 双横臂 / 前推杆后拉杆 / 扭杆防倾杆</span>
+          <span>Formula Simulator · 阶段二演示 v0.2.0 · <a href="DESIGN.md" target="_blank" rel="noopener">DESIGN.md</a></span>
+          <span>六自由度 / 弹簧阻尼器 / 扭杆防倾杆 / 固定步长</span>
         </div>
       </div>
     </div>
@@ -1552,15 +1656,15 @@ button:focus-visible, summary:focus-visible, .chip:focus-visible, .tool-btn:focu
 (function () {
 'use strict';
 /* =========================================================================
-   FS-01 · Stage 01 static rig
+   FS-01 · Stage 02 dynamic chassis
    00-core.js — constants, state schema, road frame and static load solver
    ========================================================================= */
 
 const GRAVITY = 9.80665;
 const DEG = Math.PI / 180;
 const RAD = 180 / Math.PI;
-const STORAGE_KEY = 'fs01.static.setup.v1';
-const APP_VERSION = '0.1.0';
+const STORAGE_KEY = 'fs01.dynamic.setup.v1';
+const APP_VERSION = '0.2.0';
 
 const CORNERS = [
   { key: 'FL', zh: '左前', axle: 'front', side: 'left', zSign: -1 },
@@ -1583,6 +1687,10 @@ const NUM_LIMITS = {
   wheelRadius: [0.31, 0.39],
   wheelRateF: [50, 320],
   wheelRateR: [50, 320],
+  dampingF: [0.05, 1.2],
+  dampingR: [0.05, 1.2],
+  motionRatioF: [0.3, 0.9],
+  motionRatioR: [0.3, 0.9],
   arbFront: [0, 100],
   arbRear: [0, 100],
   steer: [-18, 18]
@@ -1607,6 +1715,10 @@ const DEFAULTS = Object.freeze({
   tireWidthR: 0.405,
   wheelRateF: 140,
   wheelRateR: 160,
+  dampingF: 0.35,
+  dampingR: 0.38,
+  motionRatioF: 0.58,
+  motionRatioR: 0.62,
   arbFront: 60,
   arbRear: 60,
   slope: 0,
@@ -1688,6 +1800,24 @@ function computeDims(source = state) {
     zF: tf / 2,
     zR: tr / 2,
     xCG: (source.frontWeightPct / 100 - 0.5) * L
+  };
+}
+
+/**
+ * Equivalent body inertia about the centre of mass. The car is treated as a
+ * filled box whose length, width and height follow the current dimensions. The
+ * values are deliberately modest but physically sized: the roll inertia is
+ * dominated by the track, the pitch and yaw inertias by the wheelbase.
+ */
+function computeBodyInertia(source, dims) {
+  const mass = source.mass;
+  const length = dims.L + 0.7;
+  const width = Math.max(dims.tf, dims.tr) + 0.18;
+  const height = 0.86;
+  return {
+    Ixx: (mass / 12) * (height * height + width * width),
+    Iyy: (mass / 12) * (length * length + width * width),
+    Izz: (mass / 12) * (length * length + height * height)
   };
 }
 
@@ -1890,6 +2020,38 @@ function computeStatic(source = state) {
   const levelLeft = levelLoads[0] + levelLoads[2];
   const levelRight = levelLoads[1] + levelLoads[3];
 
+  // Stage-02 dynamic reference. The wheel rate remains the primary spring
+  // parameter; the motion ratio maps it to the coil spring and to the damper
+  // shaft. Damping is specified as a fraction of critical damping at the wheel,
+  // which keeps the transient response readable when mass or wheel rate moves.
+  const motionRatio = {
+    front: clamp(Number.isFinite(source.motionRatioF) ? source.motionRatioF : DEFAULTS.motionRatioF, 0.3, 0.9),
+    rear: clamp(Number.isFinite(source.motionRatioR) ? source.motionRatioR : DEFAULTS.motionRatioR, 0.3, 0.9)
+  };
+  const dampingRatio = {
+    front: clamp(Number.isFinite(source.dampingF) ? source.dampingF : DEFAULTS.dampingF, 0.02, 1.5),
+    rear: clamp(Number.isFinite(source.dampingR) ? source.dampingR : DEFAULTS.dampingR, 0.02, 1.5)
+  };
+  const cornerMass = baseLoads.map((value) => value / GRAVITY);
+  const criticalDamping = k.map((ki, i) => 2 * Math.sqrt(ki * Math.max(cornerMass[i], 1e-6)));
+  const damperRateWheel = k.map((ki, i) => {
+    const ratio = wheels[i].axle === 'front' ? dampingRatio.front : dampingRatio.rear;
+    return ratio * criticalDamping[i];
+  });
+  const springRateCoil = k.map((ki, i) => ki / Math.pow(wheels[i].axle === 'front' ? motionRatio.front : motionRatio.rear, 2));
+  const damperRateShaft = damperRateWheel.map((ci, i) => ci / Math.pow(wheels[i].axle === 'front' ? motionRatio.front : motionRatio.rear, 2));
+  const inertia = computeBodyInertia(source, dims);
+  const heaveStiffness = sumK;
+  const rollStiffnessSpring = wheels.reduce((acc, wheel, i) => acc + k[i] * Math.pow(wheel.z - zCG, 2), 0);
+  const rollStiffness = rollStiffnessSpring + arbRollStiffness;
+  const pitchStiffness = wheels.reduce((acc, wheel, i) => acc + k[i] * Math.pow(wheel.x - xCG, 2), 0);
+  const criticalHeave = 2 * Math.sqrt(Math.max(heaveStiffness * mass, 1e-9));
+  const frequencies = {
+    heave: Math.sqrt(Math.max(heaveStiffness / mass, 0)) / (2 * Math.PI),
+    roll: Math.sqrt(Math.max(rollStiffness / inertia.Ixx, 0)) / (2 * Math.PI),
+    pitch: Math.sqrt(Math.max(pitchStiffness / inertia.Izz, 0)) / (2 * Math.PI)
+  };
+
   const denom = sumLoads > 1e-9 ? sumLoads : 1;
   const frontShare = frontLoad / denom;
   const leftShare = leftLoad / denom;
@@ -1918,6 +2080,22 @@ function computeStatic(source = state) {
       right: levelRight
     },
     springRates: k,
+    cornerMass,
+    dampingRatio,
+    criticalDamping,
+    damperRateWheel,
+    damperRateShaft,
+    springRateCoil,
+    motionRatio,
+    inertia,
+    stiffness: {
+      heave: heaveStiffness,
+      rollSpring: rollStiffnessSpring,
+      roll: rollStiffness,
+      pitch: pitchStiffness
+    },
+    frequencies,
+    heaveDampingRatio: damperRateWheel.reduce((acc, value) => acc + value, 0) / criticalHeave,
     arbRate,
     arbMaxRate: ARB_MAX_RATE,
     arbRollStiffness,
@@ -2108,6 +2286,754 @@ function runSelfTests(source = state) {
 
   const contact = level.contactOk && slope.contactOk && bank.contactOk;
   record('常规工况四轮保持接地', contact, contact ? '4 / 4' : '出现离地');
+
+  return tests;
+}
+
+
+/* =========================================================================
+   05-body-dynamics.js — six-degree-of-freedom body, spring-damper corners,
+   anti-roll bar dynamics and fixed-step integration
+   ========================================================================= */
+
+/**
+ * Stage-02 rigid-body model.
+ *
+ * The body has three translations (x forward, y normal, z right in the road
+ * frame) and three rotations. The wheel centres stay on the road plane; the
+ * four corner springs, dampers and anti-roll bars therefore see the body pose
+ * relative to the plane. This is the "equivalent wheel-centre" model described
+ * in DESIGN.md: the unsprung masses and the individual linkage constraints are
+ * not integrated, but every force the suspension applies to the body is
+ * reacted at the contact patch, so heave, pitch and roll are coupled correctly.
+ *
+ * Orientation is stored as a quaternion mapping body axes to road axes. The
+ * Euler sequence used for display is R = Ry(yaw) * Rz(pitch) * Rx(roll), which
+ * matches the stage-01 sign convention: positive pitch lifts the nose, positive
+ * roll lowers the right side, positive yaw turns the nose to the left.
+ */
+
+const SIM_DT = 1 / 500;
+const SIM_MAX_SUBSTEPS = 40;
+const SIM_MAX_FRAME_DT = 0.1;
+const SIM_REST_SPEED = 1e-4;
+const SIM_ANGULAR_LIMIT = 40;
+const SIM_LINEAR_LIMIT = 80;
+const SIM_BOUND_X = 4.2;
+const SIM_BOUND_Z = 2.6;
+const SIM_IMPULSE_SECONDS = 0.12;
+
+let SIM = null;
+
+/* ------------------------------ quaternion helpers ------------------------------ */
+
+function simQuatMul(a, b) {
+  const aw = a[0], ax = a[1], ay = a[2], az = a[3];
+  const bw = b[0], bx = b[1], by = b[2], bz = b[3];
+  return [
+    aw * bw - ax * bx - ay * by - az * bz,
+    aw * bx + ax * bw + ay * bz - az * by,
+    aw * by - ax * bz + ay * bw + az * bx,
+    aw * bz + ax * by - ay * bx + az * bw
+  ];
+}
+
+function simQuatNormalize(q) {
+  const length = Math.hypot(q[0], q[1], q[2], q[3]);
+  if (length < 1e-12) return [1, 0, 0, 0];
+  return [q[0] / length, q[1] / length, q[2] / length, q[3] / length];
+}
+
+function simQuatRotate(q, v) {
+  const w = q[0], x = q[1], y = q[2], z = q[3];
+  const tx = 2 * (y * v[2] - z * v[1]);
+  const ty = 2 * (z * v[0] - x * v[2]);
+  const tz = 2 * (x * v[1] - y * v[0]);
+  return [
+    v[0] + w * tx + (y * tz - z * ty),
+    v[1] + w * ty + (z * tx - x * tz),
+    v[2] + w * tz + (x * ty - y * tx)
+  ];
+}
+
+function simQuatRotateInverse(q, v) {
+  return simQuatRotate([q[0], -q[1], -q[2], -q[3]], v);
+}
+
+function simQuatFromEuler(yaw, pitch, roll) {
+  const cy = Math.cos(yaw * 0.5), sy = Math.sin(yaw * 0.5);
+  const cp = Math.cos(pitch * 0.5), sp = Math.sin(pitch * 0.5);
+  const cr = Math.cos(roll * 0.5), sr = Math.sin(roll * 0.5);
+  const qy = [cy, 0, sy, 0];
+  const qp = [cp, 0, 0, sp];
+  const qr = [cr, sr, 0, 0];
+  return simQuatNormalize(simQuatMul(simQuatMul(qy, qp), qr));
+}
+
+function simEulerFromQuat(q) {
+  const w = q[0], x = q[1], y = q[2], z = q[3];
+  const r00 = 1 - 2 * (y * y + z * z);
+  const r10 = 2 * (x * y + w * z);
+  const r11 = 1 - 2 * (x * x + z * z);
+  const r12 = 2 * (y * z - w * x);
+  const r20 = 2 * (x * z - w * y);
+  const pitch = Math.asin(clamp(r10, -1, 1));
+  const yaw = Math.atan2(-r20, r00);
+  const roll = Math.atan2(-r12, r11);
+  return { yaw, pitch, roll };
+}
+
+function simQuatDerivative(q, omegaBody) {
+  const dq = simQuatMul(q, [0, omegaBody[0], omegaBody[1], omegaBody[2]]);
+  return [0.5 * dq[0], 0.5 * dq[1], 0.5 * dq[2], 0.5 * dq[3]];
+}
+
+function simCross(a, b) {
+  return [
+    a[1] * b[2] - a[2] * b[1],
+    a[2] * b[0] - a[0] * b[2],
+    a[0] * b[1] - a[1] * b[0]
+  ];
+}
+
+/* ------------------------------ simulation state ------------------------------ */
+
+function simEquilibriumState(reference) {
+  const q = simQuatFromEuler(0, reference.pitch, reference.roll);
+  return {
+    x: 0,
+    y: reference.heave,
+    z: 0,
+    vx: 0,
+    vy: 0,
+    vz: 0,
+    qw: q[0],
+    qx: q[1],
+    qy: q[2],
+    qz: q[3],
+    wx: 0,
+    wy: 0,
+    wz: 0
+  };
+}
+
+function simCreate(source = state, options = {}) {
+  const settle = options.settle || 0;
+  const sim = {
+    reference: computeStatic(source),
+    state: null,
+    time: 0,
+    impulse: null,
+    running: true,
+    accumulator: 0,
+    lastSubsteps: 0,
+    flags: {
+      holding: true,
+      sliding: false,
+      finite: true,
+      boundary: false,
+      recovered: false
+    },
+    resetCount: 0
+  };
+  sim.state = simEquilibriumState(sim.reference);
+  if (settle > 0) simRunFor(sim, settle);
+  return sim;
+}
+
+function simReset(sim, source = state, options = {}) {
+  const settle = options.settle || 0;
+  sim.reference = computeStatic(source);
+  sim.state = simEquilibriumState(sim.reference);
+  sim.time = 0;
+  sim.impulse = null;
+  sim.accumulator = 0;
+  sim.lastSubsteps = 0;
+  sim.flags = {
+    holding: true,
+    sliding: false,
+    finite: true,
+    boundary: false,
+    recovered: false
+  };
+  sim.resetCount += 1;
+  if (settle > 0) simRunFor(sim, settle);
+  return sim;
+}
+
+function simActiveImpulse(sim) {
+  return sim.impulse && sim.time < sim.impulse.until ? sim.impulse : null;
+}
+
+function simApplyImpulse(sim, kind = 'heave') {
+  const specs = {
+    heave: { label: '垂向脉冲', force: [0, -6800, 0], offset: [0, 0, 0] },
+    roll: { label: '侧倾脉冲', force: [0, -4200, 0], offset: [0, 0, 0.90] },
+    pitch: { label: '俯仰脉冲', force: [0, -6200, 0], offset: [0.95, 0, 0] }
+  };
+  const spec = specs[kind];
+  if (!spec) return false;
+  sim.impulse = {
+    kind,
+    label: spec.label,
+    force: spec.force.slice(),
+    offset: spec.offset.slice(),
+    until: sim.time + SIM_IMPULSE_SECONDS
+  };
+  sim.running = true;
+  return true;
+}
+
+/* ------------------------------ force evaluation ------------------------------ */
+
+function simEvaluate(sim) {
+  const state = sim.state;
+  const reference = sim.reference;
+  const source = reference.source || state;
+  const mass = reference.mass;
+  const q = [state.qw, state.qx, state.qy, state.qz];
+  const euler = simEulerFromQuat(q);
+  const cgBody = [reference.cgBody.x, reference.cgBody.y, reference.cgBody.z];
+  const cgArm = simQuatRotate(q, cgBody);
+  const cg = [state.x + cgArm[0], state.y + cgArm[1], state.z + cgArm[2]];
+  const omegaBody = [state.wx, state.wy, state.wz];
+  const omegaRoad = simQuatRotate(q, omegaBody);
+  const velocity = [state.vx, state.vy, state.vz];
+  const gravity = [
+    reference.frame.gravityLocal.x,
+    reference.frame.gravityLocal.y,
+    reference.frame.gravityLocal.z
+  ];
+  const force = [mass * gravity[0], mass * gravity[1], mass * gravity[2]];
+  const moment = [0, 0, 0];
+  const cy = Math.cos(euler.yaw);
+  const sy = Math.sin(euler.yaw);
+  const corners = [];
+
+  for (let i = 0; i < reference.wheels.length; i += 1) {
+    const wheel = reference.wheels[i];
+    const arm = [wheel.x, 0, wheel.z];
+    const armRoad = simQuatRotate(q, arm);
+    const cornerY = state.y + armRoad[1];
+    const cornerVelocityY = velocity[1] + (omegaRoad[2] * armRoad[0] - omegaRoad[0] * armRoad[2]);
+    const springForce = reference.baseLoads[i] - reference.springRates[i] * cornerY;
+    const dampingForce = -reference.damperRateWheel[i] * cornerVelocityY;
+    const contactX = state.x + cy * wheel.x + sy * wheel.z;
+    const contactZ = state.z - sy * wheel.x + cy * wheel.z;
+    corners.push({
+      key: wheel.key,
+      index: i,
+      wheel,
+      cornerY,
+      cornerVelocityY,
+      springForce,
+      dampingForce,
+      arbForce: 0,
+      rawForce: springForce + dampingForce,
+      force: 0,
+      contact: [contactX, 0, contactZ]
+    });
+  }
+
+  // Anti-roll bars act on the travel difference across each axle. The force is
+  // equal and opposite and produces no net heave force.
+  for (const pair of [[0, 1], [2, 3]]) {
+    const left = corners[pair[0]];
+    const right = corners[pair[1]];
+    const axle = left.wheel.axle;
+    const rate = reference.arbRate[axle] || 0;
+    const travelDelta = left.cornerY - right.cornerY;
+    left.arbForce = -rate * travelDelta;
+    right.arbForce = rate * travelDelta;
+    left.rawForce += left.arbForce;
+    right.rawForce += right.arbForce;
+  }
+
+  let sumNormal = 0;
+  for (const corner of corners) {
+    corner.force = Math.max(0, corner.rawForce);
+    sumNormal += corner.force;
+    const arm = [corner.contact[0] - cg[0], -cg[1], corner.contact[2] - cg[2]];
+    const vertical = [0, corner.force, 0];
+    const localMoment = simCross(arm, vertical);
+    moment[0] += localMoment[0];
+    moment[1] += localMoment[1];
+    moment[2] += localMoment[2];
+    force[1] += corner.force;
+  }
+
+  const impulse = simActiveImpulse(sim);
+  const externalTangent = [
+    mass * gravity[0] + (impulse ? impulse.force[0] : 0),
+    0,
+    mass * gravity[2] + (impulse ? impulse.force[2] : 0)
+  ];
+  const demand = Math.hypot(externalTangent[0], externalTangent[2]);
+  const frictionCoefficient = Number.isFinite(source.friction) ? source.friction : DEFAULTS.friction;
+  const capacity = frictionCoefficient * sumNormal;
+  const atRest = Math.abs(state.vx) < SIM_REST_SPEED &&
+    Math.abs(state.vz) < SIM_REST_SPEED &&
+    Math.abs(state.wy) < SIM_REST_SPEED;
+  const holding = atRest && sumNormal > 1e-6 && demand <= capacity + 1e-9;
+  let sliding = false;
+  const frictionForces = [];
+
+  if (sumNormal > 1e-6) {
+    if (holding) {
+      for (const corner of corners) {
+        const share = corner.force / sumNormal;
+        const friction = [-externalTangent[0] * share, 0, -externalTangent[2] * share];
+        frictionForces.push(friction);
+        const arm = [corner.contact[0] - cg[0], -cg[1], corner.contact[2] - cg[2]];
+        const localMoment = simCross(arm, friction);
+        moment[0] += localMoment[0];
+        moment[1] += localMoment[1];
+        moment[2] += localMoment[2];
+        force[0] += friction[0];
+        force[2] += friction[2];
+      }
+    } else {
+      sliding = true;
+      const globalDirection = demand > 1e-9
+        ? [-externalTangent[0] / demand, 0, -externalTangent[2] / demand]
+        : [0, 0, 0];
+      for (const corner of corners) {
+        const arm = [corner.contact[0] - state.x, -state.y, corner.contact[2] - state.z];
+        const contactVelocity = [
+          velocity[0] + (omegaRoad[1] * arm[2] - omegaRoad[2] * arm[1]),
+          0,
+          velocity[2] + (omegaRoad[0] * arm[1] - omegaRoad[1] * arm[0])
+        ];
+        const contactSpeed = Math.hypot(contactVelocity[0], contactVelocity[2]);
+        const direction = contactSpeed > 1e-3
+          ? [-contactVelocity[0] / contactSpeed, 0, -contactVelocity[2] / contactSpeed]
+          : globalDirection;
+        const magnitude = frictionCoefficient * corner.force;
+        const friction = [magnitude * direction[0], 0, magnitude * direction[2]];
+        frictionForces.push(friction);
+        const momentArm = [corner.contact[0] - cg[0], -cg[1], corner.contact[2] - cg[2]];
+        const localMoment = simCross(momentArm, friction);
+        moment[0] += localMoment[0];
+        moment[1] += localMoment[1];
+        moment[2] += localMoment[2];
+        force[0] += friction[0];
+        force[2] += friction[2];
+      }
+    }
+  }
+
+  if (impulse) {
+    force[0] += impulse.force[0];
+    force[1] += impulse.force[1];
+    force[2] += impulse.force[2];
+    const localMoment = simCross(impulse.offset, impulse.force);
+    moment[0] += localMoment[0];
+    moment[1] += localMoment[1];
+    moment[2] += localMoment[2];
+  }
+
+  return {
+    force,
+    moment,
+    corners,
+    frictionForces,
+    cg,
+    euler,
+    omegaRoad,
+    velocity,
+    sumNormal,
+    externalTangent,
+    demand,
+    capacity,
+    holding,
+    sliding,
+    impulse,
+    atRest
+  };
+}
+
+/* ------------------------------ integration ------------------------------ */
+
+function simIntegrate(sim, dt) {
+  const state = sim.state;
+  const reference = sim.reference;
+  const evaluation = simEvaluate(sim);
+  const mass = reference.mass;
+  const inertia = reference.inertia;
+  const q = [state.qw, state.qx, state.qy, state.qz];
+
+  const accel = [evaluation.force[0] / mass, evaluation.force[1] / mass, evaluation.force[2] / mass];
+  const momentBody = simQuatRotateInverse(q, evaluation.moment);
+  const omega = [state.wx, state.wy, state.wz];
+  const inertiaMoment = [inertia.Ixx * omega[0], inertia.Iyy * omega[1], inertia.Izz * omega[2]];
+  const gyroscopic = simCross(omega, inertiaMoment);
+  const alpha = [
+    (momentBody[0] - gyroscopic[0]) / inertia.Ixx,
+    (momentBody[1] - gyroscopic[1]) / inertia.Iyy,
+    (momentBody[2] - gyroscopic[2]) / inertia.Izz
+  ];
+
+  if (evaluation.holding) {
+    accel[0] = 0;
+    accel[2] = 0;
+    alpha[1] = 0;
+  }
+
+  state.vx += accel[0] * dt;
+  state.vy += accel[1] * dt;
+  state.vz += accel[2] * dt;
+  state.wx += alpha[0] * dt;
+  state.wy += alpha[1] * dt;
+  state.wz += alpha[2] * dt;
+
+  if (evaluation.holding) {
+    state.vx = 0;
+    state.vz = 0;
+    state.wy = 0;
+  }
+
+  const linearSpeed = Math.hypot(state.vx, state.vy, state.vz);
+  if (linearSpeed > SIM_LINEAR_LIMIT) {
+    const scale = SIM_LINEAR_LIMIT / linearSpeed;
+    state.vx *= scale;
+    state.vy *= scale;
+    state.vz *= scale;
+  }
+  const angularSpeed = Math.hypot(state.wx, state.wy, state.wz);
+  if (angularSpeed > SIM_ANGULAR_LIMIT) {
+    const scale = SIM_ANGULAR_LIMIT / angularSpeed;
+    state.wx *= scale;
+    state.wy *= scale;
+    state.wz *= scale;
+  }
+
+  state.x += state.vx * dt;
+  state.y += state.vy * dt;
+  state.z += state.vz * dt;
+
+  const derivative = simQuatDerivative(q, [state.wx, state.wy, state.wz]);
+  let nextQ = simQuatNormalize([
+    q[0] + derivative[0] * dt,
+    q[1] + derivative[1] * dt,
+    q[2] + derivative[2] * dt,
+    q[3] + derivative[3] * dt
+  ]);
+  if (evaluation.holding) {
+    const nextEuler = simEulerFromQuat(nextQ);
+    nextQ = simQuatFromEuler(evaluation.euler.yaw, nextEuler.pitch, nextEuler.roll);
+  }
+  state.qw = nextQ[0];
+  state.qx = nextQ[1];
+  state.qy = nextQ[2];
+  state.qz = nextQ[3];
+
+  if (Math.abs(state.x) > SIM_BOUND_X) {
+    state.x = Math.sign(state.x) * SIM_BOUND_X;
+    state.vx = 0;
+    state.vz = 0;
+    sim.flags.boundary = true;
+  }
+  if (Math.abs(state.z) > SIM_BOUND_Z) {
+    state.z = Math.sign(state.z) * SIM_BOUND_Z;
+    state.vx = 0;
+    state.vz = 0;
+    sim.flags.boundary = true;
+  }
+
+  const finite = [
+    state.x, state.y, state.z,
+    state.vx, state.vy, state.vz,
+    state.qw, state.qx, state.qy, state.qz,
+    state.wx, state.wy, state.wz
+  ].every(Number.isFinite);
+  if (!finite) {
+    sim.flags.finite = false;
+    sim.flags.recovered = true;
+    sim.state = simEquilibriumState(reference);
+    sim.impulse = null;
+    sim.accumulator = 0;
+  }
+
+  sim.flags.holding = evaluation.holding;
+  sim.flags.sliding = evaluation.sliding;
+  sim.time += dt;
+  if (sim.impulse && sim.time >= sim.impulse.until) sim.impulse = null;
+  return evaluation;
+}
+
+function simStep(sim, dt = SIM_DT) {
+  if (!sim || !sim.state) return null;
+  return simIntegrate(sim, dt);
+}
+
+function simRunFor(sim, seconds, dt = SIM_DT) {
+  const steps = Math.max(0, Math.round(seconds / dt));
+  for (let i = 0; i < steps; i += 1) simStep(sim, dt);
+  return sim;
+}
+
+function simAdvance(sim, frameDt) {
+  if (!sim || !sim.running || !sim.state) return 0;
+  sim.accumulator += clamp(frameDt, 0, SIM_MAX_FRAME_DT);
+  let steps = 0;
+  while (sim.accumulator >= SIM_DT && steps < SIM_MAX_SUBSTEPS) {
+    simStep(sim, SIM_DT);
+    sim.accumulator -= SIM_DT;
+    steps += 1;
+  }
+  if (steps >= SIM_MAX_SUBSTEPS) sim.accumulator = 0;
+  sim.lastSubsteps = steps;
+  return steps;
+}
+
+/* ------------------------------ live model ------------------------------ */
+
+function simBuildModel(sim, source = state) {
+  const reference = sim.reference || computeStatic(source);
+  const evaluation = simEvaluate(sim);
+  const state = sim.state;
+  const euler = evaluation.euler;
+  const q = [state.qw, state.qx, state.qy, state.qz];
+  const corners = evaluation.corners;
+  const loads = corners.map((corner) => corner.force);
+  const rawLoads = corners.map((corner) => corner.rawForce);
+  const sumLoads = loads.reduce((acc, value) => acc + value, 0);
+  const frontLoad = loads[0] + loads[1];
+  const rearLoad = loads[2] + loads[3];
+  const leftLoad = loads[0] + loads[2];
+  const rightLoad = loads[1] + loads[3];
+  const maxLoad = Math.max(...loads);
+  const minLoad = Math.min(...loads);
+  const denom = sumLoads > 1e-9 ? sumLoads : 1;
+  const frontShare = frontLoad / denom;
+  const leftShare = leftLoad / denom;
+  const liftedCount = rawLoads.filter((value) => value < -1e-6).length;
+  const contactPoints = corners.map((corner) => ({
+    x: corner.contact[0],
+    y: 0,
+    z: corner.contact[2]
+  }));
+  const wheelCenters = corners.map((corner) => ({
+    x: corner.contact[0],
+    y: reference.dims.R,
+    z: corner.contact[2]
+  }));
+  const normalMomentX = loads.reduce((acc, value, i) => acc + value * contactPoints[i].x, 0);
+  const normalMomentZ = loads.reduce((acc, value, i) => acc + value * contactPoints[i].z, 0);
+  const vertical = [
+    reference.frame.gravityLocal.x,
+    reference.frame.gravityLocal.y,
+    reference.frame.gravityLocal.z
+  ];
+  const verticalLength = Math.hypot(vertical[0], vertical[1], vertical[2]) || 1;
+  const down = [vertical[0] / verticalLength, vertical[1] / verticalLength, vertical[2] / verticalLength];
+  const cg = evaluation.cg;
+  const projectionT = Math.abs(down[1]) > 1e-9 ? -cg[1] / down[1] : 0;
+  const px = cg[0] + projectionT * down[0];
+  const pz = cg[2] + projectionT * down[2];
+  const motionRatio = reference.motionRatio;
+  const springCompressionMm = corners.map((corner) => {
+    const ratio = corner.wheel.axle === 'front' ? motionRatio.front : motionRatio.rear;
+    return -corner.cornerY * ratio * 1000;
+  });
+  const damperCompressionRate = corners.map((corner) => {
+    const ratio = corner.wheel.axle === 'front' ? motionRatio.front : motionRatio.rear;
+    return -corner.cornerVelocityY * ratio;
+  });
+  const forceError = Math.abs(sumLoads + reference.mass * vertical[1]);
+  const momentXError = Math.abs(evaluation.moment[0]);
+  const momentZError = Math.abs(evaluation.moment[2]);
+  const simInfo = {
+    time: sim.time,
+    running: sim.running,
+    holding: evaluation.holding,
+    sliding: evaluation.sliding,
+    atRest: evaluation.atRest,
+    finite: sim.flags.finite,
+    boundary: sim.flags.boundary,
+    recovered: sim.flags.recovered,
+    substeps: sim.lastSubsteps,
+    accumulator: sim.accumulator,
+    stepHz: Math.round(1 / SIM_DT),
+    demand: evaluation.demand,
+    capacity: evaluation.capacity,
+    impulse: evaluation.impulse ? evaluation.impulse.label : null,
+    resetCount: sim.resetCount
+  };
+
+  return Object.assign({}, reference, {
+    dynamic: true,
+    sim: simInfo,
+    bodyPos: { x: state.x, y: state.y, z: state.z },
+    bodyQuat: q,
+    bodyYaw: euler.yaw,
+    bodyPitch: euler.pitch,
+    bodyRoll: euler.roll,
+    heave: state.y,
+    pitch: euler.pitch,
+    roll: euler.roll,
+    yaw: euler.yaw,
+    poseDeg: {
+      pitch: euler.pitch * RAD,
+      roll: euler.roll * RAD,
+      yaw: euler.yaw * RAD
+    },
+    bodyRatesDeg: {
+      roll: state.wx * RAD,
+      yaw: state.wy * RAD,
+      pitch: state.wz * RAD
+    },
+    bodyVelocity: { x: state.vx, y: state.vy, z: state.vz },
+    cornerY: corners.map((corner) => corner.cornerY),
+    cornerVelocityY: corners.map((corner) => corner.cornerVelocityY),
+    travelMm: corners.map((corner) => -corner.cornerY * 1000),
+    springCompressionMm,
+    damperCompressionRate,
+    springForce: corners.map((corner) => corner.springForce),
+    dampingForce: corners.map((corner) => corner.dampingForce),
+    arbForce: corners.map((corner) => corner.arbForce),
+    frictionForce: evaluation.frictionForces.map((friction) => ({ x: friction[0], z: friction[2] })),
+    loads,
+    rawLoads,
+    liftedCount,
+    minLoad,
+    maxLoad,
+    sumLoads,
+    totalNormal: sumLoads,
+    frontLoad,
+    rearLoad,
+    leftLoad,
+    rightLoad,
+    frontShare,
+    rearShare: 1 - frontShare,
+    leftShare,
+    rightShare: 1 - leftShare,
+    normalMomentX,
+    normalMomentZ,
+    forceError,
+    momentXError,
+    momentZError,
+    equilibriumOk: forceError < 0.5 && momentXError < 0.5 && momentZError < 0.5,
+    contactOk: liftedCount === 0 && minLoad > 0.01 && sim.flags.finite,
+    cgWorld: { x: cg[0], y: cg[1], z: cg[2] },
+    projection: { x: px, z: pz, dx: px - reference.xCG, dz: pz - reference.zCG },
+    px,
+    pz,
+    contactPoints,
+    wheelCenters
+  });
+}
+
+/* ------------------------------ stage-02 self-tests ------------------------------ */
+
+function simLoadError(sim) {
+  const model = simBuildModel(sim);
+  const target = sim.reference.loads;
+  return Math.max(...model.loads.map((value, index) => Math.abs(value - target[index])));
+}
+
+function runDynamicSelfTests(source = state) {
+  const tests = [];
+  const record = (name, ok, detail) => tests.push({ name, ok, detail });
+
+  const levelSim = simCreate(Object.assign({}, source, { slope: 0, bank: 0 }), { settle: 2.5 });
+  const levelModel = simBuildModel(levelSim);
+  const levelError = simLoadError(levelSim);
+  const levelPose = Math.abs(levelModel.poseDeg.pitch) + Math.abs(levelModel.poseDeg.roll);
+  record(
+    '动态水平稳态',
+    levelError < 1 && levelPose < 0.02 && levelModel.sim.finite,
+    'ΔN ' + levelError.toFixed(3) + ' · 姿态 ' + levelPose.toFixed(3) + '°'
+  );
+
+  const tiltedSource = Object.assign({}, source, { slope: 8, bank: 7 });
+  const tiltedSim = simCreate(tiltedSource, { settle: 4 });
+  const tiltedTarget = computeStatic(tiltedSource);
+  const tiltedModel = simBuildModel(tiltedSim);
+  const tiltedError = Math.max(...tiltedModel.loads.map((value, index) => Math.abs(value - tiltedTarget.loads[index])));
+  record(
+    '倾斜路面动态收敛',
+    tiltedError < 3 && tiltedModel.sim.finite,
+    'ΔN ' + tiltedError.toFixed(3)
+  );
+
+  const heaveSim = simCreate(source, { settle: 1.5 });
+  simApplyImpulse(heaveSim, 'heave');
+  let heavePeak = 0;
+  for (let i = 0; i < 600; i += 1) {
+    simStep(heaveSim);
+    heavePeak = Math.max(heavePeak, Math.abs(heaveSim.state.y - heaveSim.reference.heave));
+  }
+  simRunFor(heaveSim, 2.0);
+  const heaveTail = Math.abs(simBuildModel(heaveSim).heave - heaveSim.reference.heave);
+  record(
+    '垂向脉冲衰减',
+    heavePeak > 0.005 && heaveTail < heavePeak * 0.2 && heaveSim.flags.finite,
+    (heavePeak * 1000).toFixed(2) + ' → ' + (heaveTail * 1000).toFixed(2) + ' mm'
+  );
+
+  const rollSoft = simCreate(Object.assign({}, source, { arbFront: 0, arbRear: 0 }), { settle: 1.2 });
+  const rollHard = simCreate(Object.assign({}, source, { arbFront: 100, arbRear: 100 }), { settle: 1.2 });
+  simApplyImpulse(rollSoft, 'roll');
+  simApplyImpulse(rollHard, 'roll');
+  let softRoll = 0;
+  let hardRoll = 0;
+  for (let i = 0; i < 450; i += 1) {
+    simStep(rollSoft);
+    simStep(rollHard);
+    const softQ = [rollSoft.state.qw, rollSoft.state.qx, rollSoft.state.qy, rollSoft.state.qz];
+    const hardQ = [rollHard.state.qw, rollHard.state.qx, rollHard.state.qy, rollHard.state.qz];
+    softRoll = Math.max(softRoll, Math.abs(simEulerFromQuat(softQ).roll));
+    hardRoll = Math.max(hardRoll, Math.abs(simEulerFromQuat(hardQ).roll));
+  }
+  record(
+    '防倾杆抑制侧倾',
+    hardRoll < softRoll && softRoll > 1e-5,
+    (softRoll * RAD).toFixed(3) + '° → ' + (hardRoll * RAD).toFixed(3) + '°'
+  );
+
+  const detA = simCreate(source, { settle: 0.4 });
+  const detB = simCreate(source, { settle: 0.4 });
+  simApplyImpulse(detA, 'pitch');
+  simApplyImpulse(detB, 'pitch');
+  simRunFor(detA, 0.5);
+  simRunFor(detB, 0.5);
+  const detDelta = Math.abs(detA.state.y - detB.state.y) +
+    Math.abs(detA.state.qx - detB.state.qx) +
+    Math.abs(detA.state.qz - detB.state.qz);
+  record('固定步长可重复', detDelta < 1e-12, 'Δ ' + detDelta.toExponential(1));
+
+  const frameSim = simCreate(source, { settle: 0.4 });
+  simApplyImpulse(frameSim, 'roll');
+  let frameSteps = 0;
+  for (let i = 0; i < 90; i += 1) frameSteps += simAdvance(frameSim, 1 / 60);
+  const fixedSim = simCreate(source, { settle: 0.4 });
+  simApplyImpulse(fixedSim, 'roll');
+  simRunFor(fixedSim, frameSteps * SIM_DT);
+  const frameDelta = Math.abs(frameSim.state.y - fixedSim.state.y) +
+    Math.abs(frameSim.state.qx - fixedSim.state.qx) +
+    Math.abs(frameSim.state.wx - fixedSim.state.wx);
+  record(
+    '渲染帧率不影响物理',
+    frameDelta < 1e-9 && frameSim.lastSubsteps > 0,
+    frameSteps + ' 步 · Δ ' + frameDelta.toExponential(1)
+  );
+
+  const slideSource = Object.assign({}, source, { slope: 10, bank: 10, friction: 0.2 });
+  const slideSim = simCreate(slideSource, { settle: 2.0 });
+  const slideDistance = Math.hypot(slideSim.state.x, slideSim.state.z);
+  record(
+    '低附着六自由度滑移',
+    slideDistance > 0.05 && slideSim.flags.finite,
+    slideDistance.toFixed(2) + ' m · ' + (slideSim.flags.sliding ? '滑移' : '静止')
+  );
+
+  const contactModel = simBuildModel(levelSim);
+  record(
+    '动态法向载荷非负',
+    contactModel.loads.every((value) => value >= 0) && contactModel.loads.every(Number.isFinite),
+    'min ' + contactModel.minLoad.toFixed(1) + ' N'
+  );
 
   return tests;
 }
@@ -2484,7 +3410,7 @@ function createBaseGaugeTexture() {
   ctx.fillStyle = 'rgba(159,176,196,0.26)';
   ctx.font = '600 18px ui-monospace, monospace';
   ctx.textAlign = 'center';
-  ctx.fillText('STATIC LOAD RIG  ·  FS-01  ·  TILT TABLE', 0, 70);
+  ctx.fillText('DYNAMIC LOAD RIG  ·  FS-01  ·  TILT TABLE', 0, 70);
   ctx.font = '14px ui-monospace, monospace';
   ctx.fillStyle = 'rgba(159,176,196,0.16)';
   ctx.fillText('SLOPE / BANK DEGREE INDEX', 0, 100);
@@ -2556,10 +3482,10 @@ function createMaterials() {
   plateCtx.clearRect(0, 0, 512, 96);
   plateCtx.fillStyle = 'rgba(214,208,196,0.56)';
   plateCtx.font = '600 28px ui-monospace, monospace';
-  plateCtx.fillText('STATIC  LOAD  RIG  /  FS-01', 14, 40);
+  plateCtx.fillText('DYNAMIC  LOAD  RIG  /  FS-01', 14, 40);
   plateCtx.fillStyle = 'rgba(214,208,196,0.25)';
   plateCtx.font = '16px ui-monospace, monospace';
-  plateCtx.fillText('TILT TABLE  ·  STAGE 01  ·  LOAD CALIBRATION', 16, 70);
+  plateCtx.fillText('TILT TABLE  ·  STAGE 02  ·  DYNAMIC CALIBRATION', 16, 70);
   TEX.padPlate = canvasTexture(plateCanvas);
 
   MAT.paint = new THREE.MeshPhysicalMaterial({
@@ -3146,14 +4072,21 @@ function updateOverlays(model) {
   S.loadOverlay.visible = visible;
   const avgCorner = model.totalWeight / 4;
   const maxLoad = Math.max(...model.loads, 1);
+  const yaw = model.bodyYaw || 0;
+  const lateralX = Math.sin(yaw);
+  const lateralZ = Math.cos(yaw);
+  const forwardX = Math.cos(yaw);
+  const forwardZ = -Math.sin(yaw);
 
   for (let i = 0; i < 4; i += 1) {
     const wheel = model.wheels[i];
+    const contact = (model.contactPoints && model.contactPoints[i]) || { x: wheel.x, z: wheel.z };
     const load = model.loads[i];
     const axleWidth = wheel.axle === 'front' ? model.dims.wF : model.dims.wR;
     const outward = wheel.zSign * (axleWidth / 2 + 0.26);
-    const baseZ = wheel.z + outward;
-    const baseX = wheel.x + (wheel.axle === 'front' ? 0.24 : -0.24);
+    const fore = wheel.axle === 'front' ? 0.24 : -0.24;
+    const baseX = contact.x + forwardX * fore + lateralX * outward;
+    const baseZ = contact.z + forwardZ * fore + lateralZ * outward;
     const arrowHeight = clamp(0.26 + 0.56 * (load / Math.max(avgCorner, 1)), 0.2, 0.88);
     const arrow = S.loadArrows[i];
     const shaftLength = Math.max(0.02, arrowHeight - arrow.arrow.head);
@@ -3168,12 +4101,12 @@ function updateOverlays(model) {
     arrow.arrow.tip.material = MAT.loadArrow;
 
     arrow.contactRing.visible = visible;
-    arrow.contactRing.position.set(wheel.x, 0.018, wheel.z);
+    arrow.contactRing.position.set(contact.x, 0.018, contact.z);
     arrow.contactRing.material.opacity = 0.12 + 0.24 * hueScale;
 
     // Thin leader on the pad from the contact patch to the annotation.
     const positions = arrow.leader.geometry.attributes.position;
-    positions.setXYZ(0, wheel.x, 0.017, wheel.z);
+    positions.setXYZ(0, contact.x, 0.017, contact.z);
     positions.setXYZ(1, baseX, 0.017, baseZ);
     positions.needsUpdate = true;
     arrow.leader.visible = visible;
@@ -3212,17 +4145,28 @@ function updateOverlays(model) {
     S.cgProjectionCross.visible = cgVisible;
   }
 
-  // Gather anchors for DOM labels.
-  const normal = S.roadGroup.quaternion;
+  // Gather anchors for DOM labels. The anchor follows the live contact patch
+  // so translation, yaw and a slide keep the labels attached to the wheels.
   S.labelAnchors = model.wheels.map((wheel, i) => {
+    const contact = (model.contactPoints && model.contactPoints[i]) || { x: wheel.x, z: wheel.z };
     const axleWidth = wheel.axle === 'front' ? model.dims.wF : model.dims.wR;
-    const baseZ = wheel.z + wheel.zSign * (axleWidth / 2 + 0.30);
-    const baseX = wheel.x + (wheel.axle === 'front' ? 0.24 : -0.24);
+    const outward = wheel.zSign * (axleWidth / 2 + 0.30);
+    const fore = wheel.axle === 'front' ? 0.24 : -0.24;
+    const baseX = contact.x + forwardX * fore + lateralX * outward;
+    const baseZ = contact.z + forwardZ * fore + lateralZ * outward;
     const h = clamp(0.26 + 0.56 * (model.loads[i] / Math.max(avgCorner, 1)), 0.2, 0.88);
     const local = new THREE.Vector3(baseX, 0.04 + h + 0.10, baseZ);
     const world = S.roadGroup.localToWorld(local.clone());
     return { key: wheel.key, load: model.loads[i], world };
   });
+
+  if (S.contactBlob) {
+    const body = model.bodyPos || { x: 0, z: 0 };
+    S.contactBlob.position.set(body.x, 0.011, body.z);
+    S.contactBlob.quaternion.copy(
+      new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw)
+    ).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2));
+  }
 }
 
 /* ------------------------------ camera ------------------------------ */
@@ -3670,7 +4614,7 @@ function initScene() {
   S.renderer.toneMappingExposure = 0.72;
   S.renderer.shadowMap.enabled = true;
   S.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  S.renderer.domElement.setAttribute('aria-label', '方程式赛车三维静态底盘台');
+  S.renderer.domElement.setAttribute('aria-label', '方程式赛车三维动态底盘台');
   S.renderer.domElement.setAttribute('tabindex', '0');
   S.host.appendChild(S.renderer.domElement);
 
@@ -4190,7 +5134,7 @@ function textMaterialNumberNose() {
     ctx.fillText('01', 0, 10);
     ctx.fillStyle = 'rgba(255,255,255,0.55)';
     ctx.font = '600 34px ui-monospace, monospace';
-    ctx.fillText('FSR  ·  STATIC 01', 0, 158);
+    ctx.fillText('FSR  ·  DYNAMIC 02', 0, 158);
     ctx.restore();
   });
 }
@@ -4921,6 +5865,7 @@ const _mid = new THREE.Vector3();
 const _qSteer = new THREE.Quaternion();
 const _qPitch = new THREE.Quaternion();
 const _qRoll = new THREE.Quaternion();
+const _qYaw = new THREE.Quaternion();
 const _axisY = new THREE.Vector3(0, 1, 0);
 const _axisX = new THREE.Vector3(1, 0, 0);
 const _axisZ = new THREE.Vector3(0, 0, 1);
@@ -6083,10 +7028,19 @@ function updateSuspension(model) {
 
 function updateCar(model) {
   if (!CAR.built) return;
-  S.bodyPivot.position.set(0, model.heave, 0);
-  _qPitch.setFromAxisAngle(_axisZ, model.pitch);
-  _qRoll.setFromAxisAngle(_axisX, model.roll);
-  S.bodyPivot.quaternion.copy(_qRoll).multiply(_qPitch);
+  const bodyPos = model.bodyPos || { x: 0, y: model.heave || 0, z: 0 };
+  const yaw = model.bodyYaw || 0;
+  _qYaw.setFromAxisAngle(_axisY, yaw);
+
+  if (model.bodyQuat) {
+    S.bodyPivot.position.set(bodyPos.x, bodyPos.y, bodyPos.z);
+    S.bodyPivot.quaternion.set(model.bodyQuat[1], model.bodyQuat[2], model.bodyQuat[3], model.bodyQuat[0]);
+  } else {
+    S.bodyPivot.position.set(bodyPos.x, bodyPos.y, bodyPos.z);
+    _qPitch.setFromAxisAngle(_axisZ, model.pitch);
+    _qRoll.setFromAxisAngle(_axisX, model.roll);
+    S.bodyPivot.quaternion.copy(_qYaw).multiply(_qRoll).multiply(_qPitch);
+  }
   S.bodyPivot.updateMatrix();
 
   for (const corner of CAR.corners) {
@@ -6097,11 +7051,19 @@ function updateCar(model) {
       const axisWorld = _vecD.copy(axisLocal).applyQuaternion(corner.restQuat);
       const pivot = _vecE.copy(corner.wheelLocal.lower).applyQuaternion(corner.restQuat).add(corner.restCenter);
       _qSteer.setFromAxisAngle(axisWorld, state.steer * DEG);
-      root.position.copy(corner.restCenter).sub(pivot).applyQuaternion(_qSteer).add(pivot);
-      root.quaternion.copy(_qSteer).multiply(corner.restQuat);
+      // The body's planar pose carries the wheel with it. Pitch and roll move
+      // the body relative to the contact plane and therefore load the springs,
+      // but the contact patch itself stays on the road.
+      const pivotPlan = _vecA.set(bodyPos.x, 0, bodyPos.z)
+        .add(_vecB.set(pivot.x, 0, pivot.z).applyQuaternion(_qYaw));
+      pivotPlan.y = pivot.y;
+      const offset = _vecC.copy(corner.restCenter).sub(pivot).applyQuaternion(_qSteer).applyQuaternion(_qYaw);
+      root.position.copy(pivotPlan).add(offset);
+      root.quaternion.copy(_qYaw).multiply(_qSteer).multiply(corner.restQuat);
     } else {
-      root.position.copy(corner.restCenter);
-      root.quaternion.copy(corner.restQuat);
+      const offset = _vecA.set(corner.restCenter.x, 0, corner.restCenter.z).applyQuaternion(_qYaw);
+      root.position.set(bodyPos.x + offset.x, model.dims.R, bodyPos.z + offset.z);
+      root.quaternion.copy(_qYaw).multiply(corner.restQuat);
     }
     root.updateMatrix();
     root.updateMatrixWorld(true);
@@ -6147,8 +7109,13 @@ function buildCar(model) {
   CAR.dims = model.dims;
   CAR.built = false;
 
-  S.bodyPivot.position.set(0, model.heave, 0);
-  S.bodyPivot.quaternion.identity();
+  const initialPos = model.bodyPos || { x: 0, y: model.heave || 0, z: 0 };
+  S.bodyPivot.position.set(initialPos.x, initialPos.y, initialPos.z);
+  if (model.bodyQuat) {
+    S.bodyPivot.quaternion.set(model.bodyQuat[1], model.bodyQuat[2], model.bodyQuat[3], model.bodyQuat[0]);
+  } else {
+    S.bodyPivot.quaternion.identity();
+  }
 
   buildBodywork(model);
 
@@ -6225,6 +7192,12 @@ function formatOutputValue(param, value) {
     case 'wheelRateF':
     case 'wheelRateR':
       return formatInt(value) + ' N/mm';
+    case 'dampingF':
+    case 'dampingR':
+      return Number(value).toFixed(2) + ' ζ';
+    case 'motionRatioF':
+    case 'motionRatioR':
+      return Number(value).toFixed(2);
     case 'arbFront':
     case 'arbRear':
       return formatInt(value) + '%';
@@ -6282,32 +7255,35 @@ function syncControlsFromState() {
   updateRoadChips();
 }
 
-function updateRoadChips() {
-  const presets = {
-    level: [0, 0],
-    slope: [8, 0],
-    bank: [0, 7],
-    mixed: [6, 5]
+function roadPresetTable() {
+  return {
+    level: { slope: 0, bank: 0 },
+    slope: { slope: 8, bank: 0 },
+    bank: { slope: 0, bank: 7 },
+    mixed: { slope: 6, bank: 5 },
+    lowGrip: { slope: 10, bank: 10, friction: 0.2 }
   };
+}
+
+function updateRoadChips() {
+  const presets = roadPresetTable();
   $$('[data-road-preset]').forEach((button) => {
     const target = presets[button.dataset.roadPreset];
-    const matches = target && Math.abs(state.slope - target[0]) < 0.001 && Math.abs(state.bank - target[1]) < 0.001;
+    const matches = target &&
+      Math.abs(state.slope - target.slope) < 0.001 &&
+      Math.abs(state.bank - target.bank) < 0.001 &&
+      (target.friction == null || Math.abs(state.friction - target.friction) < 0.001);
     button.classList.toggle('is-active', Boolean(matches));
   });
 }
 
 function applyRoadPreset(name) {
-  const presets = {
-    level: { slope: 0, bank: 0 },
-    slope: { slope: 8, bank: 0 },
-    bank: { slope: 0, bank: 7 },
-    mixed: { slope: 6, bank: 5 }
-  };
-  const target = presets[name];
+  const target = roadPresetTable()[name];
   if (!target) return;
   Object.assign(state, target);
   syncParamOutput('slope');
   syncParamOutput('bank');
+  if (target.friction != null) syncParamOutput('friction');
   updateRoadChips();
   persistState();
   refreshAll({ rebuild: false });
@@ -6360,9 +7336,39 @@ function setAutoRotate(enabled) {
   }
 }
 
+function simulationReset({ settle = 0, toast = '姿态已重置到平衡位置' } = {}) {
+  if (!SIM) SIM = simCreate(state);
+  simReset(SIM, state, { settle });
+  SIM.running = true;
+  const model = simBuildModel(SIM, state);
+  updateSceneFromModel(model);
+  refreshTelemetry(model);
+  syncSimControls(model);
+  if (toast) showToast(toast);
+}
+
+function simulationToggle() {
+  if (!SIM) SIM = simCreate(state);
+  SIM.running = !SIM.running;
+  syncSimControls(UI.lastModel);
+  showToast(SIM.running ? '动力学仿真继续' : '动力学仿真已暂停');
+}
+
+function simulationImpulse(kind) {
+  if (!SIM) SIM = simCreate(state);
+  const labels = { heave: '垂向脉冲', roll: '侧倾脉冲', pitch: '俯仰脉冲' };
+  if (!simApplyImpulse(SIM, kind)) return;
+  syncSimControls(UI.lastModel);
+  showToast(`已施加${labels[kind] || '脉冲'}，观察弹簧—阻尼器响应`);
+}
+
 function resetAll() {
   copyDefaults();
   autoRotate = false;
+  if (SIM) {
+    SIM.running = true;
+    simReset(SIM, state, { settle: 1.0 });
+  }
   syncControlsFromState();
   setAutoRotate(false);
   applyXray();
@@ -6378,17 +7384,41 @@ function buildConfigPayload() {
   return {
     app: 'FS-01 Formula Simulator',
     version: APP_VERSION,
-    stage: 'static-rig-stage-1',
+    stage: 'dynamic-rig-stage-2',
     exportedAt: new Date().toISOString(),
     setup: cloneState(state),
     summary: model ? {
-      totalNormalN: Number(model.totalNormal.toFixed(3)),
+      totalNormalN: Number(model.sumLoads.toFixed(3)),
       cornerLoadsN: model.loads.map((value) => Number(value.toFixed(3))),
       planeBetaDeg: Number(model.frame.betaDeg.toFixed(4)),
       frictionDemand: Number(model.frictionDemand.toFixed(4)),
       bodyPitchDeg: Number(model.poseDeg.pitch.toFixed(5)),
       bodyRollDeg: Number(model.poseDeg.roll.toFixed(5)),
+      bodyYawDeg: Number(model.poseDeg.yaw.toFixed(5)),
       heaveMm: Number((model.heave * 1000).toFixed(4)),
+      travelMm: model.travelMm.map((value) => Number(value.toFixed(4))),
+      bodyVelocity: model.bodyVelocity ? {
+        x: Number(model.bodyVelocity.x.toFixed(5)),
+        y: Number(model.bodyVelocity.y.toFixed(5)),
+        z: Number(model.bodyVelocity.z.toFixed(5))
+      } : null,
+      inertia: model.inertia ? {
+        Ixx: Number(model.inertia.Ixx.toFixed(3)),
+        Iyy: Number(model.inertia.Iyy.toFixed(3)),
+        Izz: Number(model.inertia.Izz.toFixed(3))
+      } : null,
+      frequenciesHz: model.frequencies ? {
+        heave: Number(model.frequencies.heave.toFixed(4)),
+        roll: Number(model.frequencies.roll.toFixed(4)),
+        pitch: Number(model.frequencies.pitch.toFixed(4))
+      } : null,
+      sim: model.sim ? {
+        timeS: Number(model.sim.time.toFixed(4)),
+        running: model.sim.running,
+        holding: model.sim.holding,
+        sliding: model.sim.sliding,
+        stepHz: model.sim.stepHz
+      } : null,
       arbFrontRateNPerM: Number(model.arbRate.front.toFixed(3)),
       arbRearRateNPerM: Number(model.arbRate.rear.toFixed(3)),
       arbTwistDeg: Number((getCarDiagnostics().arbTwistDeg || 0).toFixed(4))
@@ -6493,9 +7523,11 @@ function closeModelModal() {
   }
 }
 
-function refreshSelfTests() {
-  const tests = runSelfTests(state);
-  UI.selfTests = tests;
+function refreshSelfTests({ dynamic = true } = {}) {
+  const staticTests = runSelfTests(state);
+  UI.selfTests = staticTests;
+  if (dynamic || !UI.dynamicTests) UI.dynamicTests = runDynamicSelfTests(state);
+  const tests = staticTests.concat(UI.dynamicTests);
   const passed = tests.filter((test) => test.ok).length;
   const total = tests.length;
 
@@ -6504,21 +7536,23 @@ function refreshSelfTests() {
 
   const summary = document.getElementById('selfTestSummary');
   if (summary) {
-    summary.textContent = `${passed} / ${total} 项通过`;
+    summary.textContent = `${passed} / ${total} 项通过 · 静态 ${staticTests.length} / 动态 ${UI.dynamicTests.length}`;
     summary.style.color = passed === total ? 'var(--ok)' : 'var(--warn)';
   }
 
   const list = document.getElementById('selfTestList');
   if (list) {
     list.textContent = '';
-    tests.forEach((test) => {
+    const labelled = staticTests.map((test) => ({ ...test, group: '静态' }))
+      .concat(UI.dynamicTests.map((test) => ({ ...test, group: '动态' })));
+    labelled.forEach((test) => {
       const item = document.createElement('li');
       if (!test.ok) item.className = 'is-fail';
       const mark = document.createElement('span');
       mark.className = 'st-mark';
       mark.textContent = test.ok ? '✓' : '!';
       const name = document.createElement('span');
-      name.textContent = test.name;
+      name.textContent = test.group + ' · ' + test.name;
       const detail = document.createElement('span');
       detail.className = 'st-detail';
       detail.textContent = test.detail;
@@ -6675,20 +7709,33 @@ function refreshChecks(model) {
   if (!container) return;
   const diag = getCarDiagnostics();
   const tests = UI.selfTests;
+  const dynamicTests = UI.dynamicTests || [];
   const passed = tests.filter((test) => test.ok).length;
-  const forceOk = model.equilibriumOk && model.liftedCount === 0;
+  const dynamicPassed = dynamicTests.filter((test) => test.ok).length;
+  const sim = model.sim || {
+    time: 0,
+    running: true,
+    holding: true,
+    sliding: false,
+    finite: true,
+    recovered: false,
+    stepHz: 500,
+    substeps: 0
+  };
   const linksOk = diag.linkCount > 0 && diag.maxSuspLinkStretchMm < 1 && diag.rockerSolveOk;
   const steerOk = diag.tieRodStretchMm < 5 && diag.rockerSolveOk;
   const arbOk = diag.arbCount === 2 && diag.arbFront && diag.arbRear && diag.arbStretchMm < 0.5;
   const contactOk = model.contactOk;
-  const frictionOk = model.frictionOk;
+  const frictionOk = model.frictionDemand <= model.frictionCapacity + 1e-9;
   const testsOk = tests.length > 0 && passed === tests.length;
+  const dynamicOk = dynamicTests.length > 0 && dynamicPassed === dynamicTests.length;
+  const frictionState = sim.sliding ? '滑移' : sim.holding ? '静摩擦' : '—';
 
   const rows = [
     {
-      ok: forceOk,
-      name: '法向力平衡',
-      value: `ΣN ${model.forceError < 0.01 ? '<0.01' : model.forceError.toFixed(2)} N · M ${model.momentXError < 0.01 && model.momentZError < 0.01 ? '<0.01' : Math.max(model.momentXError, model.momentZError).toFixed(2)} N·m`
+      ok: sim.finite && !sim.recovered,
+      name: '六自由度积分',
+      value: `t ${sim.time.toFixed(2)} s · ${sim.stepHz} Hz · ${sim.substeps} 子步`
     },
     {
       ok: contactOk,
@@ -6712,13 +7759,18 @@ function refreshChecks(model) {
     },
     {
       ok: frictionOk,
-      name: '坡面静摩擦',
-      value: `μ_req ${model.frictionDemand.toFixed(3)} / ${model.frictionCapacity.toFixed(2)}`
+      name: '坡面摩擦',
+      value: `μ_req ${model.frictionDemand.toFixed(3)} / ${model.frictionCapacity.toFixed(2)} · ${frictionState}`
     },
     {
       ok: testsOk,
-      name: '静力求解自检',
+      name: '静力自检',
       value: tests.length ? `${passed} / ${tests.length} 通过` : '待运行'
+    },
+    {
+      ok: dynamicOk,
+      name: '动态自检',
+      value: dynamicTests.length ? `${dynamicPassed} / ${dynamicTests.length} 通过` : '待运行'
     }
   ];
 
@@ -6740,19 +7792,47 @@ function refreshChecks(model) {
   });
 }
 
+function syncSimControls(model = UI.lastModel) {
+  const sim = model && model.sim ? model.sim : null;
+  const running = SIM ? SIM.running : sim ? sim.running : true;
+  const simTime = SIM ? SIM.time : sim ? sim.time : 0;
+  const substeps = running ? (SIM ? SIM.lastSubsteps : sim ? sim.substeps : 0) : 0;
+  const sliding = SIM ? SIM.flags.sliding : Boolean(sim && sim.sliding);
+  setText('simStatus', running ? '运行' : '暂停');
+  setText('simClock', `${simTime.toFixed(2)} s`);
+  const toggle = document.getElementById('btnSimToggle');
+  if (toggle) toggle.textContent = running ? '暂停' : '继续';
+  const readout = document.querySelector('.sim-readout');
+  if (readout) {
+    readout.classList.toggle('is-paused', !running);
+    readout.classList.toggle('is-sliding', sliding);
+  }
+  const telemetryReadout = document.querySelector('.sim-readout-telemetry');
+  if (telemetryReadout) {
+    telemetryReadout.classList.toggle('is-paused', !running);
+    telemetryReadout.classList.toggle('is-sliding', sliding);
+  }
+  setText('telemetrySimState', sim || SIM ? (running ? '运行' : '暂停') : '静态');
+  setText('telemetrySimTime', `${simTime.toFixed(2)} s`);
+  setText('telemetrySimSteps', sim || SIM ? `${sim ? sim.stepHz : Math.round(1 / SIM_DT)} Hz · ${substeps} 子步/帧` : '—');
+}
+
 function refreshTelemetry(model) {
   UI.lastModel = model;
   if (!model) return;
   UI.selfTests = runSelfTests(state);
+  const sim = model.sim || null;
+  const loads = model.loads.slice();
+  const sumLoads = loads.reduce((acc, value) => acc + value, 0);
 
   setText('topBeta', model.frame.betaDeg.toFixed(1) + '°');
-  setText('topNormal', `${loadDisplay(model.totalNormal)} ${unitDisplay()}`);
+  setText('topNormal', `${loadDisplay(sumLoads)} ${unitDisplay()}`);
   setText('topFrontShare', (model.frontShare * 100).toFixed(1) + '%');
 
-  const maxLoad = Math.max(...model.loads, 1);
-  const avgLoad = model.sumLoads / 4;
+  const maxLoad = Math.max(...loads, 1);
+  const avgLoad = sumLoads / 4;
   CORNERS.forEach((corner, index) => {
-    const load = model.loads[index];
+    const load = loads[index];
     const levelLoad = model.levelLoads[index];
     const delta = load - levelLoad;
     const card = document.getElementById('corner' + corner.key);
@@ -6784,7 +7864,7 @@ function refreshTelemetry(model) {
       bar.style.width = width.toFixed(1) + '%';
     }
     if (card) {
-      card.classList.toggle('is-max', load === Math.max(...model.loads) && load > 0);
+      card.classList.toggle('is-max', load === maxLoad && load > 0);
       card.classList.toggle('is-low', load < avgLoad * 0.78);
     }
   });
@@ -6798,16 +7878,50 @@ function refreshTelemetry(model) {
   const leftBar = document.getElementById('leftShareBar');
   if (leftBar) leftBar.style.width = (model.leftShare * 100).toFixed(1) + '%';
 
-  setText('totalNormal', `${loadDisplay(model.totalNormal)} ${unitDisplay()}`);
+  setText('totalNormal', `${loadDisplay(sumLoads)} ${unitDisplay()}`);
   setText('totalWeight', `${loadDisplay(model.totalWeight)} ${unitDisplay()}`);
   setText('frictionDemand', model.frictionDemand.toFixed(3));
+
+  setText('dynHeave', formatSigned(model.heave * 1000, 1));
+  setText('dynPitch', formatSigned(model.poseDeg.pitch, 2));
+  setText('dynRoll', formatSigned(model.poseDeg.roll, 2));
+  setText('dynYaw', formatSigned(model.poseDeg.yaw, 2));
 
   setText('planeTilt', model.frame.betaDeg.toFixed(2) + '°');
   setText('cgLong', `${formatSigned(model.xCG * 1000, 0)} mm`);
   setText('cgProjection', `Δx ${formatSigned((model.px - model.xCG) * 1000, 1)} / Δz ${formatSigned((model.pz - model.zCG) * 1000, 1)} mm`);
   setText('bodyHeave', `${formatSigned(model.heave * 1000, 2)} mm`);
-  setText('bodyAttitude', `${formatSigned(model.poseDeg.pitch, 2)}° / ${formatSigned(model.poseDeg.roll, 2)}°`);
+  setText('bodyAttitude', `${formatSigned(model.heave * 1000, 2)} mm / ${formatSigned(model.poseDeg.pitch, 2)}° / ${formatSigned(model.poseDeg.roll, 2)}°`);
+  const bodyPos = model.bodyPos || { x: 0, y: 0, z: 0 };
+  setText('bodyPosition', `${formatSigned(bodyPos.x * 1000, 1)} / ${formatSigned(bodyPos.y * 1000, 1)} / ${formatSigned(bodyPos.z * 1000, 1)} mm`);
+  if (model.bodyRatesDeg) {
+    setText('bodyRates', `φ̇ ${formatSigned(model.bodyRatesDeg.roll, 2)} · ψ̇ ${formatSigned(model.bodyRatesDeg.yaw, 2)} · θ̇ ${formatSigned(model.bodyRatesDeg.pitch, 2)} °/s`);
+  } else {
+    setText('bodyRates', '—');
+  }
   setText('cornerTravel', model.travelMm.map((value) => formatSigned(value, 2)).join(' / ') + ' mm');
+  if (model.springCompressionMm && model.dampingForce && model.arbForce) {
+    const maxDamping = Math.max(...model.dampingForce.map((value) => Math.abs(value)));
+    const maxArb = Math.max(...model.arbForce.map((value) => Math.abs(value)));
+    setText(
+      'cornerForces',
+      `压缩 ${model.springCompressionMm.map((value) => value.toFixed(1)).join(' / ')} mm · 阻尼 ${formatInt(maxDamping)} N · ARB ${formatInt(maxArb)} N`
+    );
+  } else {
+    setText('cornerForces', '—');
+  }
+  if (model.frequencies) {
+    setText('dynFreq', `${model.frequencies.heave.toFixed(2)} / ${model.frequencies.roll.toFixed(2)} / ${model.frequencies.pitch.toFixed(2)} Hz`);
+  }
+  if (model.inertia) {
+    setText('dynInertia', `${model.inertia.Ixx.toFixed(0)} / ${model.inertia.Iyy.toFixed(0)} / ${model.inertia.Izz.toFixed(0)} kg·m²`);
+  }
+  if (sim) {
+    const stateText = sim.sliding ? '切向滑移' : sim.holding ? '静摩擦保持' : '瞬态';
+    setText('simDetail', `${sim.running ? '运行' : '暂停'} · t ${sim.time.toFixed(2)} s · ${sim.stepHz} Hz · ${stateText}`);
+  } else {
+    setText('simDetail', '静态参考');
+  }
 
   const diag = getCarDiagnostics();
   setText('linkStatus', `${diag.linkCount} 根 · ${diag.jointCount} 点 · 悬架杆长偏差 ${diag.maxSuspLinkStretchMm.toFixed(3)} mm`);
@@ -6820,9 +7934,14 @@ function refreshTelemetry(model) {
     `${formatInt(model.arbRate.front / 1000)} / ${formatInt(model.arbRate.rear / 1000)} N/mm · 扭转 ${diag.arbTwistDeg.toFixed(2)}° · 叶片 ${diag.arbBladeFrontDeg.toFixed(0)}° / ${diag.arbBladeRearDeg.toFixed(0)}°`
   );
   const tests = UI.selfTests;
+  const dynamicTests = UI.dynamicTests || [];
   if (tests.length) {
     const passed = tests.filter((test) => test.ok).length;
-    setText('selfTestStatus', `${passed} / ${tests.length} 通过`);
+    const dynamicPassed = dynamicTests.filter((test) => test.ok).length;
+    setText(
+      'selfTestStatus',
+      `静力 ${passed} / ${tests.length}${dynamicTests.length ? ` · 动态 ${dynamicPassed} / ${dynamicTests.length}` : ''}`
+    );
   }
 
   ['FL', 'FR', 'RL', 'RR'].forEach((key, index) => {
@@ -6831,15 +7950,26 @@ function refreshTelemetry(model) {
 
   const warning = document.getElementById('solverWarning');
   if (warning) {
+    const title = warning.querySelector('b');
+    const detail = warning.querySelector('span');
     if (model.liftedCount > 0) {
       warning.hidden = false;
-      warning.querySelector('b').textContent = `${model.liftedCount} 个车轮出现负法向载荷`;
-      warning.querySelector('span').textContent = '线性静力模型已超出单侧接触范围，显示值已截断为 0；请减小倾角、质心高度或横向偏移。';
+      title.textContent = `${model.liftedCount} 个车轮卸载`;
+      detail.textContent = '等效悬挂力已截断为 0；请减小倾角、质心高度或横向偏移，或提高轮心率。';
+    } else if (sim && sim.boundary) {
+      warning.hidden = false;
+      title.textContent = '车辆到达试验台边界';
+      detail.textContent = '平面自由度已停在台面边界，按“重置姿态”回到中心。';
+    } else if (sim && sim.sliding) {
+      warning.hidden = false;
+      title.textContent = '切向摩擦不足，车辆滑移';
+      detail.textContent = `μ_req ${model.frictionDemand.toFixed(3)} > μ ${model.frictionCapacity.toFixed(2)}；阶段二使用库仑摩擦，按“重置姿态”可回到台面中心。`;
     } else {
       warning.hidden = true;
     }
   }
 
+  syncSimControls(model);
   refreshChecks(model);
   refreshLabelContent(model);
 }
@@ -6962,6 +8092,22 @@ function bindControls() {
   const btnInspect = document.getElementById('btnInspect');
   if (btnInspect) btnInspect.addEventListener('click', cycleInspectView);
 
+  const btnSimToggle = document.getElementById('btnSimToggle');
+  if (btnSimToggle) btnSimToggle.addEventListener('click', simulationToggle);
+  const btnSimReset = document.getElementById('btnSimReset');
+  if (btnSimReset) btnSimReset.addEventListener('click', () => simulationReset({ settle: 0 }));
+  const btnSimSettle = document.getElementById('btnSimSettle');
+  if (btnSimSettle) btnSimSettle.addEventListener('click', () => simulationReset({ settle: 2, toast: '已回到静力平衡姿态' }));
+  const impulseButtons = [
+    ['btnImpulseHeave', 'heave'],
+    ['btnImpulseRoll', 'roll'],
+    ['btnImpulsePitch', 'pitch']
+  ];
+  for (const [id, kind] of impulseButtons) {
+    const button = document.getElementById(id);
+    if (button) button.addEventListener('click', () => simulationImpulse(kind));
+  }
+
   const btnResetView = document.getElementById('btnResetView');
   if (btnResetView) btnResetView.addEventListener('click', () => {
     resetCamera();
@@ -7028,7 +8174,13 @@ function bindKeyboard() {
     if (event.ctrlKey || event.metaKey || event.altKey) return;
 
     const key = event.key.toLowerCase();
-    if (key === 'r') {
+    if (event.code === 'Space') {
+      simulationToggle();
+      event.preventDefault();
+    } else if (key === 'i') {
+      simulationImpulse('heave');
+      event.preventDefault();
+    } else if (key === 'r') {
       resetCamera();
       resetInspectButton();
       showToast('视角已重置');
@@ -7114,6 +8266,7 @@ function initUI() {
   bindControls();
   syncControlsFromState();
   refreshSelfTests();
+  syncSimControls();
   CAMERA.onChange = (reason) => {
     if (reason === 'preset') {
       syncCameraButtonActive(CAMERA.preset || '');
@@ -7135,6 +8288,7 @@ UI.refreshSelfTests = refreshSelfTests;
 UI.openModelModal = openModelModal;
 UI.closeModelModal = closeModelModal;
 UI.syncControls = syncControlsFromState;
+UI.syncSimControls = syncSimControls;
 UI.applyStateChange = applyStateChange;
 UI.copyConfig = copyConfig;
 UI.resetAll = resetAll;
@@ -7157,6 +8311,11 @@ let loaderShownAt = 0;
 let lastFrameTime = 0;
 let screenshotCount = 0;
 
+function liveModel() {
+  if (!SIM) return computeStatic(state);
+  return simBuildModel(SIM, state);
+}
+
 function updateSceneFromModel(model) {
   if (typeof applyXray === 'function') applyXray();
   S.roadGroup.quaternion.copy(model.frame.q);
@@ -7176,9 +8335,11 @@ function requestRebuild(model) {
 function processPendingRebuild(now) {
   if (!PENDING.rebuild || !PENDING.model) return;
   if (now - PENDING.lastBuildAt < 85) return;
-  const model = PENDING.model;
   PENDING.rebuild = false;
   PENDING.lastBuildAt = now;
+  if (!SIM) SIM = simCreate(state);
+  simReset(SIM, state, { settle: 0.5 });
+  const model = simBuildModel(SIM, state);
   buildCar(model);
   applyXray();
   S.roadGroup.quaternion.copy(model.frame.q);
@@ -7187,14 +8348,17 @@ function processPendingRebuild(now) {
   S.scene.updateMatrixWorld(true);
   updateOverlays(model);
   S.scene.updateMatrixWorld(true);
-  UI.refreshSelfTests();
+  UI.refreshSelfTests({ dynamic: false });
   UI.refreshTelemetry(model);
   UI.updateLabelPositions();
 }
 
 function refreshAll({ rebuild = false } = {}) {
   if (!booted) return;
-  const model = computeStatic(state);
+  const reference = computeStatic(state);
+  if (!SIM) SIM = simCreate(state);
+  SIM.reference = reference;
+  const model = simBuildModel(SIM, state);
   if (rebuild) {
     requestRebuild(model);
     UI.refreshTelemetry(model);
@@ -7237,7 +8401,7 @@ function formatLocalDate(date = new Date()) {
 
 function exportScreenshot() {
   if (!S.renderer) return false;
-  const model = computeStatic(state);
+  const model = liveModel();
   updateSceneFromModel(model);
   S.renderer.render(S.scene, S.camera);
 
@@ -7280,15 +8444,15 @@ function exportScreenshot() {
   ctx.textBaseline = 'alphabetic';
   ctx.fillStyle = 'rgba(236,241,246,0.95)';
   ctx.font = `600 ${Math.round(22 * scale)}px "Helvetica Neue", Arial, sans-serif`;
-  ctx.fillText('FS-01  /  STATIC CHASSIS RIG', pad, pad + 26 * scale);
+  ctx.fillText('FS-01  /  DYNAMIC CHASSIS RIG', pad, pad + 26 * scale);
   ctx.fillStyle = 'rgba(255,103,56,0.95)';
   ctx.fillRect(pad, pad + 37 * scale, 38 * scale, 3 * scale);
   ctx.fillStyle = 'rgba(151,167,185,0.8)';
   ctx.font = `500 ${Math.round(11 * scale)}px ui-monospace, monospace`;
-  ctx.fillText('STAGE 01  ·  TILT-PLANE STATIC LOADS  ·  ' + formatLocalDate(), pad, pad + 58 * scale);
+  ctx.fillText('STAGE 02  ·  SIX-DOF · SPRING-DAMPER  ·  ' + formatLocalDate(), pad, pad + 58 * scale);
 
   const cardW = Math.round(392 * scale);
-  const cardH = Math.round(198 * scale);
+  const cardH = Math.round(216 * scale);
   const cardX = pad;
   const cardY = height - pad - cardH;
   ctx.fillStyle = 'rgba(6,10,15,0.82)';
@@ -7301,7 +8465,7 @@ function exportScreenshot() {
   ctx.fillRect(cardX + 16 * scale, cardY + 17 * scale, 26 * scale, 2 * scale);
   ctx.fillStyle = 'rgba(160,177,195,0.82)';
   ctx.font = `500 ${Math.round(10 * scale)}px ui-monospace, monospace`;
-  ctx.fillText('STATIC CORNER LOADS', cardX + 50 * scale, cardY + 22 * scale);
+  ctx.fillText('DYNAMIC CORNER LOADS', cardX + 50 * scale, cardY + 22 * scale);
   ctx.strokeStyle = 'rgba(255,255,255,0.08)';
   ctx.beginPath();
   ctx.moveTo(cardX + cardW / 2, cardY + 38 * scale);
@@ -7334,9 +8498,14 @@ function exportScreenshot() {
   ctx.fillStyle = 'rgba(156,173,191,0.8)';
   ctx.font = `500 ${Math.round(9.5 * scale)}px ui-monospace, monospace`;
   ctx.fillText(
-    `ΣN ${loadDisplay(model.totalNormal)} ${unit}    ·    β ${model.frame.betaDeg.toFixed(2)}°    ·    μreq ${model.frictionDemand.toFixed(3)}`,
+    `ΣN ${loadDisplay(model.sumLoads)} ${unit}    ·    β ${model.frame.betaDeg.toFixed(2)}°    ·    μreq ${model.frictionDemand.toFixed(3)}`,
     cardX + 16 * scale,
-    cardY + 186 * scale
+    cardY + 184 * scale
+  );
+  ctx.fillText(
+    `h ${formatSigned(model.heave * 1000, 1)} mm    ·    θ ${formatSigned(model.poseDeg.pitch, 2)}°    ·    φ ${formatSigned(model.poseDeg.roll, 2)}°    ·    ${model.sim ? (model.sim.running ? 'RUN' : 'PAUSE') : 'STATIC'}`,
+    cardX + 16 * scale,
+    cardY + 201 * scale
   );
 
   ctx.textAlign = 'right';
@@ -7362,7 +8531,7 @@ function showFatalError(error) {
   const message = document.getElementById('errorMessage');
   if (screen) screen.hidden = false;
   if (message && error && error.message) {
-    message.textContent = '当前浏览器无法启动三维静态底盘演示：' + error.message;
+    message.textContent = '当前浏览器无法启动三维动态底盘演示：' + error.message;
   }
 }
 
@@ -7372,7 +8541,7 @@ function bindGlobalAPI() {
     version: APP_VERSION,
     getState: () => cloneState(state),
     getSnapshot: () => {
-      const model = UI.lastModel || computeStatic(state);
+      const model = liveModel();
       const tests = UI.selfTests.length ? UI.selfTests : runSelfTests(state);
       const diag = getCarDiagnostics();
       return {
@@ -7381,7 +8550,7 @@ function bindGlobalAPI() {
         loads: model.loads.slice(),
         rawLoads: model.rawLoads.slice(),
         levelLoads: model.levelLoads.slice(),
-        totalNormal: model.totalNormal,
+        totalNormal: model.sumLoads,
         totalWeight: model.totalWeight,
         betaDeg: model.frame.betaDeg,
         frictionDemand: model.frictionDemand,
@@ -7397,6 +8566,23 @@ function bindGlobalAPI() {
         heaveMm: model.heave * 1000,
         pitchDeg: model.poseDeg.pitch,
         rollDeg: model.poseDeg.roll,
+        yawDeg: model.poseDeg.yaw,
+        bodyPos: model.bodyPos ? { x: model.bodyPos.x, y: model.bodyPos.y, z: model.bodyPos.z } : null,
+        bodyVelocity: model.bodyVelocity ? { x: model.bodyVelocity.x, y: model.bodyVelocity.y, z: model.bodyVelocity.z } : null,
+        bodyRatesDeg: model.bodyRatesDeg || null,
+        travelMm: model.travelMm.slice(),
+        springCompressionMm: model.springCompressionMm ? model.springCompressionMm.slice() : null,
+        damperCompressionRate: model.damperCompressionRate ? model.damperCompressionRate.slice() : null,
+        springForce: model.springForce ? model.springForce.slice() : null,
+        dampingForce: model.dampingForce ? model.dampingForce.slice() : null,
+        arbForce: model.arbForce ? model.arbForce.slice() : null,
+        inertia: model.inertia ? Object.assign({}, model.inertia) : null,
+        frequencies: model.frequencies ? Object.assign({}, model.frequencies) : null,
+        motionRatio: model.motionRatio ? Object.assign({}, model.motionRatio) : null,
+        springRateCoil: model.springRateCoil ? model.springRateCoil.slice() : null,
+        damperRateWheel: model.damperRateWheel ? model.damperRateWheel.slice() : null,
+        damperRateShaft: model.damperRateShaft ? model.damperRateShaft.slice() : null,
+        sim: model.sim ? Object.assign({}, model.sim) : null,
         arbRate: Object.assign({}, model.arbRate),
         arbBladeAngleDeg: Object.assign({}, model.arbBladeAngleDeg),
         arbRollStiffness: model.arbRollStiffness,
@@ -7425,7 +8611,8 @@ function bindGlobalAPI() {
           target: CAMERA.target.toArray(),
           transition: Boolean(CAMERA.transition)
         },
-        pendingRebuild: PENDING.rebuild
+        pendingRebuild: PENDING.rebuild,
+        frameCount: UI.frameCount || 0
       };
     },
     setState: (patch, options = {}) => {
@@ -7444,9 +8631,46 @@ function bindGlobalAPI() {
       resetAll();
       return window.FSApp.getSnapshot();
     },
+    setSimRunning: (running) => {
+      if (SIM) SIM.running = Boolean(running);
+      if (UI.syncSimControls) UI.syncSimControls();
+      return window.FSApp.getSnapshot();
+    },
+    toggleSimRunning: () => {
+      if (SIM) SIM.running = !SIM.running;
+      if (UI.syncSimControls) UI.syncSimControls();
+      return window.FSApp.getSnapshot();
+    },
+    resetDynamics: (options = {}) => {
+      if (!SIM) SIM = simCreate(state);
+      const settle = Number.isFinite(options.settle) ? options.settle : 0;
+      simReset(SIM, state, { settle });
+      const model = simBuildModel(SIM, state);
+      updateSceneFromModel(model);
+      UI.refreshTelemetry(model);
+      if (UI.syncSimControls) UI.syncSimControls();
+      return window.FSApp.getSnapshot();
+    },
+    impulse: (kind = 'heave') => {
+      if (!SIM) SIM = simCreate(state);
+      simApplyImpulse(SIM, kind);
+      if (UI.syncSimControls) UI.syncSimControls();
+      return window.FSApp.getSnapshot();
+    },
+    advanceSimulation: (seconds = 0.5) => {
+      if (!SIM) SIM = simCreate(state);
+      const duration = clamp(Number(seconds) || 0, 0, 10);
+      simRunFor(SIM, duration);
+      const model = simBuildModel(SIM, state);
+      updateSceneFromModel(model);
+      UI.refreshTelemetry(model);
+      if (UI.syncSimControls) UI.syncSimControls();
+      return window.FSApp.getSnapshot();
+    },
     openModel: UI.openModelModal,
     closeModel: UI.closeModelModal,
     runSelfTests: () => runSelfTests(state),
+    runDynamicSelfTests: () => runDynamicSelfTests(state),
     exportScreenshot,
     setCameraPreset,
     setCameraProjection
@@ -7460,8 +8684,22 @@ function animate(now) {
   const dt = lastFrameTime ? clamp((now - lastFrameTime) / 1000, 0, 0.05) : 0;
   lastFrameTime = now;
 
+  UI.frameCount = (UI.frameCount || 0) + 1;
   updateCamera(dt);
   processPendingRebuild(now);
+
+  if (booted && SIM) {
+    const steps = simAdvance(SIM, dt);
+    if (steps > 0 || !UI.lastDynamicUpdate) {
+      const model = simBuildModel(SIM, state);
+      updateSceneFromModel(model);
+      UI.lastDynamicUpdate = now;
+      if (!UI.lastTelemetryAt || now - UI.lastTelemetryAt > 110) {
+        UI.lastTelemetryAt = now;
+        UI.refreshTelemetry(model);
+      }
+    }
+  }
 
   // Camera and scene matrices are current before projecting the DOM labels.
   S.scene.updateMatrixWorld(false);
@@ -7491,7 +8729,8 @@ function boot() {
     if (restored) Object.assign(state, restored);
 
     initScene();
-    const initialModel = computeStatic(state);
+    SIM = simCreate(state, { settle: 1.8 });
+    const initialModel = simBuildModel(SIM, state);
     S.roadGroup.quaternion.copy(initialModel.frame.q);
     S.roadGroup.updateMatrixWorld(true);
     buildCar(initialModel);
@@ -7499,7 +8738,7 @@ function boot() {
 
     initUI();
     UI.refreshTelemetry(initialModel);
-    UI.refreshSelfTests();
+    UI.refreshSelfTests({ dynamic: false });
     syncControlsFromState();
     persistState();
     bindGlobalAPI();
@@ -7508,7 +8747,7 @@ function boot() {
     lastFrameTime = 0;
     requestAnimationFrame(animate);
 
-    console.info(`[FS-01] stage 01 static rig v${APP_VERSION} ready`);
+    console.info('[FS-01] stage 02 dynamic chassis v' + APP_VERSION + ' ready');
   } catch (error) {
     showFatalError(error);
   }
