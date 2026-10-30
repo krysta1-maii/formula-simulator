@@ -377,6 +377,7 @@
     <span class="tool-sep"></span>
     <div class="tool-group">
       <button type="button" class="tool-btn" id="btnXray" aria-pressed="false"><span class="tool-glyph">◫</span>透视</button>
+      <button type="button" class="tool-btn" id="btnOrtho" aria-pressed="false" title="正交投影 (O)"><span class="tool-glyph">▱</span>正交</button>
       <button type="button" class="tool-btn" id="btnAutoRotate" aria-pressed="false"><span class="tool-glyph">↻</span>环绕</button>
     </div>
     <span class="tool-sep"></span>
@@ -387,7 +388,7 @@
   </div>
 
   <div class="viewport-hint">
-    <span>拖动旋转</span><span>滚轮缩放</span><span>右键平移</span><span>R 重置 · H 水平</span>
+    <span>拖动旋转</span><span>滚轮缩放至光标</span><span>右键平移</span><span>双击重置 · O 正交 · H 水平</span>
   </div>
 
   <div class="loading" id="loading" aria-live="polite">
@@ -475,8 +476,9 @@
           <section>
             <h3><span>05</span>操作与约定</h3>
             <ul class="key-list">
-              <li><span>拖动</span> 环绕观察，滚轮缩放，右键或 Shift+拖动平移</li>
-              <li><span>1 – 5</span> 切换相机预设，<span>R</span> 重置视角</li>
+              <li><span>拖动</span> 环绕观察（场景跟随指针），滚轮以光标为中心缩放，右键/中键或 Shift+拖动平移，双击重置</li>
+              <li><span>1 – 5</span> 切换三分之四、侧视、前视、后视、顶视；三视使用水平正交投影，顶视为正交俯视，<span>O</span> 切换投影，<span>R</span> 重置视角</li>
+              <li><span>取景</span> 视线不滚转，相机不低于台面水平面；手动缩放范围 0.9 – 14 m 可视高度，窄屏按车宽自动退距</li>
               <li><span>X</span> 切换车身剖视，<span>M</span> 机构剖视（转向 → 传动 → 前/后防倾杆），<span>R</span> 返回总览</li>
               <li><span>F</span> 轮载矢量，<span>G</span> 质心，<span>H</span> 水平路面</li>
               <li><span>单位</span> 遥测面板可在 N 与 kg 等效之间切换；kg 值按 g = 9.80665 m/s² 换算</li>

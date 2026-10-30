@@ -24,35 +24,52 @@ const S = {
 const MAT = {};
 const TEX = {};
 
+/**
+ * Camera presets.
+ *
+ * theta  azimuth around +Y (0 = in front of the car, PI/2 = right side)
+ * phi    polar angle from +Y (PI/2 = exactly level, 0.002 = plan view)
+ * zoom   visible world height in metres at the target plane; the projection
+ *        derives the perspective distance or the orthographic frustum from it.
+ * fitWidth  on narrow viewports the visible width (zoom * aspect) must stay
+ *           above this value, otherwise the long car overflows the screen.
+ */
 const CAMERA_PRESETS = {
-  threeQuarter: { theta: 0.62, phi: 1.22, radius: 8.9, target: [0, 0.54, 0] },
-  side: { theta: 1.52, phi: 1.36, radius: 9.3, target: [0, 0.48, 0] },
-  front: { theta: 0.06, phi: 1.28, radius: 8.2, target: [0, 0.48, 0] },
-  rear: { theta: 3.09, phi: 1.23, radius: 9.1, target: [0, 0.48, 0] },
-  top: { theta: 0.74, phi: 0.42, radius: 9.6, target: [0, 0.38, 0] },
-  portrait: { theta: 0.26, phi: 1.18, radius: 12.4, target: [0, 0.55, 0] },
-  inspectSteering: { theta: 0.55, phi: 0.72, radius: 2.8, target: [1.35, 0.34, 0] },
-  inspectDrivetrain: { theta: 2.40, phi: 0.70, radius: 2.8, target: [-1.40, 0.34, 0] },
-  inspectArb: { theta: 0.15, phi: 0.72, radius: 3.0, target: [1.34, 0.55, 0] },
-  inspectArbRear: { theta: 2.55, phi: 0.45, radius: 2.8, target: [-1.45, 0.52, 0] }
+  threeQuarter: { theta: 0.62, phi: 1.22, zoom: 5.79, target: [0, 0.55, 0], projection: 'perspective' },
+  side: { theta: Math.PI / 2, phi: Math.PI / 2, zoom: 6.0, fitWidth: 6.3, target: [0, 0.55, 0], projection: 'orthographic' },
+  front: { theta: 0, phi: Math.PI / 2, zoom: 2.45, fitWidth: 3.1, target: [0, 0.55, 0], projection: 'orthographic' },
+  rear: { theta: Math.PI, phi: Math.PI / 2, zoom: 2.45, fitWidth: 3.1, target: [0, 0.55, 0], projection: 'orthographic' },
+  top: { theta: Math.PI / 2, phi: 0.002, zoom: 6.0, fitWidth: 6.3, target: [0, 0.55, 0], projection: 'orthographic' },
+  portrait: { theta: 0.26, phi: 1.18, zoom: 8.05, target: [0, 0.55, 0], projection: 'perspective' },
+  inspectSteering: { theta: 0.55, phi: 0.72, zoom: 1.82, target: [1.35, 0.34, 0], arc: 0.22 },
+  inspectDrivetrain: { theta: 2.40, phi: 0.70, zoom: 1.82, target: [-1.40, 0.34, 0], arc: 0.22 },
+  inspectArb: { theta: 0.15, phi: 0.72, zoom: 1.95, target: [1.34, 0.55, 0], arc: 0.22 },
+  inspectArbRear: { theta: 2.55, phi: 0.45, zoom: 1.82, target: [-1.45, 0.52, 0], arc: 0.22 }
 };
 
 const PORTRAIT_QUERY = window.matchMedia('(max-width: 980px) and (orientation: portrait)');
 
 const CAMERA = {
+  // Current, rendered orbit state. The camera never rolls: up is always +Y.
   theta: 0.62,
   phi: 1.22,
-  radius: 8.9,
-  target: new THREE.Vector3(0, 0.54, 0),
+  zoom: 5.79,
+  target: new THREE.Vector3(0, 0.55, 0),
+  // Damped targets used by direct manipulation and auto-rotate.
   goalTheta: 0.62,
   goalPhi: 1.22,
-  goalRadius: 8.9,
-  goalTarget: new THREE.Vector3(0, 0.54, 0),
+  goalZoom: 5.79,
+  goalTarget: new THREE.Vector3(0, 0.55, 0),
+  // 'perspective' or 'orthographic'; the axis presets use orthographic.
+  projection: 'perspective',
+  preset: 'threeQuarter',
+  transition: null,
   dragging: null,
   pointers: new Map(),
-  pinchDistance: 0,
+  pinch: null,
+  userMoved: false,
   enabled: true,
-  userMoved: false
+  onChange: null
 };
 
 const REDUCED_MOTION = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -1095,30 +1112,257 @@ function updateOverlays(model) {
 
 /* ------------------------------ camera ------------------------------ */
 
+const CAMERA_FOV = 36;
+const CAMERA_MIN_ZOOM = 0.9;
+const CAMERA_MAX_ZOOM = 14;
+const CAMERA_PHI_MIN = 0.002;
+const CAMERA_PHI_MAX = Math.PI / 2;
+// An orthographic camera does not change scale with distance, so it is parked
+// at least 12 m outside the car. This keeps close-ups free of near-plane
+// clipping while the frustum itself provides the zoom.
+const CAMERA_ORTHO_DISTANCE = 12;
+const CAMERA_TARGET_MIN = new THREE.Vector3(-4.2, -0.6, -3.6);
+const CAMERA_TARGET_MAX = new THREE.Vector3(4.2, 2.6, 3.6);
+
+function cameraAspect() {
+  if (!S.host) return 16 / 9;
+  return Math.max(0.2, S.host.clientWidth / Math.max(1, S.host.clientHeight));
+}
+
+/** Perspective distance that shows exactly CAMERA.zoom metres at the target. */
+function cameraPerspectiveDistance(zoom = CAMERA.zoom) {
+  return zoom / (2 * Math.tan((CAMERA_FOV * Math.PI / 180) / 2));
+}
+
+function cameraDistance(zoom = CAMERA.zoom) {
+  const perspective = cameraPerspectiveDistance(zoom);
+  return CAMERA.projection === 'orthographic'
+    ? Math.max(perspective, CAMERA_ORTHO_DISTANCE)
+    : perspective;
+}
+
+function clampCameraTarget(target) {
+  target.x = clamp(target.x, CAMERA_TARGET_MIN.x, CAMERA_TARGET_MAX.x);
+  target.y = clamp(target.y, CAMERA_TARGET_MIN.y, CAMERA_TARGET_MAX.y);
+  target.z = clamp(target.z, CAMERA_TARGET_MIN.z, CAMERA_TARGET_MAX.z);
+  return target;
+}
+
+function shortestAngle(from, to) {
+  const twoPi = Math.PI * 2;
+  return ((to - from + Math.PI) % twoPi + twoPi) % twoPi - Math.PI;
+}
+
+function presetZoom(preset) {
+  const aspect = cameraAspect();
+  return preset.fitWidth
+    ? Math.max(preset.zoom, preset.fitWidth / aspect)
+    : preset.zoom;
+}
+
+function updateOrthoFrustum() {
+  if (!S.cameraOrtho) return;
+  const halfHeight = Math.max(0.05, CAMERA.zoom) / 2;
+  const halfWidth = halfHeight * cameraAspect();
+  S.cameraOrtho.left = -halfWidth;
+  S.cameraOrtho.right = halfWidth;
+  S.cameraOrtho.top = halfHeight;
+  S.cameraOrtho.bottom = -halfHeight;
+  S.cameraOrtho.near = 0.1;
+  S.cameraOrtho.far = 120;
+  S.cameraOrtho.updateProjectionMatrix();
+}
+
+function applyCameraPose() {
+  if (!S.camera) return;
+  const sinPhi = Math.sin(CAMERA.phi);
+  const distance = cameraDistance();
+  S.camera.position.set(
+    CAMERA.target.x + distance * sinPhi * Math.cos(CAMERA.theta),
+    CAMERA.target.y + distance * Math.cos(CAMERA.phi),
+    CAMERA.target.z + distance * sinPhi * Math.sin(CAMERA.theta)
+  );
+  S.camera.up.set(0, 1, 0);
+  S.camera.lookAt(CAMERA.target);
+  S.camera.updateMatrixWorld();
+}
+
+function notifyCameraChange(reason) {
+  if (typeof CAMERA.onChange === 'function') CAMERA.onChange(reason);
+}
+
+function setCameraProjection(mode, { silent = false } = {}) {
+  if (mode !== 'perspective' && mode !== 'orthographic') return;
+  const next = mode === 'orthographic' ? S.cameraOrtho : S.cameraPersp;
+  if (!next) return;
+  const changed = CAMERA.projection !== mode;
+  CAMERA.projection = mode;
+  if (S.camera && S.camera !== next) {
+    next.position.copy(S.camera.position);
+    next.quaternion.copy(S.camera.quaternion);
+    next.up.copy(S.camera.up);
+    S.camera = next;
+  }
+  if (mode === 'orthographic') updateOrthoFrustum();
+  applyCameraPose();
+  if (changed && !silent) notifyCameraChange('projection');
+}
+
+function applyCameraView(view) {
+  CAMERA.theta = view.theta;
+  CAMERA.phi = view.phi;
+  CAMERA.zoom = view.zoom;
+  CAMERA.target.copy(view.target);
+  CAMERA.goalTheta = view.theta;
+  CAMERA.goalPhi = view.phi;
+  CAMERA.goalZoom = view.zoom;
+  CAMERA.goalTarget.copy(view.target);
+  if (CAMERA.projection === 'orthographic') updateOrthoFrustum();
+  applyCameraPose();
+}
+
+/**
+ * Jump or glide to a named preset. Axis presets cancel any active orbit and
+ * land exactly on the requested yaw/pitch; a short dolly-out arc keeps close
+ * inspection transitions from cutting through the bodywork.
+ */
+function setCameraPreset(name, immediate = false) {
+  const preset = CAMERA_PRESETS[name];
+  if (!preset) return;
+  if (preset.projection && preset.projection !== CAMERA.projection) {
+    setCameraProjection(preset.projection, { silent: true });
+  }
+  const target = new THREE.Vector3(preset.target[0], preset.target[1], preset.target[2]);
+  const to = { theta: preset.theta, phi: preset.phi, zoom: presetZoom(preset), target };
+  CAMERA.preset = name;
+  CAMERA.userMoved = false;
+  if (immediate || !S.initialized) {
+    CAMERA.transition = null;
+    applyCameraView(to);
+  } else {
+    CAMERA.transition = {
+      from: {
+        theta: CAMERA.theta,
+        phi: CAMERA.phi,
+        zoom: CAMERA.zoom,
+        target: CAMERA.target.clone()
+      },
+      to,
+      t: 0,
+      duration: 0.78,
+      arc: preset.arc != null ? preset.arc : 0.1
+    };
+  }
+  notifyCameraChange('preset');
+}
+
+function resetCamera(immediate = false) {
+  setCameraPreset(PORTRAIT_QUERY.matches ? 'portrait' : 'threeQuarter', immediate);
+}
+
+function cancelCameraTransition() {
+  if (!CAMERA.transition) return;
+  CAMERA.transition = null;
+  CAMERA.goalTheta = CAMERA.theta;
+  CAMERA.goalPhi = CAMERA.phi;
+  CAMERA.goalZoom = CAMERA.zoom;
+  CAMERA.goalTarget.copy(CAMERA.target);
+}
+
+/** Any deliberate camera gesture leaves the preset and stops auto-rotate. */
+function markCameraManual() {
+  cancelCameraTransition();
+  let changed = false;
+  if (CAMERA.preset) {
+    CAMERA.preset = null;
+    changed = true;
+  }
+  if (autoRotate) {
+    autoRotate = false;
+    changed = true;
+  }
+  CAMERA.userMoved = true;
+  if (changed) notifyCameraChange('manual');
+}
+
+/** Auto-rotate is a free orbit: it leaves the fixed preset framing. */
+function clearCameraPreset() {
+  if (!CAMERA.preset) return;
+  CAMERA.preset = null;
+  CAMERA.userMoved = true;
+  notifyCameraChange('orbit');
+}
+
+/**
+ * Zoom around a screen point. The pivot is the point under the cursor on the
+ * plane through the target, so wheel and pinch zoom move the interesting part
+ * of the car toward the viewer instead of always zooming the orbit centre.
+ */
+function zoomCameraAt(clientX, clientY, factor) {
+  const rect = S.renderer.domElement.getBoundingClientRect();
+  const before = CAMERA.goalZoom;
+  const after = clamp(before * factor, CAMERA_MIN_ZOOM, CAMERA_MAX_ZOOM);
+  if (!Number.isFinite(after) || Math.abs(after - before) < 1e-6) return;
+  const ratio = after / before;
+  const ndcX = ((clientX - rect.left) / Math.max(1, rect.width)) * 2 - 1;
+  const ndcY = 1 - ((clientY - rect.top) / Math.max(1, rect.height)) * 2;
+  const right = new THREE.Vector3().setFromMatrixColumn(S.camera.matrix, 0);
+  const up = new THREE.Vector3().setFromMatrixColumn(S.camera.matrix, 1);
+  const halfHeight = before / 2;
+  const halfWidth = halfHeight * (rect.width / Math.max(1, rect.height));
+  const pivot = CAMERA.goalTarget.clone()
+    .addScaledVector(right, ndcX * halfWidth)
+    .addScaledVector(up, ndcY * halfHeight);
+  const offset = pivot.sub(CAMERA.goalTarget);
+  CAMERA.goalZoom = after;
+  CAMERA.goalTarget.addScaledVector(offset, 1 - ratio);
+  clampCameraTarget(CAMERA.goalTarget);
+}
+
+function panCameraBy(dx, dy) {
+  const rect = S.renderer.domElement.getBoundingClientRect();
+  const worldPerPixel = CAMERA.goalZoom / Math.max(1, rect.height);
+  const right = new THREE.Vector3().setFromMatrixColumn(S.camera.matrix, 0);
+  const up = new THREE.Vector3().setFromMatrixColumn(S.camera.matrix, 1);
+  CAMERA.goalTarget.addScaledVector(right, -dx * worldPerPixel);
+  CAMERA.goalTarget.addScaledVector(up, dy * worldPerPixel);
+  clampCameraTarget(CAMERA.goalTarget);
+}
+
 function initCameraControls() {
   const el = S.renderer.domElement;
   el.addEventListener('contextmenu', (event) => event.preventDefault());
 
-  const onPointerDown = (event) => {
-    if (event.button === 2 || event.shiftKey) {
-      CAMERA.dragging = { mode: 'pan', x: event.clientX, y: event.clientY };
-      el.classList.add('is-panning');
-    } else {
-      CAMERA.dragging = { mode: 'rotate', x: event.clientX, y: event.clientY };
-      el.classList.add('is-dragging');
-    }
-    CAMERA.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
-    if (CAMERA.pointers.size === 2) {
-      CAMERA.dragging = { mode: 'pinch', distance: pointerDistance() };
-    }
-    el.setPointerCapture(event.pointerId);
-    event.preventDefault();
+  const pointerPair = () => Array.from(CAMERA.pointers.values());
+  const pointerDistance = () => {
+    const pair = pointerPair();
+    if (pair.length < 2) return 0;
+    return Math.hypot(pair[0].x - pair[1].x, pair[0].y - pair[1].y);
+  };
+  const pointerCenter = () => {
+    const pair = pointerPair();
+    if (pair.length < 2) return { x: 0, y: 0 };
+    return { x: (pair[0].x + pair[1].x) / 2, y: (pair[0].y + pair[1].y) / 2 };
   };
 
-  const pointerDistance = () => {
-    const values = Array.from(CAMERA.pointers.values());
-    if (values.length < 2) return 0;
-    return Math.hypot(values[0].x - values[1].x, values[0].y - values[1].y);
+  const onPointerDown = (event) => {
+    if (!CAMERA.enabled) return;
+    if (event.pointerType === 'mouse' && event.button > 2) return;
+    const pan = event.button === 2 || event.button === 1 || event.shiftKey;
+    CAMERA.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (CAMERA.pointers.size === 1) {
+      CAMERA.dragging = { mode: pan ? 'pan' : 'rotate', x: event.clientX, y: event.clientY };
+      el.classList.toggle('is-panning', pan);
+      el.classList.toggle('is-dragging', !pan);
+    } else if (CAMERA.pointers.size === 2) {
+      const center = pointerCenter();
+      CAMERA.pinch = { distance: pointerDistance(), x: center.x, y: center.y };
+      CAMERA.dragging = { mode: 'pinch' };
+      el.classList.remove('is-panning');
+      el.classList.add('is-dragging');
+    }
+    try { el.setPointerCapture(event.pointerId); } catch (_) { /* noop */ }
+    event.preventDefault();
   };
 
   const onPointerMove = (event) => {
@@ -1126,112 +1370,132 @@ function initCameraControls() {
     CAMERA.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
 
     if (CAMERA.pointers.size >= 2) {
-      const distance = pointerDistance();
-      if (CAMERA.dragging && CAMERA.dragging.mode === 'pinch' && CAMERA.dragging.distance > 0) {
-        const ratio = distance / CAMERA.dragging.distance;
-        CAMERA.goalRadius = clamp(CAMERA.goalRadius / ratio, 4.0, 17);
+      const distance = Math.max(1, pointerDistance());
+      const center = pointerCenter();
+      if (CAMERA.pinch) {
+        const dx = center.x - CAMERA.pinch.x;
+        const dy = center.y - CAMERA.pinch.y;
+        if (Math.abs(dx) > 0.01 || Math.abs(dy) > 0.01) {
+          markCameraManual();
+          panCameraBy(dx, dy);
+        }
+        const ratio = CAMERA.pinch.distance / distance;
+        if (Math.abs(ratio - 1) > 0.001) {
+          markCameraManual();
+          zoomCameraAt(center.x, center.y, clamp(ratio, 0.8, 1.25));
+        }
       }
-      CAMERA.dragging = { mode: 'pinch', distance };
+      CAMERA.pinch = { distance, x: center.x, y: center.y };
+      event.preventDefault();
       return;
     }
 
     if (!CAMERA.dragging) return;
     const dx = event.clientX - CAMERA.dragging.x;
     const dy = event.clientY - CAMERA.dragging.y;
+    if (!dx && !dy) return;
     CAMERA.dragging.x = event.clientX;
     CAMERA.dragging.y = event.clientY;
+    markCameraManual();
 
+    const height = Math.max(320, el.clientHeight || 1);
     if (CAMERA.dragging.mode === 'pan') {
-      const scale = CAMERA.goalRadius * 0.0016;
-      const right = new THREE.Vector3().setFromMatrixColumn(S.camera.matrix, 0);
-      const up = new THREE.Vector3().setFromMatrixColumn(S.camera.matrix, 1);
-      CAMERA.goalTarget.addScaledVector(right, -dx * scale);
-      CAMERA.goalTarget.addScaledVector(up, dy * scale);
-      CAMERA.goalTarget.x = clamp(CAMERA.goalTarget.x, -3.4, 3.4);
-      CAMERA.goalTarget.y = clamp(CAMERA.goalTarget.y, -0.2, 2.3);
-      CAMERA.goalTarget.z = clamp(CAMERA.goalTarget.z, -3.4, 3.4);
+      panCameraBy(dx, dy);
     } else {
-      CAMERA.goalTheta -= dx * 0.0063;
-      CAMERA.goalPhi = clamp(CAMERA.goalPhi - dy * 0.005, 0.24, 1.43);
-      CAMERA.userMoved = true;
+      // The scene follows the pointer: drag right swings the object right,
+      // drag down tips the top of the car toward the viewer.
+      CAMERA.goalTheta += dx * (Math.PI * 2 * 0.65 / height);
+      CAMERA.goalPhi = clamp(
+        CAMERA.goalPhi - dy * (Math.PI * 0.9 / height),
+        CAMERA_PHI_MIN,
+        CAMERA_PHI_MAX
+      );
     }
     event.preventDefault();
   };
 
   const onPointerUp = (event) => {
     CAMERA.pointers.delete(event.pointerId);
+    try { el.releasePointerCapture(event.pointerId); } catch (_) { /* noop */ }
     if (CAMERA.pointers.size === 0) {
       CAMERA.dragging = null;
+      CAMERA.pinch = null;
       el.classList.remove('is-dragging');
       el.classList.remove('is-panning');
     } else if (CAMERA.pointers.size === 1) {
-      const [remaining] = Array.from(CAMERA.pointers.values());
+      const [remaining] = pointerPair();
+      CAMERA.pinch = null;
       CAMERA.dragging = { mode: 'rotate', x: remaining.x, y: remaining.y };
-      el.classList.remove('is-dragging');
+      el.classList.remove('is-panning');
       el.classList.add('is-dragging');
     }
-    try { el.releasePointerCapture(event.pointerId); } catch (_) { /* noop */ }
   };
 
   el.addEventListener('pointerdown', onPointerDown);
   el.addEventListener('pointermove', onPointerMove);
   el.addEventListener('pointerup', onPointerUp);
   el.addEventListener('pointercancel', onPointerUp);
-  el.addEventListener('pointerleave', (event) => {
-    if (CAMERA.dragging && CAMERA.pointers.size === 1) {
-      // Keep capture; pointerleave should not cancel an active drag.
-    }
+  window.addEventListener('blur', () => {
+    // A window switch can swallow pointerup; drop stale pointers so the next
+    // gesture starts in a single-pointer state.
+    CAMERA.pointers.clear();
+    CAMERA.dragging = null;
+    CAMERA.pinch = null;
+    el.classList.remove('is-dragging');
+    el.classList.remove('is-panning');
   });
 
   el.addEventListener('wheel', (event) => {
     event.preventDefault();
-    const factor = Math.exp(event.deltaY * 0.0009);
-    CAMERA.goalRadius = clamp(CAMERA.goalRadius * factor, 4.0, 17);
+    if (!CAMERA.enabled) return;
+    const delta = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY;
+    const factor = Math.exp(clamp(delta, -240, 240) * (event.ctrlKey ? 0.012 : 0.0014));
+    if (!Number.isFinite(factor) || Math.abs(factor - 1) < 1e-4) return;
+    markCameraManual();
+    zoomCameraAt(event.clientX, event.clientY, clamp(factor, 0.7, 1.4));
   }, { passive: false });
 
   el.addEventListener('dblclick', () => resetCamera());
 }
 
-function setCameraPreset(name, immediate = false) {
-  const preset = CAMERA_PRESETS[name];
-  if (!preset) return;
-  CAMERA.goalTheta = preset.theta;
-  CAMERA.goalPhi = preset.phi;
-  CAMERA.goalRadius = preset.radius;
-  CAMERA.goalTarget.set(preset.target[0], preset.target[1], preset.target[2]);
-  CAMERA.userMoved = false;
-  if (immediate) {
-    CAMERA.theta = preset.theta;
-    CAMERA.phi = preset.phi;
-    CAMERA.radius = preset.radius;
-    CAMERA.target.copy(CAMERA.goalTarget);
-  }
-}
-
-function resetCamera(immediate = false) {
-  setCameraPreset(PORTRAIT_QUERY.matches ? 'portrait' : 'threeQuarter', immediate);
-}
-
 function updateCamera(dt) {
-  if (autoRotate && !REDUCED_MOTION && !CAMERA.dragging) {
-    CAMERA.goalTheta += dt * 0.115;
+  if (CAMERA.transition) {
+    const tr = CAMERA.transition;
+    tr.t = Math.min(1, tr.t + Math.max(0, dt) / tr.duration);
+    const ease = tr.t * tr.t * (3 - 2 * tr.t);
+    CAMERA.theta = tr.from.theta + shortestAngle(tr.from.theta, tr.to.theta) * ease;
+    CAMERA.phi = lerp(tr.from.phi, tr.to.phi, ease);
+    const zoom = Math.exp(lerp(Math.log(tr.from.zoom), Math.log(tr.to.zoom), ease));
+    CAMERA.zoom = zoom * (1 + Math.sin(Math.PI * ease) * tr.arc);
+    CAMERA.target.lerpVectors(tr.from.target, tr.to.target, ease);
+    if (tr.t >= 1) {
+      CAMERA.transition = null;
+      CAMERA.theta = tr.to.theta;
+      CAMERA.phi = tr.to.phi;
+      CAMERA.zoom = tr.to.zoom;
+      CAMERA.target.copy(tr.to.target);
+      CAMERA.goalTheta = tr.to.theta;
+      CAMERA.goalPhi = tr.to.phi;
+      CAMERA.goalZoom = tr.to.zoom;
+      CAMERA.goalTarget.copy(tr.to.target);
+    }
+  } else {
+    if (autoRotate && !REDUCED_MOTION && !CAMERA.dragging) {
+      CAMERA.goalTheta += Math.max(0, dt) * 0.115;
+    }
+    const speed = CAMERA.userMoved || CAMERA.dragging ? 16 : 7;
+    const k = 1 - Math.exp(-Math.max(0, dt) * speed);
+    CAMERA.theta = lerp(CAMERA.theta, CAMERA.goalTheta, k);
+    CAMERA.phi = lerp(CAMERA.phi, CAMERA.goalPhi, k);
+    CAMERA.zoom = Math.exp(lerp(Math.log(CAMERA.zoom), Math.log(CAMERA.goalZoom), k));
+    CAMERA.target.lerp(CAMERA.goalTarget, k);
+    if (Math.abs(shortestAngle(CAMERA.theta, CAMERA.goalTheta)) < 1e-5) CAMERA.theta = CAMERA.goalTheta;
+    if (Math.abs(CAMERA.phi - CAMERA.goalPhi) < 1e-5) CAMERA.phi = CAMERA.goalPhi;
+    if (Math.abs(Math.log(CAMERA.zoom / CAMERA.goalZoom)) < 1e-5) CAMERA.zoom = CAMERA.goalZoom;
+    if (CAMERA.target.distanceToSquared(CAMERA.goalTarget) < 1e-10) CAMERA.target.copy(CAMERA.goalTarget);
   }
-
-  const speed = CAMERA.userMoved || CAMERA.dragging ? 11 : 3.4;
-  const k = 1 - Math.exp(-dt * speed);
-  CAMERA.theta = lerp(CAMERA.theta, CAMERA.goalTheta, k);
-  CAMERA.phi = lerp(CAMERA.phi, CAMERA.goalPhi, k);
-  CAMERA.radius = lerp(CAMERA.radius, CAMERA.goalRadius, k);
-  CAMERA.target.lerp(CAMERA.goalTarget, k);
-
-  const sinPhi = Math.sin(CAMERA.phi);
-  S.camera.position.set(
-    CAMERA.target.x + CAMERA.radius * sinPhi * Math.cos(CAMERA.theta),
-    CAMERA.target.y + CAMERA.radius * Math.cos(CAMERA.phi),
-    CAMERA.target.z + CAMERA.radius * sinPhi * Math.sin(CAMERA.theta)
-  );
-  S.camera.lookAt(CAMERA.target);
-  S.camera.updateMatrixWorld();
+  if (CAMERA.projection === 'orthographic') updateOrthoFrustum();
+  applyCameraPose();
 }
 
 function resizeScene() {
@@ -1241,8 +1505,26 @@ function resizeScene() {
   const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
   S.renderer.setPixelRatio(pixelRatio);
   S.renderer.setSize(width, height, true);
-  S.camera.aspect = width / height;
-  S.camera.updateProjectionMatrix();
+  if (S.cameraPersp) {
+    S.cameraPersp.aspect = width / height;
+    S.cameraPersp.updateProjectionMatrix();
+  }
+  updateOrthoFrustum();
+  // Keep an untouched axis view fitted when the viewport changes shape.
+  if (S.initialized && CAMERA.preset && !CAMERA.userMoved && !CAMERA.transition) {
+    const preset = CAMERA_PRESETS[CAMERA.preset];
+    if (preset) {
+      const fitted = presetZoom(preset);
+      if (Math.abs(fitted - CAMERA.goalZoom) > 0.01) {
+        CAMERA.goalZoom = fitted;
+        if (CAMERA.projection === 'orthographic') {
+          CAMERA.zoom = fitted;
+          updateOrthoFrustum();
+          applyCameraPose();
+        }
+      }
+    }
+  }
 }
 
 function projectWorld(world, out = { x: 0, y: 0, visible: false }) {
@@ -1280,8 +1562,10 @@ function initScene() {
   S.scene = new THREE.Scene();
   S.scene.fog = new THREE.Fog(0x070b11, 17, 48);
 
-  S.camera = new THREE.PerspectiveCamera(36, 1, 0.1, 90);
-  S.camera.position.set(8, 4, 5);
+  S.cameraPersp = new THREE.PerspectiveCamera(CAMERA_FOV, 1, 0.1, 120);
+  S.cameraOrtho = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 120);
+  S.camera = S.cameraPersp;
+  S.cameraPersp.position.set(8, 4, 5);
 
   createMaterials();
   setupEnvironment();
@@ -1316,7 +1600,13 @@ function initScene() {
   if (PORTRAIT_QUERY.matches) setCameraPreset('portrait', true);
   else setCameraPreset('threeQuarter', true);
   const onPortraitChange = (event) => {
-    setCameraPreset(event.matches ? 'portrait' : 'threeQuarter');
+    // A deliberate axis view is re-fitted to the new viewport; the default
+    // view swaps between the desktop and portrait framing.
+    if (CAMERA.preset && CAMERA.preset !== 'portrait' && CAMERA.preset !== 'threeQuarter') {
+      setCameraPreset(CAMERA.preset);
+    } else {
+      setCameraPreset(event.matches ? 'portrait' : 'threeQuarter');
+    }
   };
   if (PORTRAIT_QUERY.addEventListener) PORTRAIT_QUERY.addEventListener('change', onPortraitChange);
   else if (PORTRAIT_QUERY.addListener) PORTRAIT_QUERY.addListener(onPortraitChange);

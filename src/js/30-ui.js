@@ -178,6 +178,7 @@ function setAutoRotate(enabled) {
   } else {
     autoRotate = Boolean(enabled);
   }
+  if (autoRotate) clearCameraPreset();
   const button = document.getElementById('btnAutoRotate');
   if (button) {
     button.classList.toggle('is-active', autoRotate);
@@ -194,7 +195,6 @@ function resetAll() {
   persistState();
   resetCamera(false);
   resetInspectButton();
-  syncCameraButtonActive(PORTRAIT_QUERY.matches ? 'portrait' : 'threeQuarter');
   refreshAll({ rebuild: true });
   showToast('已恢复默认标定与相机');
 }
@@ -678,6 +678,21 @@ function syncCameraButtonActive(name) {
   });
 }
 
+function syncCameraModeButtons() {
+  const button = document.getElementById('btnOrtho');
+  if (!button) return;
+  const ortho = CAMERA.projection === 'orthographic';
+  button.classList.toggle('is-active', ortho);
+  button.setAttribute('aria-pressed', String(ortho));
+}
+
+function setOrtho(enabled) {
+  const ortho = Boolean(enabled);
+  if ((CAMERA.projection === 'orthographic') === ortho) return;
+  setCameraProjection(ortho ? 'orthographic' : 'perspective');
+  showToast(ortho ? '正交投影：平行线保持平行，无透视收敛' : '透视投影：恢复近大远小');
+}
+
 function resetInspectButton() {
   UI.inspectIndex = -1;
   const button = document.getElementById('btnInspect');
@@ -693,7 +708,7 @@ function cycleInspectView() {
   if (!state.xray) setXray(true);
   setPanel('panelControls', false);
   setPanel('panelTelemetry', false);
-  setCameraPreset(view.preset, true);
+  setCameraPreset(view.preset);
   syncCameraButtonActive('');
   const button = document.getElementById('btnInspect');
   if (button) {
@@ -777,15 +792,18 @@ function bindControls() {
   if (btnResetView) btnResetView.addEventListener('click', () => {
     resetCamera();
     resetInspectButton();
-    syncCameraButtonActive(PORTRAIT_QUERY.matches ? 'portrait' : 'threeQuarter');
     showToast('相机已重置');
+  });
+
+  const btnOrtho = document.getElementById('btnOrtho');
+  if (btnOrtho) btnOrtho.addEventListener('click', () => {
+    setOrtho(CAMERA.projection !== 'orthographic');
   });
 
   $$('[data-camera]').forEach((button) => {
     button.addEventListener('click', () => {
       resetInspectButton();
       setCameraPreset(button.dataset.camera);
-      syncCameraButtonActive(button.dataset.camera);
     });
   });
 
@@ -832,13 +850,17 @@ function bindKeyboard() {
       return;
     }
     if (isTyping || modalOpen) return;
+    // Leave browser and OS shortcuts (Ctrl+R, Cmd+O, Alt+...) alone.
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
 
     const key = event.key.toLowerCase();
     if (key === 'r') {
       resetCamera();
       resetInspectButton();
-      syncCameraButtonActive(PORTRAIT_QUERY.matches ? 'portrait' : 'threeQuarter');
       showToast('视角已重置');
+      event.preventDefault();
+    } else if (key === 'o') {
+      setOrtho(CAMERA.projection !== 'orthographic');
       event.preventDefault();
     } else if (key === 'm') {
       cycleInspectView();
@@ -872,10 +894,8 @@ function bindKeyboard() {
       event.preventDefault();
     } else if (['1', '2', '3', '4', '5'].includes(key)) {
       const presets = ['threeQuarter', 'side', 'front', 'rear', 'top'];
-      const name = presets[Number(key) - 1];
       resetInspectButton();
-      setCameraPreset(name);
-      syncCameraButtonActive(name);
+      setCameraPreset(presets[Number(key) - 1]);
       event.preventDefault();
     }
   });
@@ -920,6 +940,17 @@ function initUI() {
   bindControls();
   syncControlsFromState();
   refreshSelfTests();
+  CAMERA.onChange = (reason) => {
+    if (reason === 'preset') {
+      syncCameraButtonActive(CAMERA.preset || '');
+    } else if (reason === 'manual' || reason === 'orbit') {
+      syncCameraButtonActive('');
+    }
+    syncCameraModeButtons();
+    if (reason === 'preset' || reason === 'manual') setAutoRotate(false);
+  };
+  syncCameraButtonActive(CAMERA.preset || '');
+  syncCameraModeButtons();
   UI.initialized = true;
 }
 

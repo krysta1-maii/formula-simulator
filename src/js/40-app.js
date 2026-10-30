@@ -273,7 +273,16 @@ function bindGlobalAPI() {
         liftedCount: model.liftedCount,
         diag: getCarDiagnostics(),
         selfTests: tests.map((test) => ({ name: test.name, ok: test.ok, detail: test.detail })),
-        camera: { theta: CAMERA.goalTheta, phi: CAMERA.goalPhi, radius: CAMERA.goalRadius },
+        camera: {
+          theta: CAMERA.theta,
+          phi: CAMERA.phi,
+          zoom: CAMERA.zoom,
+          radius: cameraDistance(),
+          projection: CAMERA.projection,
+          preset: CAMERA.preset,
+          target: CAMERA.target.toArray(),
+          transition: Boolean(CAMERA.transition)
+        },
         pendingRebuild: PENDING.rebuild
       };
     },
@@ -297,7 +306,8 @@ function bindGlobalAPI() {
     closeModel: UI.closeModelModal,
     runSelfTests: () => runSelfTests(state),
     exportScreenshot,
-    setCameraPreset
+    setCameraPreset,
+    setCameraProjection
   };
 }
 

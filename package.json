@@ -7,6 +7,7 @@
   "scripts": {
     "build": "node tools/build.mjs",
     "test": "node tools/test-core.mjs",
+    "test:camera": "node tools/test-camera.mjs",
     "dev": "node tools/dev-server.mjs"
   },
   "engines": {
