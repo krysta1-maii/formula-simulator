@@ -54,9 +54,6 @@ function formatOutputValue(param, value) {
     case 'dampingF':
     case 'dampingR':
       return Number(value).toFixed(2) + ' ζ';
-    case 'motionRatioF':
-    case 'motionRatioR':
-      return Number(value).toFixed(2);
     case 'arbFront':
     case 'arbRear':
       return formatInt(value) + '%';
@@ -768,6 +765,12 @@ function refreshTelemetry(model) {
     );
   } else {
     setText('cornerForces', '—');
+  }
+  if (model.motionRatioInstant && model.motionRatioInstant.length === 4) {
+    const instant = model.motionRatioInstant;
+    setText('dynRatio', `${((instant[0] + instant[1]) / 2).toFixed(2)} / ${((instant[2] + instant[3]) / 2).toFixed(2)}`);
+  } else if (model.motionRatio) {
+    setText('dynRatio', `${model.motionRatio.front.toFixed(2)} / ${model.motionRatio.rear.toFixed(2)}`);
   }
   if (model.frequencies) {
     setText('dynFreq', `${model.frequencies.heave.toFixed(2)} / ${model.frequencies.roll.toFixed(2)} / ${model.frequencies.pitch.toFixed(2)} Hz`);

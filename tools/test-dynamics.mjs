@@ -11,10 +11,11 @@ new Function('module', 'exports', 'globalThis', read('vendor/three.min.js') + '\
 const THREE = threeModule.exports;
 
 const factory = new Function('THREE', 'localStorage',
-  read('src/js/00-core.js') + '\n' + read('src/js/05-body-dynamics.js') + '\nreturn {' +
+  read('src/js/00-core.js') + '\n' + read('src/js/03-suspension.js') + '\n' + read('src/js/05-body-dynamics.js') + '\nreturn {' +
   ' computeStatic, computeBodyInertia, runSelfTests, DEFAULTS, NUM_LIMITS, GRAVITY,' +
   ' simCreate, simReset, simStep, simRunFor, simAdvance, simBuildModel, simApplyImpulse,' +
-  ' simEvaluate, runDynamicSelfTests, SIM_DT, simQuatFromEuler, simEulerFromQuat' +
+  ' simEvaluate, runDynamicSelfTests, SIM_DT, simQuatFromEuler, simEulerFromQuat,' +
+  ' suspSolveCorner, suspensionBuild, suspRackForSteer, suspWheelSteer' +
   '};');
 const api = factory(THREE, { getItem: () => null, setItem: () => {} });
 const {
@@ -30,7 +31,11 @@ const {
   simBuildModel,
   simApplyImpulse,
   runDynamicSelfTests,
-  SIM_DT
+  SIM_DT,
+  suspSolveCorner,
+  suspensionBuild,
+  suspRackForSteer,
+  suspWheelSteer
 } = api;
 
 let failures = 0;
@@ -77,6 +82,63 @@ check('natural frequencies are finite and positive', finite(reference.frequencie
 check('wheel damping is positive', reference.damperRateWheel.every((value) => finite(value) && value > 0));
 check('motion ratios are in range', reference.motionRatio.front >= 0.3 && reference.motionRatio.front <= 0.9 && reference.motionRatio.rear >= 0.3 && reference.motionRatio.rear <= 0.9);
 check('coil rate follows wheel rate / i^2', reference.springRateCoil.every((value, index) => Math.abs(value - reference.springRates[index] / Math.pow(index < 2 ? reference.motionRatio.front : reference.motionRatio.rear, 2)) < 1e-6));
+
+console.log('\n[1b] mechanism kinematics');
+const mechanism = reference.suspension.corners;
+const designRows = reference.suspension.design;
+const travelSamples = [-25, -15, 0, 15, 25];
+let closureMax = 0;
+let contactMax = 0;
+const solvedRows = travelSamples.map((mm) => {
+  const solved = mechanism.map((corner) => suspSolveCorner(
+    corner,
+    { x: 0, y: -mm / 1000, z: 0 },
+    new THREE.Quaternion(),
+    0,
+    null,
+    true
+  ));
+  closureMax = Math.max(closureMax, ...solved.map((row) => row.error));
+  contactMax = Math.max(contactMax, ...solved.map((row) => Math.abs(row.contact.y - mm / 1000)));
+  return solved;
+});
+check('four corner mechanisms close over ±25 mm travel', closureMax < 1e-6, (closureMax * 1000).toExponential(2) + ' mm');
+check('tire contact stays on the road plane', contactMax < 1e-6, contactMax.toExponential(2) + ' m');
+check(
+  'bump shortens every coil and droop extends it',
+  designRows.every((row, i) => solvedRows[3][i].coilLength < row.length0 - 1e-4 && solvedRows[1][i].coilLength > row.length0 + 1e-4),
+  designRows.map((row, i) => ((solvedRows[3][i].coilLength - row.length0) * 1000).toFixed(2)).join(' / ') + ' mm'
+);
+check(
+  'measured motion ratios stay positive',
+  solvedRows.every((row) => row.every((corner) => corner.motionRatio != null && corner.motionRatio > 0.15 && corner.motionRatio < 1.5)),
+  reference.motionRatio.front.toFixed(3) + ' / ' + reference.motionRatio.rear.toFixed(3)
+);
+const rackSteer = 12 * Math.PI / 180;
+const rackShift = suspRackForSteer(mechanism, { x: 0, y: 0, z: 0 }, new THREE.Quaternion(), rackSteer);
+const rackSolved = mechanism.filter((corner) => corner.front).map((corner) =>
+  suspSolveCorner(corner, { x: 0, y: 0, z: 0 }, new THREE.Quaternion(), rackShift, null, false));
+const meanSteer = rackSolved.reduce((acc, row) => acc + suspWheelSteer(row.wheelQuat), 0) / rackSolved.length;
+check(
+  'rack calibration reaches the steering input',
+  Math.abs(meanSteer - rackSteer) < 0.01,
+  (meanSteer * 180 / Math.PI).toFixed(2) + '° at ' + (rackShift * 1000).toFixed(1) + ' mm'
+);
+const strokeSim = simCreate(DEFAULTS, { settle: 1.5 });
+simApplyImpulse(strokeSim, 'heave');
+simRunFor(strokeSim, 0.06);
+const strokeModel = simBuildModel(strokeSim);
+check(
+  'telemetry compression equals the solved coil stroke',
+  strokeModel.springCompressionMm.every((value, i) =>
+    Math.abs(value - (designRows[i].length0 - strokeModel.solved[i].coilLength) * 1000) < 1e-6),
+  strokeModel.springCompressionMm.map((value) => value.toFixed(2)).join(' / ') + ' mm'
+);
+check(
+  'solved wheel poses remain on the plane',
+  strokeModel.solved.every((row) => Math.abs(row.contact[1]) < 1e-6),
+  strokeModel.solved.map((row) => row.contact[1].toExponential(1)).join(' / ')
+);
 check('static self-tests still pass', runSelfTests(DEFAULTS).every((test) => test.ok));
 
 console.log('\n[2] level dynamic equilibrium');
@@ -200,8 +262,6 @@ for (let i = 0; i < 120; i += 1) {
     wheelRateR: randomBetween(random, NUM_LIMITS.wheelRateR[0], NUM_LIMITS.wheelRateR[1]),
     dampingF: randomBetween(random, NUM_LIMITS.dampingF[0], NUM_LIMITS.dampingF[1]),
     dampingR: randomBetween(random, NUM_LIMITS.dampingR[0], NUM_LIMITS.dampingR[1]),
-    motionRatioF: randomBetween(random, NUM_LIMITS.motionRatioF[0], NUM_LIMITS.motionRatioF[1]),
-    motionRatioR: randomBetween(random, NUM_LIMITS.motionRatioR[0], NUM_LIMITS.motionRatioR[1]),
     arbFront: randomBetween(random, NUM_LIMITS.arbFront[0], NUM_LIMITS.arbFront[1]),
     arbRear: randomBetween(random, NUM_LIMITS.arbRear[0], NUM_LIMITS.arbRear[1])
   });

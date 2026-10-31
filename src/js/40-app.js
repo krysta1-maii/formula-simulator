@@ -20,6 +20,17 @@ function liveModel() {
   return simBuildModel(SIM, state);
 }
 
+function calibrateRack(sim, steerDeg) {
+  if (!sim || !sim.reference || !sim.reference.suspension) return 0;
+  const st = sim.state;
+  return suspRackForSteer(
+    sim.reference.suspension.corners,
+    { x: st.x, y: st.y, z: st.z },
+    new THREE.Quaternion(st.qx, st.qy, st.qz, st.qw),
+    steerDeg * DEG
+  );
+}
+
 function updateSceneFromModel(model) {
   if (typeof applyXray === 'function') applyXray();
   S.roadGroup.quaternion.copy(model.frame.q);
@@ -43,6 +54,7 @@ function processPendingRebuild(now) {
   PENDING.lastBuildAt = now;
   if (!SIM) SIM = simCreate(state);
   simReset(SIM, state, { settle: 0.5 });
+  SIM.rackShift = calibrateRack(SIM, state.steer);
   const model = simBuildModel(SIM, state);
   buildCar(model);
   applyXray();
@@ -62,6 +74,7 @@ function refreshAll({ rebuild = false } = {}) {
   const reference = computeStatic(state);
   if (!SIM) SIM = simCreate(state);
   SIM.reference = reference;
+  SIM.rackShift = calibrateRack(SIM, state.steer);
   const model = simBuildModel(SIM, state);
   if (rebuild) {
     requestRebuild(model);
@@ -272,6 +285,7 @@ function bindGlobalAPI() {
         rollDeg: model.poseDeg.roll,
         yawDeg: model.poseDeg.yaw,
         bodyPos: model.bodyPos ? { x: model.bodyPos.x, y: model.bodyPos.y, z: model.bodyPos.z } : null,
+        solved: model.solved || null,
         bodyVelocity: model.bodyVelocity ? { x: model.bodyVelocity.x, y: model.bodyVelocity.y, z: model.bodyVelocity.z } : null,
         bodyRatesDeg: model.bodyRatesDeg || null,
         travelMm: model.travelMm.slice(),
@@ -373,6 +387,22 @@ function bindGlobalAPI() {
     },
     openModel: UI.openModelModal,
     closeModel: UI.closeModelModal,
+    getSceneProbe: () => ({
+      springs: (CAR.springs || []).map((spring) => spring.lastA.distanceTo(spring.lastB)),
+      wireLengths: SIM && SIM.reference && SIM.reference.suspension
+        ? SIM.reference.suspension.design.map((row) => row.length0)
+        : [],
+      rockerAngles: (CAR.corners || []).map((corner) => corner.angle),
+      wheelPos: (CAR.corners || []).map((corner) => (corner.wheelRoot ? corner.wheelRoot.position.toArray() : null)),
+      rackShiftMm: CAR.diag.rackTravelMm,
+      stretch: {
+        susp: CAR.diag.maxSuspLinkStretchMm,
+        tie: CAR.diag.tieRodStretchMm,
+        push: CAR.diag.pushRodStretchMm,
+        arb: CAR.diag.arbStretchMm
+      },
+      solverOk: CAR.diag.rockerSolveOk
+    }),
     runSelfTests: () => runSelfTests(state),
     runDynamicSelfTests: () => runDynamicSelfTests(state),
     exportScreenshot,
@@ -434,6 +464,7 @@ function boot() {
 
     initScene();
     SIM = simCreate(state, { settle: 1.8 });
+    SIM.rackShift = calibrateRack(SIM, state.steer);
     const initialModel = simBuildModel(SIM, state);
     S.roadGroup.quaternion.copy(initialModel.frame.q);
     S.roadGroup.updateMatrixWorld(true);

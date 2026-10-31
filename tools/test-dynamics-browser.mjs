@@ -167,18 +167,41 @@ try {
   await evaluate("window.FSApp.resetDynamics({ settle: 1 })");
   await evaluate("window.FSApp.impulse('heave')");
   await evaluate("window.FSApp.advanceSimulation(0.12)");
-  const impulse = await snapshot();
+  const impulseBundle = await evaluateJson("({ snapshot: window.FSApp.getSnapshot(), scene: window.FSApp.getSceneProbe() })");
+  const impulse = impulseBundle.snapshot;
+  const scene = impulseBundle.scene;
   const impulseTravel = Math.max(...impulse.travelMm.map((value) => Math.abs(value)));
   check('heave impulse loads the suspension', impulseTravel > 2, impulseTravel.toFixed(2) + ' mm');
+  const visibleStroke = scene.wireLengths.map((wire, index) => (wire - scene.springs[index]) * 1000);
+  const strokeDelta = Math.max(...visibleStroke.map((value, index) => Math.abs(value - impulse.springCompressionMm[index])));
+  check(
+    'rendered coil stroke equals the telemetry compression',
+    strokeDelta < 5e-3,
+    visibleStroke.map((value) => value.toFixed(3)).join(' / ') + ' mm · Δ ' + strokeDelta.toExponential(1)
+  );
+  check(
+    'mechanism closes in the rendered scene',
+    scene.stretch.susp < 0.01 && scene.stretch.tie < 0.01 && scene.stretch.arb < 0.01 && scene.solverOk,
+    'susp ' + scene.stretch.susp.toFixed(4) + ' · tie ' + scene.stretch.tie.toFixed(4) + ' · arb ' + scene.stretch.arb.toFixed(4) + ' mm'
+  );
+  check(
+    'wheel centres stay one tire radius above the plane',
+    scene.wheelPos.every((position) => Math.abs(position[1] - 0.36) < 0.002),
+    scene.wheelPos.map((position) => position[1].toFixed(4)).join(' / ')
+  );
   await evaluate("window.FSApp.advanceSimulation(3.5)");
   const settled = await snapshot();
   const settledTravel = Math.max(...settled.travelMm.map((value) => Math.abs(value)));
   check('spring-damper settles after the impulse', settledTravel < 0.2 && settled.sim.holding, settledTravel.toFixed(3) + ' mm');
 
   await evaluate("window.FSApp.impulse('roll')");
-  await evaluate("window.FSApp.advanceSimulation(0.12)");
-  const rollSnap = await snapshot();
-  check('roll impulse produces body roll', Math.abs(rollSnap.rollDeg) > 0.05, rollSnap.rollDeg.toFixed(3) + '°');
+  let rollPeak = 0;
+  for (let step = 0; step < 8; step += 1) {
+    await evaluate("window.FSApp.advanceSimulation(0.05)");
+    const rollSnap = await snapshot();
+    rollPeak = Math.max(rollPeak, Math.abs(rollSnap.rollDeg));
+  }
+  check('roll impulse produces body roll', rollPeak > 0.1, rollPeak.toFixed(3) + '° peak');
   await evaluate("window.FSApp.advanceSimulation(3.0)");
 
   await evaluate("window.FSApp.resetDynamics({ settle: 1 })");

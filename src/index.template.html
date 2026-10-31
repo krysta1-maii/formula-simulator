@@ -246,16 +246,6 @@
           </div>
           <div class="control split-2">
             <div>
-              <div class="control-head"><label for="motionRatioF">前运动比</label><output id="motionRatioFOut" for="motionRatioF">0.58</output></div>
-              <input type="range" id="motionRatioF" data-param="motionRatioF" data-kind="decimal2" min="0.3" max="0.9" step="0.01" value="0.58">
-            </div>
-            <div>
-              <div class="control-head"><label for="motionRatioR">后运动比</label><output id="motionRatioROut" for="motionRatioR">0.62</output></div>
-              <input type="range" id="motionRatioR" data-param="motionRatioR" data-kind="decimal2" min="0.3" max="0.9" step="0.01" value="0.62">
-            </div>
-          </div>
-          <div class="control split-2">
-            <div>
               <div class="control-head"><label for="arbFront">前防倾杆硬度</label><output id="arbFrontOut" for="arbFront">60%</output></div>
               <input type="range" id="arbFront" data-param="arbFront" data-kind="int" min="0" max="100" step="1" value="60">
             </div>
@@ -266,7 +256,7 @@
           </div>
           <div class="inline-note">
             <span class="note-dot"></span>
-            轮心率是轮心等效刚度；运动比 i 将其换算为弹簧刚度 k<sub>s</sub> = k<sub>w</sub>/i² 和阻尼器轴端阻尼。阻尼滑块给出轮心阻尼比 ζ，0.35 对应欠阻尼衰减。
+            轮心率是设计位置的轮心刚度；运动比由四角机构实时反解得到，页面据此换算弹簧刚度 k<sub>s</sub> = k<sub>w</sub>/i² 与阻尼器轴端阻尼。阻尼滑块给出轮心阻尼比 ζ，0.35 对应欠阻尼衰减。
           </div>
           <div class="control">
             <div class="control-head">
@@ -406,6 +396,7 @@
           <div><dt>车体角速度</dt><dd class="mono" id="bodyRates">—</dd></div>
           <div><dt>四角行程 / 弹簧压缩</dt><dd class="mono" id="cornerTravel">—</dd></div>
           <div><dt>弹簧 / 阻尼 / 防倾杆</dt><dd class="mono" id="cornerForces">—</dd></div>
+          <div><dt>实测运动比 前 / 后</dt><dd id="dynRatio">—</dd></div>
           <div><dt>固有频率 h / θ / φ</dt><dd id="dynFreq">—</dd></div>
           <div><dt>惯量 I<sub>xx</sub> / I<sub>yy</sub> / I<sub>zz</sub></dt><dd id="dynInertia">—</dd></div>
           <div><dt>悬架杆件端点</dt><dd id="linkStatus">—</dd></div>
@@ -497,10 +488,10 @@
         <div class="modal-cols">
           <section>
             <h3><span>01</span>本期范围</h3>
-            <p>本页面是 <b>DESIGN.md</b> 阶段二的交互演示：在阶段一的外观、倾斜路面和静态四角载荷之上，加入车体六自由度、四角弹簧—阻尼器、等效运动比和前后防倾杆动态。车体不再直接贴合路面，而是在悬挂力、重力和接触摩擦作用下积分升沉、俯仰、侧倾、纵移、横移与横摆。</p>
+            <p>本页面是 <b>DESIGN.md</b> 阶段二的交互演示：在阶段一的外观、倾斜路面和静态四角载荷之上，加入车体六自由度、四角机构反解的弹簧—阻尼器和前后防倾杆动态。车体不再直接贴合路面，而是在悬挂力、重力和接触摩擦作用下积分升沉、俯仰、侧倾、纵移、横移与横摆。</p>
             <ul class="check-list-static">
               <li>六自由度刚体：三轴平动、三轴转动，四元数姿态，固定步长 2 ms 半隐式积分</li>
-              <li>四角等效轮心弹簧与阻尼器，运动比换算弹簧刚度与阻尼器轴端阻尼</li>
+              <li>四角双横臂、推杆、摇臂与弹簧—阻尼器按硬点实时反解，线圈长度直接产生弹簧力与阻尼力</li>
               <li>前后横向扭杆式防倾杆按左右行程差产生等大反向作用力</li>
               <li>四轮接地点保持在倾斜平面内，切向库仑摩擦承担坡面驻车与滑移</li>
               <li>车身、车轮、摇臂、推杆、弹簧—阻尼器与载荷箭头共享同一动态姿态</li>
@@ -514,7 +505,7 @@
             <div class="eq">m dv/dt = m g + ΣN<sub>i</sub> e<sub>y</sub> + Σf<sub>i</sub> + F<sub>impulse</sub><br>I<sub>CG</sub> dω/dt + ω × (I<sub>CG</sub>ω) = Σ(r<sub>i</sub> − r<sub>CG</sub>) × F<sub>i</sub></div>
             <p>每个角的弹簧力为 N<sub>i</sub> = N<sub>i0</sub> − k<sub>w,i</sub>δ<sub>i</sub> − c<sub>w,i</sub>δ̇<sub>i</sub> + F<sub>arb,i</sub>，其中 δ<sub>i</sub> 是车体在轮心处的法向位移，负值表示弹簧压缩；N<sub>i0</sub> 是设计姿态角重量，k<sub>w</sub> 是轮心等效刚度，c<sub>w</sub> = 2ζ√(k<sub>w</sub>m<sub>i</sub>) 由阻尼比 ζ 换算。防倾杆取左右行程差 Δ = δ<sub>L</sub> − δ<sub>R</sub>：</p>
             <div class="eq">F<sub>arb,L</sub> = −k<sub>a</sub>Δ，F<sub>arb,R</sub> = +k<sub>a</sub>Δ</div>
-            <p>运动比 i 把轮心量换算到弹簧和阻尼器轴端：k<sub>s</sub> = k<sub>w</sub>/i<sup>2</sup>，c<sub>s</sub> = c<sub>w</sub>/i<sup>2</sup>，弹簧压缩量 s = i·δ。页面中的运动比同时也是遥测换算值；可见杆件仍由端点绑定和定长闭合驱动。</p>
+            <p>运动比 i 由四角机构实时反解，不再作为输入：k<sub>s</sub> = k<sub>w</sub>/i<sup>2</sup>，c<sub>s</sub> = c<sub>w</sub>/i<sup>2</sup>。弹簧力取实际线圈长度 F<sub>s</sub> = k<sub>s</sub>(L − L<sub>ref</sub>) 加阻尼 c<sub>s</sub>L̇，再经机构雅可比换成轮心力。页面里的弹簧伸缩量、横臂、拉杆、摇臂和防倾杆均由同一次反解驱动，因此画面与载荷是同一组数。</p>
             <p>车轮中心保持在路面上方一个轮胎半径处，车身相对路面的姿态产生四角行程。积分采用半隐式欧拉，步长固定为 1/500 s；渲染帧只累积并执行整数个子步，因此改变刷新率不会改变物理结果。脉冲试验在 0.12 s 内施加垂向力，用来观察弹簧—阻尼器和防倾杆的瞬态。</p>
             <p>切向接触使用简化的库仑摩擦：静止且所需切向力不超过 μΣN<sub>i</sub> 时按法向载荷比例分配静摩擦并保持平面速度为零；超过容量或已经滑移时按 μN<sub>i</sub> 施加动摩擦。该模型只承担坡面驻车与滑移，不产生轮胎侧偏力，阶段三将替换为完整的轮胎滑移模型。</p>
           </section>
@@ -524,7 +515,7 @@
           <h3><span>03</span>阶段二验收映射</h3>
           <div class="acceptance-grid">
             <div class="acceptance-item"><span class="acc-num">A</span><div><b>六自由度车体</b><p>位置、速度、四元数姿态与角速度完整积分；水平路面收敛到设计姿态，倾斜路面收敛到与静力解一致的载荷。</p></div></div>
-            <div class="acceptance-item"><span class="acc-num">B</span><div><b>四角弹簧—阻尼器</b><p>轮心等效刚度、运动比和阻尼比可调；脉冲后按阻尼比衰减，不出现非预期持续振荡或发散。</p></div></div>
+            <div class="acceptance-item"><span class="acc-num">B</span><div><b>四角弹簧—阻尼器</b><p>设计位置轮心刚度与阻尼比可调；运动比由机构反解并随行程变化；脉冲后按阻尼比衰减，不出现非预期持续振荡或发散。</p></div></div>
             <div class="acceptance-item"><span class="acc-num">C</span><div><b>防倾杆动态</b><p>左右同向行程不产生扭转；反向行程产生等大反向力；提高硬度抑制侧倾，并改变前后轴侧倾载荷转移。</p></div></div>
             <div class="acceptance-item"><span class="acc-num">D</span><div><b>机构与视觉同步</b><p>车身六自由度带动车轮平面位置与横摆；杆件端点跟随车体与立柱；弹簧、摇臂、推杆与载荷箭头使用同一次求解结果。</p></div></div>
             <div class="acceptance-item"><span class="acc-num">E</span><div><b>数值与交互</b><p>固定步长 500 Hz，渲染帧率不改变结果；暂停、重置、三种脉冲可复现；低附着时六自由度滑移并给出警告。</p></div></div>

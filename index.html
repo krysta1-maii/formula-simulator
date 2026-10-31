@@ -1329,16 +1329,6 @@ button:focus-visible, summary:focus-visible, .chip:focus-visible, .tool-btn:focu
           </div>
           <div class="control split-2">
             <div>
-              <div class="control-head"><label for="motionRatioF">前运动比</label><output id="motionRatioFOut" for="motionRatioF">0.58</output></div>
-              <input type="range" id="motionRatioF" data-param="motionRatioF" data-kind="decimal2" min="0.3" max="0.9" step="0.01" value="0.58">
-            </div>
-            <div>
-              <div class="control-head"><label for="motionRatioR">后运动比</label><output id="motionRatioROut" for="motionRatioR">0.62</output></div>
-              <input type="range" id="motionRatioR" data-param="motionRatioR" data-kind="decimal2" min="0.3" max="0.9" step="0.01" value="0.62">
-            </div>
-          </div>
-          <div class="control split-2">
-            <div>
               <div class="control-head"><label for="arbFront">前防倾杆硬度</label><output id="arbFrontOut" for="arbFront">60%</output></div>
               <input type="range" id="arbFront" data-param="arbFront" data-kind="int" min="0" max="100" step="1" value="60">
             </div>
@@ -1349,7 +1339,7 @@ button:focus-visible, summary:focus-visible, .chip:focus-visible, .tool-btn:focu
           </div>
           <div class="inline-note">
             <span class="note-dot"></span>
-            轮心率是轮心等效刚度；运动比 i 将其换算为弹簧刚度 k<sub>s</sub> = k<sub>w</sub>/i² 和阻尼器轴端阻尼。阻尼滑块给出轮心阻尼比 ζ，0.35 对应欠阻尼衰减。
+            轮心率是设计位置的轮心刚度；运动比由四角机构实时反解得到，页面据此换算弹簧刚度 k<sub>s</sub> = k<sub>w</sub>/i² 与阻尼器轴端阻尼。阻尼滑块给出轮心阻尼比 ζ，0.35 对应欠阻尼衰减。
           </div>
           <div class="control">
             <div class="control-head">
@@ -1489,6 +1479,7 @@ button:focus-visible, summary:focus-visible, .chip:focus-visible, .tool-btn:focu
           <div><dt>车体角速度</dt><dd class="mono" id="bodyRates">—</dd></div>
           <div><dt>四角行程 / 弹簧压缩</dt><dd class="mono" id="cornerTravel">—</dd></div>
           <div><dt>弹簧 / 阻尼 / 防倾杆</dt><dd class="mono" id="cornerForces">—</dd></div>
+          <div><dt>实测运动比 前 / 后</dt><dd id="dynRatio">—</dd></div>
           <div><dt>固有频率 h / θ / φ</dt><dd id="dynFreq">—</dd></div>
           <div><dt>惯量 I<sub>xx</sub> / I<sub>yy</sub> / I<sub>zz</sub></dt><dd id="dynInertia">—</dd></div>
           <div><dt>悬架杆件端点</dt><dd id="linkStatus">—</dd></div>
@@ -1580,10 +1571,10 @@ button:focus-visible, summary:focus-visible, .chip:focus-visible, .tool-btn:focu
         <div class="modal-cols">
           <section>
             <h3><span>01</span>本期范围</h3>
-            <p>本页面是 <b>DESIGN.md</b> 阶段二的交互演示：在阶段一的外观、倾斜路面和静态四角载荷之上，加入车体六自由度、四角弹簧—阻尼器、等效运动比和前后防倾杆动态。车体不再直接贴合路面，而是在悬挂力、重力和接触摩擦作用下积分升沉、俯仰、侧倾、纵移、横移与横摆。</p>
+            <p>本页面是 <b>DESIGN.md</b> 阶段二的交互演示：在阶段一的外观、倾斜路面和静态四角载荷之上，加入车体六自由度、四角机构反解的弹簧—阻尼器和前后防倾杆动态。车体不再直接贴合路面，而是在悬挂力、重力和接触摩擦作用下积分升沉、俯仰、侧倾、纵移、横移与横摆。</p>
             <ul class="check-list-static">
               <li>六自由度刚体：三轴平动、三轴转动，四元数姿态，固定步长 2 ms 半隐式积分</li>
-              <li>四角等效轮心弹簧与阻尼器，运动比换算弹簧刚度与阻尼器轴端阻尼</li>
+              <li>四角双横臂、推杆、摇臂与弹簧—阻尼器按硬点实时反解，线圈长度直接产生弹簧力与阻尼力</li>
               <li>前后横向扭杆式防倾杆按左右行程差产生等大反向作用力</li>
               <li>四轮接地点保持在倾斜平面内，切向库仑摩擦承担坡面驻车与滑移</li>
               <li>车身、车轮、摇臂、推杆、弹簧—阻尼器与载荷箭头共享同一动态姿态</li>
@@ -1597,7 +1588,7 @@ button:focus-visible, summary:focus-visible, .chip:focus-visible, .tool-btn:focu
             <div class="eq">m dv/dt = m g + ΣN<sub>i</sub> e<sub>y</sub> + Σf<sub>i</sub> + F<sub>impulse</sub><br>I<sub>CG</sub> dω/dt + ω × (I<sub>CG</sub>ω) = Σ(r<sub>i</sub> − r<sub>CG</sub>) × F<sub>i</sub></div>
             <p>每个角的弹簧力为 N<sub>i</sub> = N<sub>i0</sub> − k<sub>w,i</sub>δ<sub>i</sub> − c<sub>w,i</sub>δ̇<sub>i</sub> + F<sub>arb,i</sub>，其中 δ<sub>i</sub> 是车体在轮心处的法向位移，负值表示弹簧压缩；N<sub>i0</sub> 是设计姿态角重量，k<sub>w</sub> 是轮心等效刚度，c<sub>w</sub> = 2ζ√(k<sub>w</sub>m<sub>i</sub>) 由阻尼比 ζ 换算。防倾杆取左右行程差 Δ = δ<sub>L</sub> − δ<sub>R</sub>：</p>
             <div class="eq">F<sub>arb,L</sub> = −k<sub>a</sub>Δ，F<sub>arb,R</sub> = +k<sub>a</sub>Δ</div>
-            <p>运动比 i 把轮心量换算到弹簧和阻尼器轴端：k<sub>s</sub> = k<sub>w</sub>/i<sup>2</sup>，c<sub>s</sub> = c<sub>w</sub>/i<sup>2</sup>，弹簧压缩量 s = i·δ。页面中的运动比同时也是遥测换算值；可见杆件仍由端点绑定和定长闭合驱动。</p>
+            <p>运动比 i 由四角机构实时反解，不再作为输入：k<sub>s</sub> = k<sub>w</sub>/i<sup>2</sup>，c<sub>s</sub> = c<sub>w</sub>/i<sup>2</sup>。弹簧力取实际线圈长度 F<sub>s</sub> = k<sub>s</sub>(L − L<sub>ref</sub>) 加阻尼 c<sub>s</sub>L̇，再经机构雅可比换成轮心力。页面里的弹簧伸缩量、横臂、拉杆、摇臂和防倾杆均由同一次反解驱动，因此画面与载荷是同一组数。</p>
             <p>车轮中心保持在路面上方一个轮胎半径处，车身相对路面的姿态产生四角行程。积分采用半隐式欧拉，步长固定为 1/500 s；渲染帧只累积并执行整数个子步，因此改变刷新率不会改变物理结果。脉冲试验在 0.12 s 内施加垂向力，用来观察弹簧—阻尼器和防倾杆的瞬态。</p>
             <p>切向接触使用简化的库仑摩擦：静止且所需切向力不超过 μΣN<sub>i</sub> 时按法向载荷比例分配静摩擦并保持平面速度为零；超过容量或已经滑移时按 μN<sub>i</sub> 施加动摩擦。该模型只承担坡面驻车与滑移，不产生轮胎侧偏力，阶段三将替换为完整的轮胎滑移模型。</p>
           </section>
@@ -1607,7 +1598,7 @@ button:focus-visible, summary:focus-visible, .chip:focus-visible, .tool-btn:focu
           <h3><span>03</span>阶段二验收映射</h3>
           <div class="acceptance-grid">
             <div class="acceptance-item"><span class="acc-num">A</span><div><b>六自由度车体</b><p>位置、速度、四元数姿态与角速度完整积分；水平路面收敛到设计姿态，倾斜路面收敛到与静力解一致的载荷。</p></div></div>
-            <div class="acceptance-item"><span class="acc-num">B</span><div><b>四角弹簧—阻尼器</b><p>轮心等效刚度、运动比和阻尼比可调；脉冲后按阻尼比衰减，不出现非预期持续振荡或发散。</p></div></div>
+            <div class="acceptance-item"><span class="acc-num">B</span><div><b>四角弹簧—阻尼器</b><p>设计位置轮心刚度与阻尼比可调；运动比由机构反解并随行程变化；脉冲后按阻尼比衰减，不出现非预期持续振荡或发散。</p></div></div>
             <div class="acceptance-item"><span class="acc-num">C</span><div><b>防倾杆动态</b><p>左右同向行程不产生扭转；反向行程产生等大反向力；提高硬度抑制侧倾，并改变前后轴侧倾载荷转移。</p></div></div>
             <div class="acceptance-item"><span class="acc-num">D</span><div><b>机构与视觉同步</b><p>车身六自由度带动车轮平面位置与横摆；杆件端点跟随车体与立柱；弹簧、摇臂、推杆与载荷箭头使用同一次求解结果。</p></div></div>
             <div class="acceptance-item"><span class="acc-num">E</span><div><b>数值与交互</b><p>固定步长 500 Hz，渲染帧率不改变结果；暂停、重置、三种脉冲可复现；低附着时六自由度滑移并给出警告。</p></div></div>
@@ -1689,8 +1680,6 @@ const NUM_LIMITS = {
   wheelRateR: [50, 320],
   dampingF: [0.05, 1.2],
   dampingR: [0.05, 1.2],
-  motionRatioF: [0.3, 0.9],
-  motionRatioR: [0.3, 0.9],
   arbFront: [0, 100],
   arbRear: [0, 100],
   steer: [-18, 18]
@@ -1717,8 +1706,6 @@ const DEFAULTS = Object.freeze({
   wheelRateR: 160,
   dampingF: 0.35,
   dampingR: 0.38,
-  motionRatioF: 0.58,
-  motionRatioR: 0.62,
   arbFront: 60,
   arbRear: 60,
   slope: 0,
@@ -1981,21 +1968,114 @@ function computeStatic(source = state) {
     [sumKZ, sumKXZ, -sumKZZ - arbRollStiffness]
   ];
   const solved = solve3(A, [b0, b1, b2]) || [0, 0, 0];
-  const heave = solved[0];
-  const pitch = solved[1];
-  const roll = solved[2];
+  let heave = solved[0];
+  let pitch = solved[1];
+  let roll = solved[2];
 
-  const cornerY = wheels.map((wheel) => heave + wheel.x * pitch - wheel.z * roll);
-  // A positive roll lowers the right side, so the right-hand bar arm is twisted
-  // in the bump direction and the bar pushes that wheel down (increasing its
-  // normal load); the left side receives the equal-and-opposite force.
-  const arbForce = wheels.map((wheel) => {
-    const rate = wheel.axle === 'front' ? arbRate.front : arbRate.rear;
-    const track = wheel.axle === 'front' ? dims.tf : dims.tr;
-    return wheel.zSign * rate * track * roll;
+  // Stage-02 dynamic reference. The wheel rate remains the design parameter; the
+  // motion ratio is no longer an input. It is measured from the actual hardpoint
+  // geometry by solving the four corner mechanisms, so the coil rate, the
+  // preload and the force path all follow the same linkage that is drawn.
+  const dampingRatio = {
+    front: clamp(Number.isFinite(source.dampingF) ? source.dampingF : DEFAULTS.dampingF, 0.02, 1.5),
+    rear: clamp(Number.isFinite(source.dampingR) ? source.dampingR : DEFAULTS.dampingR, 0.02, 1.5)
+  };
+  const cornerMass = baseLoads.map((value) => value / GRAVITY);
+  const criticalDamping = k.map((ki, i) => 2 * Math.sqrt(ki * Math.max(cornerMass[i], 1e-6)));
+  const damperRateWheel = k.map((ki, i) => {
+    const ratio = wheels[i].axle === 'front' ? dampingRatio.front : dampingRatio.rear;
+    return ratio * criticalDamping[i];
   });
+
+  const cornerGeometry = suspensionBuild({ dims, wheels });
+  const designQuat = new THREE.Quaternion();
+  const designLevel = cornerGeometry.corners.map((corner) =>
+    suspSolveCorner(corner, { x: 0, y: 0, z: 0 }, designQuat, 0, null, true));
+  const cornerRatio = designLevel.map((solution) => {
+    if (solution.motionRatio != null && Number.isFinite(solution.motionRatio) && Math.abs(solution.motionRatio) > 1e-3) {
+      return solution.motionRatio;
+    }
+    return 0.5;
+  });
+  const motionRatio = {
+    front: (Math.abs(cornerRatio[0]) + Math.abs(cornerRatio[1])) / 2,
+    rear: (Math.abs(cornerRatio[2]) + Math.abs(cornerRatio[3])) / 2
+  };
+  const springRateCoil = k.map((ki, i) => ki / Math.pow(cornerRatio[i], 2));
+  const damperRateShaft = damperRateWheel.map((ci, i) => ci / Math.pow(cornerRatio[i], 2));
+  const springDesign = designLevel.map((solution, i) => {
+    const dLdDelta = -cornerRatio[i];
+    const ratio = Math.abs(cornerRatio[i]) > 1e-3 ? cornerRatio[i] : 0.5;
+    const length0 = solution.coilLength;
+    const refLength = length0 + baseLoads[i] / (springRateCoil[i] * ratio);
+    return {
+      length0,
+      refLength,
+      motionRatio: cornerRatio[i],
+      dLdDelta,
+      rockerAngle0: solution.rockerAngle,
+      coilRate: springRateCoil[i],
+      coilDamping: damperRateShaft[i]
+    };
+  });
+
+  // Geometric static equilibrium. The linear solve only supplies a starting
+  // pose; the reference attitude is refined with the same mechanism forces that
+  // the integrator evaluates, so static and dynamic equilibria agree.
+  const staticSeeds = [null, null, null, null];
+  const evaluateStatic = (h, p, r) => {
+    const quat = new THREE.Quaternion()
+      .setFromAxisAngle(new THREE.Vector3(0, 0, 1), p)
+      .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), r));
+    const bodyPos = { x: 0, y: h, z: 0 };
+    const cornerY = wheels.map((wheel) => h + wheel.x * p - wheel.z * r);
+    const arb = [0, 0, 0, 0];
+    for (const pair of [[0, 1], [2, 3]]) {
+      const rate = arbRate[wheels[pair[0]].axle] || 0;
+      const delta = cornerY[pair[0]] - cornerY[pair[1]];
+      arb[pair[0]] = -rate * delta;
+      arb[pair[1]] = rate * delta;
+    }
+    const raw = cornerGeometry.corners.map((corner, i) => {
+      const solution = suspSolveCorner(corner, bodyPos, quat, 0, staticSeeds[i], true);
+      staticSeeds[i] = solution.seed;
+      const ratio = solution.motionRatio != null ? solution.motionRatio : springDesign[i].motionRatio;
+      const spring = springDesign[i].coilRate * (solution.coilLength - springDesign[i].refLength) * (-ratio);
+      return spring + arb[i];
+    });
+    const sum = raw.reduce((acc, value) => acc + value, 0);
+    const mx = raw.reduce((acc, value, i) => acc + value * wheels[i].x, 0);
+    const mz = raw.reduce((acc, value, i) => acc + value * wheels[i].z, 0);
+    return { raw, arb, cornerY, sum, mx, mz };
+  };
+  {
+    const target = [totalNormal, totalNormal * px, totalNormal * pz];
+    for (let iter = 0; iter < 6; iter += 1) {
+      const evaluation = evaluateStatic(heave, pitch, roll);
+      const residual = [evaluation.sum - target[0], evaluation.mx - target[1], evaluation.mz - target[2]];
+      if (Math.max(Math.abs(residual[0]), Math.abs(residual[1]), Math.abs(residual[2])) < 1e-7) break;
+      const hStep = 1e-4;
+      const aStep = 1e-5;
+      const eh = evaluateStatic(heave + hStep, pitch, roll);
+      const ep = evaluateStatic(heave, pitch + aStep, roll);
+      const er = evaluateStatic(heave, pitch, roll + aStep);
+      const J = [
+        [(eh.sum - evaluation.sum) / hStep, (ep.sum - evaluation.sum) / aStep, (er.sum - evaluation.sum) / aStep],
+        [(eh.mx - evaluation.mx) / hStep, (ep.mx - evaluation.mx) / aStep, (er.mx - evaluation.mx) / aStep],
+        [(eh.mz - evaluation.mz) / hStep, (ep.mz - evaluation.mz) / aStep, (er.mz - evaluation.mz) / aStep]
+      ];
+      const delta = solve3(J, [-residual[0], -residual[1], -residual[2]]);
+      if (!delta) break;
+      heave += clamp(delta[0], -0.01, 0.01);
+      pitch += clamp(delta[1], -0.005, 0.005);
+      roll += clamp(delta[2], -0.005, 0.005);
+    }
+  }
+  const staticState = evaluateStatic(heave, pitch, roll);
+  const cornerY = staticState.cornerY;
+  const arbForce = staticState.arb;
   const arbMoment = arbForce.reduce((acc, value, i) => acc + value * wheels[i].z, 0);
-  const rawLoads = cornerY.map((y, i) => baseLoads[i] - k[i] * y + arbForce[i]);
+  const rawLoads = staticState.raw;
   const loads = rawLoads.map((value) => Math.max(0, value));
   const minRawLoad = Math.min(...rawLoads);
   const liftedCount = rawLoads.filter((value) => value < -1e-6).length;
@@ -2020,26 +2100,6 @@ function computeStatic(source = state) {
   const levelLeft = levelLoads[0] + levelLoads[2];
   const levelRight = levelLoads[1] + levelLoads[3];
 
-  // Stage-02 dynamic reference. The wheel rate remains the primary spring
-  // parameter; the motion ratio maps it to the coil spring and to the damper
-  // shaft. Damping is specified as a fraction of critical damping at the wheel,
-  // which keeps the transient response readable when mass or wheel rate moves.
-  const motionRatio = {
-    front: clamp(Number.isFinite(source.motionRatioF) ? source.motionRatioF : DEFAULTS.motionRatioF, 0.3, 0.9),
-    rear: clamp(Number.isFinite(source.motionRatioR) ? source.motionRatioR : DEFAULTS.motionRatioR, 0.3, 0.9)
-  };
-  const dampingRatio = {
-    front: clamp(Number.isFinite(source.dampingF) ? source.dampingF : DEFAULTS.dampingF, 0.02, 1.5),
-    rear: clamp(Number.isFinite(source.dampingR) ? source.dampingR : DEFAULTS.dampingR, 0.02, 1.5)
-  };
-  const cornerMass = baseLoads.map((value) => value / GRAVITY);
-  const criticalDamping = k.map((ki, i) => 2 * Math.sqrt(ki * Math.max(cornerMass[i], 1e-6)));
-  const damperRateWheel = k.map((ki, i) => {
-    const ratio = wheels[i].axle === 'front' ? dampingRatio.front : dampingRatio.rear;
-    return ratio * criticalDamping[i];
-  });
-  const springRateCoil = k.map((ki, i) => ki / Math.pow(wheels[i].axle === 'front' ? motionRatio.front : motionRatio.rear, 2));
-  const damperRateShaft = damperRateWheel.map((ci, i) => ci / Math.pow(wheels[i].axle === 'front' ? motionRatio.front : motionRatio.rear, 2));
   const inertia = computeBodyInertia(source, dims);
   const heaveStiffness = sumK;
   const rollStiffnessSpring = wheels.reduce((acc, wheel, i) => acc + k[i] * Math.pow(wheel.z - zCG, 2), 0);
@@ -2087,6 +2147,10 @@ function computeStatic(source = state) {
     damperRateShaft,
     springRateCoil,
     motionRatio,
+    suspension: {
+      corners: cornerGeometry.corners,
+      design: springDesign
+    },
     inertia,
     stiffness: {
       heave: heaveStiffness,
@@ -2292,6 +2356,354 @@ function runSelfTests(source = state) {
 
 
 /* =========================================================================
+   03-suspension.js — shared hardpoints and the kinematic suspension solver
+   ========================================================================= */
+
+const V = (x, y, z) => new THREE.Vector3(x, y, z);
+
+/**
+ * Hardpoints and design geometry for the four corners.
+ *
+ * This is the single source of truth shared by the dynamics and the renderer.
+ * Body-frame points come from the chassis hardpoints; wheel-local points are
+ * expressed in the upright/wheel frame and are rotated by the design camber.
+ *
+ * The spring-damper unit sits above the rocker: the damper eye is on the same
+ * side of the pivot as the push arm, so bump travel shortens the unit and the
+ * coil is always in compression.
+ */
+function buildCornerData(model) {
+  return model.wheels.map((wheel, index) => {
+    const front = wheel.axle === 'front';
+    const zSign = wheel.zSign;
+    const innerZ = front ? 0.17 : 0.125;
+    const rockerZ = front ? 0.225 : 0.15;
+    const body = {
+      lowerFront: V(wheel.x + (front ? 0.31 : 0.23), front ? 0.145 : 0.16, zSign * innerZ),
+      lowerRear: V(wheel.x - (front ? 0.30 : 0.22), front ? 0.145 : 0.16, zSign * innerZ),
+      upperFront: V(wheel.x + (front ? 0.21 : 0.17), front ? 0.345 : 0.355, zSign * (innerZ - 0.025)),
+      upperRear: V(wheel.x - (front ? 0.20 : 0.16), front ? 0.345 : 0.355, zSign * (innerZ - 0.025)),
+      track: front
+        ? V(wheel.x - 0.44, 0.315, zSign * 0.295)
+        : V(wheel.x + 0.34, 0.315, zSign * 0.115),
+      rocker: V(wheel.x + (front ? -0.42 : 0.30), front ? 0.56 : 0.45, zSign * rockerZ),
+      damper: front
+        ? V(wheel.x - 0.36, 0.79, zSign * 0.10)
+        : V(wheel.x + 0.34, 0.66, zSign * 0.09),
+      diff: V(wheel.x + 0.08, 0.30, zSign * 0.17)
+    };
+    body.trackBase = body.track.clone();
+    const wheelLocal = {
+      lower: V(0.015, -0.215, -zSign * 0.105),
+      upper: V(-0.010, 0.215, -zSign * 0.105),
+      track: V(0.100, -0.020, -zSign * 0.105),
+      push: front ? V(0.040, -0.185, -zSign * 0.080) : V(0.000, -0.185, -zSign * 0.080),
+      drive: V(0.000, 0.000, -zSign * 0.060)
+    };
+    const rocker = {
+      pivot: body.rocker.clone(),
+      pushArm: front ? V(0.130, -0.010, 0) : V(-0.130, -0.010, 0),
+      damperArm: front ? V(0.070, -0.050, 0) : V(-0.070, -0.050, 0),
+      arbArm: front ? V(-0.060, 0.050, 0) : V(0.060, 0.050, 0),
+      baseAngle: front ? -0.10 : 0.10,
+      gain: 14,
+      mesh: null,
+      axle: null
+    };
+    const camber = -zSign * (front ? 1.15 : 0.8) * DEG;
+    const restCenter = V(wheel.x, model.dims.R, wheel.z);
+    const restQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), camber);
+    return {
+      key: wheel.key,
+      index,
+      front,
+      zSign,
+      wheel,
+      body,
+      wheelLocal,
+      rocker,
+      restCenter,
+      restQuat,
+      wheelRoot: null,
+      wheelLocalPoints: null,
+      pushTip: new THREE.Vector3(),
+      damperTip: new THREE.Vector3(),
+      arbTip: new THREE.Vector3(),
+      angle: rocker.baseAngle,
+      tieRodLength0: 0,
+      pushRodLength0: 0,
+      rackShift: 0,
+      rockerSolveFailed: false
+    };
+  });
+}
+
+/* ------------------------------ design geometry ------------------------------ */
+
+function suspRockerPoint(corner, arm, angle) {
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return new THREE.Vector3(
+    corner.rocker.pivot.x + arm.x * cos - arm.y * sin,
+    corner.rocker.pivot.y + arm.x * sin + arm.y * cos,
+    corner.rocker.pivot.z + arm.z
+  );
+}
+
+function suspDesign(corner) {
+  if (corner.designData) return corner.designData;
+  const quat = corner.restQuat;
+  const center = corner.restCenter;
+  const toBody = (local) => local.clone().applyQuaternion(quat).add(center);
+  const anchor = corner.body;
+  const BL0 = toBody(corner.wheelLocal.lower);
+  const BU0 = toBody(corner.wheelLocal.upper);
+  const T0 = toBody(corner.wheelLocal.track);
+  const P0 = toBody(corner.wheelLocal.push);
+  const D0 = toBody(corner.wheelLocal.drive);
+  const line0 = BU0.clone().sub(BL0).normalize();
+  const axisL = anchor.lowerFront.clone().sub(anchor.lowerRear).normalize();
+  const axisU = anchor.upperFront.clone().sub(anchor.upperRear).normalize();
+  const pushTip0 = suspRockerPoint(corner, corner.rocker.pushArm, corner.rocker.baseAngle);
+  const damperTip0 = suspRockerPoint(corner, corner.rocker.damperArm, corner.rocker.baseAngle);
+  const design = {
+    BL0,
+    BU0,
+    T0,
+    P0,
+    D0,
+    C0: center.clone(),
+    line0,
+    axisL,
+    axisU,
+    axisLPoint: anchor.lowerFront.clone(),
+    axisUPoint: anchor.upperFront.clone(),
+    d0: BU0.distanceTo(BL0),
+    tie0: T0.distanceTo(anchor.track),
+    pushLen0: pushTip0.distanceTo(P0),
+    pushTip0,
+    damperTip0,
+    damperLength0: damperTip0.distanceTo(anchor.damper),
+    innerTrack0: anchor.track.clone(),
+    tireRadius: center.y,
+    restQuat: quat.clone()
+  };
+  corner.designData = design;
+  return design;
+}
+
+/* ------------------------------ mechanism solve ------------------------------ */
+
+function suspSolve3(J, b) {
+  const det = (m) => m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+    - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+    + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+  const D = det(J);
+  if (!Number.isFinite(D) || Math.abs(D) < 1e-14) return null;
+  const out = [0, 0, 0];
+  for (let k = 0; k < 3; k += 1) {
+    const M = [[J[0][0], J[0][1], J[0][2]], [J[1][0], J[1][1], J[1][2]], [J[2][0], J[2][1], J[2][2]]];
+    for (let i = 0; i < 3; i += 1) M[i][k] = b[i];
+    out[k] = det(M) / D;
+  }
+  return out.every(Number.isFinite) ? out : null;
+}
+
+function suspEval(corner, bodyPos, bodyQuat, rackShift, thL, thU, spin) {
+  const d = suspDesign(corner);
+  const inlet = d.innerTrack0.clone();
+  if (corner.front) inlet.z += rackShift;
+  const BL = d.BL0.clone().sub(d.axisLPoint).applyAxisAngle(d.axisL, thL).add(d.axisLPoint);
+  const BU = d.BU0.clone().sub(d.axisUPoint).applyAxisAngle(d.axisU, thU).add(d.axisUPoint);
+  const line = BU.clone().sub(BL).normalize();
+  const q0 = new THREE.Quaternion().setFromUnitVectors(d.line0, line);
+  const qSpin = new THREE.Quaternion().setFromAxisAngle(line, spin);
+  const qU = qSpin.multiply(q0);
+  const place = (p) => p.clone().sub(d.BL0).applyQuaternion(qU).add(BL);
+  const C = place(d.C0);
+  const T = place(d.T0);
+  const P = place(d.P0);
+  const axle = new THREE.Vector3(0, 0, 1).applyQuaternion(d.restQuat).applyQuaternion(qU);
+  const inv = bodyQuat ? bodyQuat.clone().invert() : new THREE.Quaternion();
+  const nb = new THREE.Vector3(0, 1, 0).applyQuaternion(inv);
+  const cb = -bodyPos.y;
+  const downProjection = Math.sqrt(Math.max(0, 1 - Math.pow(nb.dot(axle), 2)));
+  const f = [
+    BU.distanceTo(BL) - d.d0,
+    T.distanceTo(inlet) - d.tie0,
+    nb.dot(C) - d.tireRadius * downProjection - cb
+  ];
+  return { f, BL, BU, C, T, P, qU, axle, nb, cb, downProjection, wheelQuat: qU.clone().multiply(d.restQuat) };
+}
+
+function suspSolveRaw(corner, bodyPos, bodyQuat, rackShift, seed, cold) {
+  const start = seed && !cold ? seed : { thL: 0, thU: 0, spin: 0 };
+  let thL = start.thL || 0;
+  let thU = start.thU || 0;
+  let spin = start.spin || 0;
+  let best = null;
+  let bestNorm = Infinity;
+  for (let iter = 0; iter < 12; iter += 1) {
+    const e = suspEval(corner, bodyPos, bodyQuat, rackShift, thL, thU, spin);
+    const norm = Math.max(Math.abs(e.f[0]), Math.abs(e.f[1]), Math.abs(e.f[2]));
+    if (norm < bestNorm) {
+      bestNorm = norm;
+      best = e;
+    }
+    if (norm < 1e-10) break;
+    const J = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+    const eps = 1e-6;
+    const eL = suspEval(corner, bodyPos, bodyQuat, rackShift, thL + eps, thU, spin);
+    const eU = suspEval(corner, bodyPos, bodyQuat, rackShift, thL, thU + eps, spin);
+    const eS = suspEval(corner, bodyPos, bodyQuat, rackShift, thL, thU, spin + eps);
+    for (let i = 0; i < 3; i += 1) {
+      J[i][0] = (eL.f[i] - e.f[i]) / eps;
+      J[i][1] = (eU.f[i] - e.f[i]) / eps;
+      J[i][2] = (eS.f[i] - e.f[i]) / eps;
+    }
+    const delta = suspSolve3(J, [-e.f[0], -e.f[1], -e.f[2]]);
+    if (!delta) break;
+    const scale = Math.max(Math.abs(delta[0]), Math.abs(delta[1]), Math.abs(delta[2]));
+    const limiter = scale > 0.25 ? 0.25 / scale : 1;
+    thL += delta[0] * limiter;
+    thU += delta[1] * limiter;
+    spin += delta[2] * limiter;
+    if (!Number.isFinite(thL) || !Number.isFinite(thU) || !Number.isFinite(spin)) break;
+  }
+  const final = suspEval(corner, bodyPos, bodyQuat, rackShift, thL, thU, spin);
+  const norm = Math.max(Math.abs(final.f[0]), Math.abs(final.f[1]), Math.abs(final.f[2]));
+  const converged = norm < 1e-6;
+  return {
+    thL,
+    thU,
+    spin,
+    converged,
+    error: norm,
+    evalState: final
+  };
+}
+
+function suspRockerAngle(corner, pushPoint, seed) {
+  const d = suspDesign(corner);
+  const target = d.pushLen0;
+  let angle = Number.isFinite(seed) ? seed : corner.rocker.baseAngle;
+  const distance = (a) => suspRockerPoint(corner, corner.rocker.pushArm, a).distanceTo(pushPoint);
+  for (let i = 0; i < 24; i += 1) {
+    const error = distance(angle) - target;
+    if (Math.abs(error) < 1e-11) break;
+    const h = 1e-5;
+    const derivative = (distance(angle + h) - distance(angle - h)) / (2 * h);
+    if (!Number.isFinite(derivative) || Math.abs(derivative) < 1e-9) break;
+    angle -= Math.max(-0.25, Math.min(0.25, error / derivative));
+    if (!Number.isFinite(angle)) {
+      angle = seed;
+      break;
+    }
+  }
+  return angle;
+}
+
+function suspCoilLength(corner, angle) {
+  return suspRockerPoint(corner, corner.rocker.damperArm, angle).distanceTo(corner.body.damper);
+}
+
+/**
+ * Solve one corner at a body pose. The returned pose is in the body frame.
+ * motionRatio is the conventional value (compression per unit bump travel).
+ */
+function suspSolveCorner(corner, bodyPos, bodyQuat, rackShift, seed, withRatio) {
+  let raw = suspSolveRaw(corner, bodyPos, bodyQuat, rackShift, seed, false);
+  if (!raw.converged) {
+    const cold = suspSolveRaw(corner, bodyPos, bodyQuat, rackShift, null, true);
+    if (cold.error < raw.error) raw = cold;
+  }
+  const state = raw.evalState;
+  const angle = suspRockerAngle(corner, state.P, corner.angle);
+  const coilLength = suspCoilLength(corner, angle);
+  let motionRatio = null;
+  const epsilon = 1e-3;
+  if (withRatio) {
+    const high = suspSolveRaw(corner, { x: bodyPos.x, y: bodyPos.y + epsilon, z: bodyPos.z }, bodyQuat, rackShift, raw, false);
+    const low = suspSolveRaw(corner, { x: bodyPos.x, y: bodyPos.y - epsilon, z: bodyPos.z }, bodyQuat, rackShift, raw, false);
+    if (high.converged && low.converged) {
+      const lHigh = suspCoilLength(corner, suspRockerAngle(corner, high.evalState.P, angle));
+      const lLow = suspCoilLength(corner, suspRockerAngle(corner, low.evalState.P, angle));
+      motionRatio = (lHigh - lLow) / (2 * epsilon);
+    }
+  }
+  const d = suspDesign(corner);
+  const down = state.nb.clone().multiplyScalar(-1);
+  down.addScaledVector(state.axle, -down.dot(state.axle));
+  if (down.lengthSq() > 1e-12) down.normalize(); else down.set(0, -1, 0);
+  const contact = state.C.clone().addScaledVector(down, d.tireRadius);
+  return {
+    thL: raw.thL,
+    thU: raw.thU,
+    spin: raw.spin,
+    converged: raw.converged,
+    error: raw.error,
+    wheelPos: state.C.clone(),
+    wheelQuat: state.wheelQuat.clone(),
+    contact,
+    pushPoint: state.P.clone(),
+    rockerAngle: angle,
+    coilLength,
+    motionRatio,
+    seed: { thL: raw.thL, thU: raw.thU, spin: raw.spin }
+  };
+}
+
+function suspWheelSteer(quat) {
+  const dir = new THREE.Vector3(1, 0, 0).applyQuaternion(quat);
+  return Math.atan2(-dir.z, dir.x);
+}
+
+/**
+ * Find the rack displacement that makes the mean front wheel angle match the
+ * driver input. Called only when the steering input or the design changes.
+ */
+function suspRackForSteer(corners, bodyPos, bodyQuat, steerRad) {
+  const fronts = corners.filter((corner) => corner.front);
+  if (!fronts.length) return 0;
+  const meanAt = (shift) => {
+    let sum = 0;
+    for (const corner of fronts) {
+      const solved = suspSolveRaw(corner, bodyPos, bodyQuat, shift, corner.rackSeed, false);
+      corner.rackSeed = { thL: solved.thL, thU: solved.thU, spin: solved.spin };
+      sum += suspWheelSteer(solved.evalState.wheelQuat);
+    }
+    return sum / fronts.length;
+  };
+  let lo = -0.12;
+  let hi = 0.12;
+  let loAngle = meanAt(lo);
+  let hiAngle = meanAt(hi);
+  if (loAngle > hiAngle) {
+    const tmp = lo; lo = hi; hi = tmp;
+    const tmpA = loAngle; loAngle = hiAngle; hiAngle = tmpA;
+  }
+  if (steerRad <= loAngle) return lo;
+  if (steerRad >= hiAngle) return hi;
+  for (let i = 0; i < 42; i += 1) {
+    const mid = 0.5 * (lo + hi);
+    const value = meanAt(mid);
+    if (value < steerRad) lo = mid; else hi = mid;
+  }
+  return 0.5 * (lo + hi);
+}
+
+/* ------------------------------ design-row helpers ------------------------------ */
+
+function suspensionBuild(model) {
+  const corners = buildCornerData(model);
+  return {
+    corners,
+    byKey: corners.reduce((acc, corner) => { acc[corner.key] = corner; return acc; }, {})
+  };
+}
+
+
+/* =========================================================================
    05-body-dynamics.js — six-degree-of-freedom body, spring-damper corners,
    anti-roll bar dynamics and fixed-step integration
    ========================================================================= */
@@ -2427,6 +2839,8 @@ function simCreate(source = state, options = {}) {
     running: true,
     accumulator: 0,
     lastSubsteps: 0,
+    cornerSeed: [null, null, null, null],
+    rackShift: 0,
     flags: {
       holding: true,
       sliding: false,
@@ -2449,6 +2863,7 @@ function simReset(sim, source = state, options = {}) {
   sim.impulse = null;
   sim.accumulator = 0;
   sim.lastSubsteps = 0;
+  sim.cornerSeed = [null, null, null, null];
   sim.flags = {
     holding: true,
     sliding: false,
@@ -2510,14 +2925,50 @@ function simEvaluate(sim) {
   const sy = Math.sin(euler.yaw);
   const corners = [];
 
+  const geometry = reference.suspension ? reference.suspension.corners : null;
+  const design = reference.suspension ? reference.suspension.design : null;
+  const bodyPos = { x: state.x, y: state.y, z: state.z };
+  const bodyQuat = new THREE.Quaternion(state.qx, state.qy, state.qz, state.qw);
+  const rackShift = sim.rackShift || 0;
+
   for (let i = 0; i < reference.wheels.length; i += 1) {
     const wheel = reference.wheels[i];
     const arm = [wheel.x, 0, wheel.z];
     const armRoad = simQuatRotate(q, arm);
     const cornerY = state.y + armRoad[1];
     const cornerVelocityY = velocity[1] + (omegaRoad[2] * armRoad[0] - omegaRoad[0] * armRoad[2]);
-    const springForce = reference.baseLoads[i] - reference.springRates[i] * cornerY;
-    const dampingForce = -reference.damperRateWheel[i] * cornerVelocityY;
+    let solved = null;
+    let springForce = 0;
+    let dampingForce = 0;
+    let coilLength = NaN;
+    let lengthDot = 0;
+    let ratio = 1;
+    if (geometry && design) {
+      const row = design[i];
+      solved = suspSolveCorner(geometry[i], bodyPos, bodyQuat, rackShift, sim.cornerSeed[i], true);
+      sim.cornerSeed[i] = solved.seed;
+      const instantRatio = solved.motionRatio != null ? solved.motionRatio : row.motionRatio;
+      const deltaDot = -cornerVelocityY;
+      if (solved.converged) {
+        const dLdDelta = -instantRatio;
+        lengthDot = dLdDelta * deltaDot;
+        coilLength = solved.coilLength;
+        springForce = row.coilRate * (coilLength - row.refLength) * dLdDelta;
+        dampingForce = row.coilDamping * lengthDot * dLdDelta;
+      } else {
+        // Diverged solve: fall back to the design linkage slope so the state
+        // stays finite, and flag it through the corner record.
+        const dLdDelta = row.dLdDelta;
+        lengthDot = dLdDelta * deltaDot;
+        coilLength = row.length0 + dLdDelta * (-cornerY);
+        springForce = row.coilRate * (coilLength - row.refLength) * dLdDelta;
+        dampingForce = row.coilDamping * dLdDelta * dLdDelta * deltaDot;
+      }
+      ratio = instantRatio;
+    } else {
+      springForce = reference.baseLoads[i] - reference.springRates[i] * cornerY;
+      dampingForce = -reference.damperRateWheel[i] * cornerVelocityY;
+    }
     const contactX = state.x + cy * wheel.x + sy * wheel.z;
     const contactZ = state.z - sy * wheel.x + cy * wheel.z;
     corners.push({
@@ -2531,7 +2982,11 @@ function simEvaluate(sim) {
       arbForce: 0,
       rawForce: springForce + dampingForce,
       force: 0,
-      contact: [contactX, 0, contactZ]
+      contact: [contactX, 0, contactZ],
+      solved,
+      coilLength,
+      lengthDot,
+      motionRatio: ratio
     });
   }
 
@@ -2832,11 +3287,33 @@ function simBuildModel(sim, source = state) {
   const px = cg[0] + projectionT * down[0];
   const pz = cg[2] + projectionT * down[2];
   const motionRatio = reference.motionRatio;
-  const springCompressionMm = corners.map((corner) => {
+  const designRow = reference.suspension ? reference.suspension.design : null;
+  const bodyVec = new THREE.Vector3(state.x, state.y, state.z);
+  const bodyQuat = new THREE.Quaternion(state.qx, state.qy, state.qz, state.qw);
+  const solved = corners.map((corner) => {
+    if (!corner.solved) return null;
+    const solvedCorner = corner.solved;
+    const position = solvedCorner.wheelPos.clone().applyQuaternion(bodyQuat).add(bodyVec);
+    const quaternion = bodyQuat.clone().multiply(solvedCorner.wheelQuat);
+    const contact = solvedCorner.contact.clone().applyQuaternion(bodyQuat).add(bodyVec);
+    return {
+      key: corner.key,
+      wheelPos: [position.x, position.y, position.z],
+      wheelQuat: [quaternion.x, quaternion.y, quaternion.z, quaternion.w],
+      contact: [contact.x, contact.y, contact.z],
+      rockerAngle: solvedCorner.rockerAngle,
+      coilLength: solvedCorner.coilLength,
+      motionRatio: solvedCorner.motionRatio,
+      converged: solvedCorner.converged
+    };
+  });
+  const springCompressionMm = corners.map((corner, index) => {
+    if (designRow && Number.isFinite(corner.coilLength)) return (designRow[index].length0 - corner.coilLength) * 1000;
     const ratio = corner.wheel.axle === 'front' ? motionRatio.front : motionRatio.rear;
     return -corner.cornerY * ratio * 1000;
   });
-  const damperCompressionRate = corners.map((corner) => {
+  const damperCompressionRate = corners.map((corner, index) => {
+    if (Number.isFinite(corner.lengthDot)) return -corner.lengthDot;
     const ratio = corner.wheel.axle === 'front' ? motionRatio.front : motionRatio.rear;
     return -corner.cornerVelocityY * ratio;
   });
@@ -2887,6 +3364,10 @@ function simBuildModel(sim, source = state) {
     cornerY: corners.map((corner) => corner.cornerY),
     cornerVelocityY: corners.map((corner) => corner.cornerVelocityY),
     travelMm: corners.map((corner) => -corner.cornerY * 1000),
+    solved,
+    rackShift: sim.rackShift || 0,
+    motionRatioInstant: corners.map((corner) => corner.motionRatio),
+    solverOk: corners.every((corner) => !corner.solved || corner.solved.converged),
     springCompressionMm,
     damperCompressionRate,
     springForce: corners.map((corner) => corner.springForce),
@@ -4738,7 +5219,6 @@ const CAR = {
 };
 
 const TAU = Math.PI * 2;
-const V = (x, y, z) => new THREE.Vector3(x, y, z);
 
 /* ------------------------------ shared assets ------------------------------ */
 
@@ -5880,71 +6360,6 @@ function initCarSceneGroups() {
   if (!S.bodyPivot) throw new Error('bodyPivot not created by initScene');
 }
 
-function buildCornerData(model) {
-  return model.wheels.map((wheel, index) => {
-    const front = wheel.axle === 'front';
-    const zSign = wheel.zSign;
-    const innerZ = front ? 0.17 : 0.125;
-    const rockerZ = front ? 0.225 : 0.15;
-    const body = {
-      lowerFront: V(wheel.x + (front ? 0.31 : 0.23), front ? 0.145 : 0.16, zSign * innerZ),
-      lowerRear: V(wheel.x - (front ? 0.30 : 0.22), front ? 0.145 : 0.16, zSign * innerZ),
-      upperFront: V(wheel.x + (front ? 0.21 : 0.17), front ? 0.345 : 0.355, zSign * (innerZ - 0.025)),
-      upperRear: V(wheel.x - (front ? 0.20 : 0.16), front ? 0.345 : 0.355, zSign * (innerZ - 0.025)),
-      track: front
-        ? V(wheel.x - 0.44, 0.315, zSign * 0.295)
-        : V(wheel.x + 0.34, 0.315, zSign * 0.115),
-      rocker: V(wheel.x + (front ? -0.42 : 0.30), front ? 0.43 : 0.40, zSign * rockerZ),
-      damper: V(wheel.x + (front ? -0.80 : 0.68), front ? 0.49 : 0.46, zSign * (front ? 0.10 : 0.09)),
-      diff: V(wheel.x + 0.08, 0.30, zSign * 0.17)
-    };
-    body.trackBase = body.track.clone();
-    const wheelLocal = {
-      lower: V(0.015, -0.215, -zSign * 0.105),
-      upper: V(-0.010, 0.215, -zSign * 0.105),
-      track: V(0.100, -0.020, -zSign * 0.105),
-      push: front ? V(0.040, -0.185, -zSign * 0.080) : V(0.000, 0.195, -zSign * 0.080),
-      drive: V(0.000, 0.000, -zSign * 0.060)
-    };
-    const rocker = {
-      pivot: body.rocker.clone(),
-      pushArm: front ? V(0.130, -0.010, 0) : V(-0.130, -0.010, 0),
-      damperArm: front ? V(-0.090, -0.050, 0) : V(0.090, -0.050, 0),
-      // Dedicated eye for the anti-roll-bar drop link. It is a short bracket
-      // above the rocker plate, not a second pushrod or damper pickup.
-      arbArm: front ? V(-0.060, 0.050, 0) : V(0.060, 0.050, 0),
-      baseAngle: front ? -0.10 : 0.10,
-      gain: 14,
-      mesh: null,
-      axle: null
-    };
-    const camber = -zSign * (front ? 1.15 : 0.8) * DEG;
-    const restCenter = V(wheel.x, model.dims.R, wheel.z);
-    const restQuat = new THREE.Quaternion().setFromAxisAngle(_axisX, camber);
-    return {
-      key: wheel.key,
-      index,
-      front,
-      zSign,
-      wheel,
-      body,
-      wheelLocal,
-      rocker,
-      restCenter,
-      restQuat,
-      wheelRoot: null,
-      wheelLocalPoints: null,
-      pushTip: new THREE.Vector3(),
-      damperTip: new THREE.Vector3(),
-      arbTip: new THREE.Vector3(),
-      angle: rocker.baseAngle,
-      tieRodLength0: 0,
-      pushRodLength0: 0,
-      rackShift: 0,
-      rockerSolveFailed: false
-    };
-  });
-}
 
 /* ------------------------------ wheel geometry ------------------------------ */
 
@@ -6808,39 +7223,13 @@ function buildSuspensionLinks(corners) {
   }
 }
 
-function updateSteeringRack(model, bodyMatrix) {
-  const rackGroup = CAR.mechanics.rackGroup;
-  const frontCorners = CAR.corners.filter((corner) => corner.front);
-  if (!rackGroup || frontCorners.length === 0) {
-    CAR.diag.rackTravelMm = 0;
-    CAR.diag.tieRodStretchMm = 0;
-    return;
+function applyRack(model) {
+  const shift = model && Number.isFinite(model.rackShift) ? model.rackShift : 0;
+  for (const corner of CAR.corners) {
+    corner.rackShift = corner.front ? shift : 0;
+    corner.body.track.z = corner.body.trackBase.z + corner.rackShift;
   }
-  const bodyZ = _vecC.set(0, 0, 1).transformDirection(bodyMatrix);
-  let shiftSum = 0;
-  for (const corner of frontCorners) {
-    corner.wheelRoot.updateMatrix();
-    const inner = _vecA.copy(corner.body.trackBase).applyMatrix4(bodyMatrix);
-    const outer = _vecB.copy(corner.wheelLocal.track).applyMatrix4(corner.wheelRoot.matrix);
-    const v = _vecD.subVectors(inner, outer);
-    const b = 2 * bodyZ.dot(v);
-    const c = v.lengthSq() - corner.tieRodLength0 * corner.tieRodLength0;
-    const disc = b * b - 4 * c;
-    let ideal = 0;
-    if (disc >= 0) {
-      const root = Math.sqrt(disc);
-      const s1 = (-b + root) * 0.5;
-      const s2 = (-b - root) * 0.5;
-      ideal = Math.abs(s1 - corner.rackShift) <= Math.abs(s2 - corner.rackShift) ? s1 : s2;
-    }
-    shiftSum += ideal;
-  }
-  const shift = shiftSum / frontCorners.length;
-  for (const corner of frontCorners) {
-    corner.rackShift = shift;
-    corner.body.track.z = corner.body.trackBase.z + shift;
-  }
-  rackGroup.position.z = shift;
+  if (CAR.mechanics.rackGroup) CAR.mechanics.rackGroup.position.z = shift;
   CAR.diag.rackTravelMm = shift * 1000;
 }
 
@@ -6887,7 +7276,7 @@ function solveRockerAngle(corner, bodyMatrix, wheelMatrix, fallback) {
 
 function updateSuspension(model) {
   const bodyMatrix = S.bodyPivot.matrix;
-  updateSteeringRack(model, bodyMatrix);
+  applyRack(model);
   let maxLinkStretch = 0;
   let maxSuspLinkStretch = 0;
   let maxTieRodStretch = 0;
@@ -6899,7 +7288,13 @@ function updateSuspension(model) {
     const wheelMatrix = corner.wheelRoot.matrix;
     const travel = -model.cornerY[i];
     const fallbackAngle = corner.rocker.baseAngle + travel * corner.rocker.gain;
-    corner.angle = solveRockerAngle(corner, bodyMatrix, wheelMatrix, fallbackAngle);
+    const solvedCorner = model.solved && model.solved[i] ? model.solved[i] : null;
+    if (solvedCorner && Number.isFinite(solvedCorner.rockerAngle)) {
+      corner.angle = solvedCorner.rockerAngle;
+      corner.rockerSolveFailed = false;
+    } else {
+      corner.angle = solveRockerAngle(corner, bodyMatrix, wheelMatrix, fallbackAngle);
+    }
     corner.rocker.mesh.rotation.z = corner.angle;
     // Rocker arm tips in body-local coordinates.
     const cos = Math.cos(corner.angle);
@@ -7043,27 +7438,41 @@ function updateCar(model) {
   }
   S.bodyPivot.updateMatrix();
 
-  for (const corner of CAR.corners) {
+  for (let index = 0; index < CAR.corners.length; index += 1) {
+    const corner = CAR.corners[index];
     const root = corner.wheelRoot;
     if (!root) continue;
-    if (corner.front) {
-      const axisLocal = _vecC.copy(corner.wheelLocal.upper).sub(corner.wheelLocal.lower).normalize();
-      const axisWorld = _vecD.copy(axisLocal).applyQuaternion(corner.restQuat);
-      const pivot = _vecE.copy(corner.wheelLocal.lower).applyQuaternion(corner.restQuat).add(corner.restCenter);
-      _qSteer.setFromAxisAngle(axisWorld, state.steer * DEG);
-      // The body's planar pose carries the wheel with it. Pitch and roll move
-      // the body relative to the contact plane and therefore load the springs,
-      // but the contact patch itself stays on the road.
-      const pivotPlan = _vecA.set(bodyPos.x, 0, bodyPos.z)
-        .add(_vecB.set(pivot.x, 0, pivot.z).applyQuaternion(_qYaw));
-      pivotPlan.y = pivot.y;
-      const offset = _vecC.copy(corner.restCenter).sub(pivot).applyQuaternion(_qSteer).applyQuaternion(_qYaw);
-      root.position.copy(pivotPlan).add(offset);
-      root.quaternion.copy(_qYaw).multiply(_qSteer).multiply(corner.restQuat);
+    const solvedCorner = model.solved && model.solved[index] ? model.solved[index] : null;
+    if (solvedCorner) {
+      // The solver output is already in the road frame and contains the bump
+      // camber, toe and steering angle produced by the linkage.
+      root.position.set(solvedCorner.wheelPos[0], solvedCorner.wheelPos[1], solvedCorner.wheelPos[2]);
+      root.quaternion.set(
+        solvedCorner.wheelQuat[0],
+        solvedCorner.wheelQuat[1],
+        solvedCorner.wheelQuat[2],
+        solvedCorner.wheelQuat[3]
+      );
     } else {
-      const offset = _vecA.set(corner.restCenter.x, 0, corner.restCenter.z).applyQuaternion(_qYaw);
-      root.position.set(bodyPos.x + offset.x, model.dims.R, bodyPos.z + offset.z);
-      root.quaternion.copy(_qYaw).multiply(corner.restQuat);
+          if (corner.front) {
+            const axisLocal = _vecC.copy(corner.wheelLocal.upper).sub(corner.wheelLocal.lower).normalize();
+            const axisWorld = _vecD.copy(axisLocal).applyQuaternion(corner.restQuat);
+            const pivot = _vecE.copy(corner.wheelLocal.lower).applyQuaternion(corner.restQuat).add(corner.restCenter);
+            _qSteer.setFromAxisAngle(axisWorld, state.steer * DEG);
+            // The body's planar pose carries the wheel with it. Pitch and roll move
+            // the body relative to the contact plane and therefore load the springs,
+            // but the contact patch itself stays on the road.
+            const pivotPlan = _vecA.set(bodyPos.x, 0, bodyPos.z)
+              .add(_vecB.set(pivot.x, 0, pivot.z).applyQuaternion(_qYaw));
+            pivotPlan.y = pivot.y;
+            const offset = _vecC.copy(corner.restCenter).sub(pivot).applyQuaternion(_qSteer).applyQuaternion(_qYaw);
+            root.position.copy(pivotPlan).add(offset);
+            root.quaternion.copy(_qYaw).multiply(_qSteer).multiply(corner.restQuat);
+          } else {
+            const offset = _vecA.set(corner.restCenter.x, 0, corner.restCenter.z).applyQuaternion(_qYaw);
+            root.position.set(bodyPos.x + offset.x, model.dims.R, bodyPos.z + offset.z);
+            root.quaternion.copy(_qYaw).multiply(corner.restQuat);
+          }
     }
     root.updateMatrix();
     root.updateMatrixWorld(true);
@@ -7084,7 +7493,9 @@ function buildCar(model) {
 
   CAR.shellMeshes = [];
   CAR.wheels = [];
-  CAR.corners = buildCornerData(model);
+  CAR.corners = model.suspension && model.suspension.corners
+    ? model.suspension.corners
+    : buildCornerData(model);
   CAR.links = [];
   CAR.joints = [];
   CAR.driveshafts = [];
@@ -7195,9 +7606,6 @@ function formatOutputValue(param, value) {
     case 'dampingF':
     case 'dampingR':
       return Number(value).toFixed(2) + ' ζ';
-    case 'motionRatioF':
-    case 'motionRatioR':
-      return Number(value).toFixed(2);
     case 'arbFront':
     case 'arbRear':
       return formatInt(value) + '%';
@@ -7910,6 +8318,12 @@ function refreshTelemetry(model) {
   } else {
     setText('cornerForces', '—');
   }
+  if (model.motionRatioInstant && model.motionRatioInstant.length === 4) {
+    const instant = model.motionRatioInstant;
+    setText('dynRatio', `${((instant[0] + instant[1]) / 2).toFixed(2)} / ${((instant[2] + instant[3]) / 2).toFixed(2)}`);
+  } else if (model.motionRatio) {
+    setText('dynRatio', `${model.motionRatio.front.toFixed(2)} / ${model.motionRatio.rear.toFixed(2)}`);
+  }
   if (model.frequencies) {
     setText('dynFreq', `${model.frequencies.heave.toFixed(2)} / ${model.frequencies.roll.toFixed(2)} / ${model.frequencies.pitch.toFixed(2)} Hz`);
   }
@@ -8316,6 +8730,17 @@ function liveModel() {
   return simBuildModel(SIM, state);
 }
 
+function calibrateRack(sim, steerDeg) {
+  if (!sim || !sim.reference || !sim.reference.suspension) return 0;
+  const st = sim.state;
+  return suspRackForSteer(
+    sim.reference.suspension.corners,
+    { x: st.x, y: st.y, z: st.z },
+    new THREE.Quaternion(st.qx, st.qy, st.qz, st.qw),
+    steerDeg * DEG
+  );
+}
+
 function updateSceneFromModel(model) {
   if (typeof applyXray === 'function') applyXray();
   S.roadGroup.quaternion.copy(model.frame.q);
@@ -8339,6 +8764,7 @@ function processPendingRebuild(now) {
   PENDING.lastBuildAt = now;
   if (!SIM) SIM = simCreate(state);
   simReset(SIM, state, { settle: 0.5 });
+  SIM.rackShift = calibrateRack(SIM, state.steer);
   const model = simBuildModel(SIM, state);
   buildCar(model);
   applyXray();
@@ -8358,6 +8784,7 @@ function refreshAll({ rebuild = false } = {}) {
   const reference = computeStatic(state);
   if (!SIM) SIM = simCreate(state);
   SIM.reference = reference;
+  SIM.rackShift = calibrateRack(SIM, state.steer);
   const model = simBuildModel(SIM, state);
   if (rebuild) {
     requestRebuild(model);
@@ -8568,6 +8995,7 @@ function bindGlobalAPI() {
         rollDeg: model.poseDeg.roll,
         yawDeg: model.poseDeg.yaw,
         bodyPos: model.bodyPos ? { x: model.bodyPos.x, y: model.bodyPos.y, z: model.bodyPos.z } : null,
+        solved: model.solved || null,
         bodyVelocity: model.bodyVelocity ? { x: model.bodyVelocity.x, y: model.bodyVelocity.y, z: model.bodyVelocity.z } : null,
         bodyRatesDeg: model.bodyRatesDeg || null,
         travelMm: model.travelMm.slice(),
@@ -8669,6 +9097,22 @@ function bindGlobalAPI() {
     },
     openModel: UI.openModelModal,
     closeModel: UI.closeModelModal,
+    getSceneProbe: () => ({
+      springs: (CAR.springs || []).map((spring) => spring.lastA.distanceTo(spring.lastB)),
+      wireLengths: SIM && SIM.reference && SIM.reference.suspension
+        ? SIM.reference.suspension.design.map((row) => row.length0)
+        : [],
+      rockerAngles: (CAR.corners || []).map((corner) => corner.angle),
+      wheelPos: (CAR.corners || []).map((corner) => (corner.wheelRoot ? corner.wheelRoot.position.toArray() : null)),
+      rackShiftMm: CAR.diag.rackTravelMm,
+      stretch: {
+        susp: CAR.diag.maxSuspLinkStretchMm,
+        tie: CAR.diag.tieRodStretchMm,
+        push: CAR.diag.pushRodStretchMm,
+        arb: CAR.diag.arbStretchMm
+      },
+      solverOk: CAR.diag.rockerSolveOk
+    }),
     runSelfTests: () => runSelfTests(state),
     runDynamicSelfTests: () => runDynamicSelfTests(state),
     exportScreenshot,
@@ -8730,6 +9174,7 @@ function boot() {
 
     initScene();
     SIM = simCreate(state, { settle: 1.8 });
+    SIM.rackShift = calibrateRack(SIM, state.steer);
     const initialModel = simBuildModel(SIM, state);
     S.roadGroup.quaternion.copy(initialModel.frame.q);
     S.roadGroup.updateMatrixWorld(true);

@@ -61,7 +61,6 @@ const CAR = {
 };
 
 const TAU = Math.PI * 2;
-const V = (x, y, z) => new THREE.Vector3(x, y, z);
 
 /* ------------------------------ shared assets ------------------------------ */
 

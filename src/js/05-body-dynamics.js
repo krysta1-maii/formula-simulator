@@ -134,6 +134,8 @@ function simCreate(source = state, options = {}) {
     running: true,
     accumulator: 0,
     lastSubsteps: 0,
+    cornerSeed: [null, null, null, null],
+    rackShift: 0,
     flags: {
       holding: true,
       sliding: false,
@@ -156,6 +158,7 @@ function simReset(sim, source = state, options = {}) {
   sim.impulse = null;
   sim.accumulator = 0;
   sim.lastSubsteps = 0;
+  sim.cornerSeed = [null, null, null, null];
   sim.flags = {
     holding: true,
     sliding: false,
@@ -217,14 +220,50 @@ function simEvaluate(sim) {
   const sy = Math.sin(euler.yaw);
   const corners = [];
 
+  const geometry = reference.suspension ? reference.suspension.corners : null;
+  const design = reference.suspension ? reference.suspension.design : null;
+  const bodyPos = { x: state.x, y: state.y, z: state.z };
+  const bodyQuat = new THREE.Quaternion(state.qx, state.qy, state.qz, state.qw);
+  const rackShift = sim.rackShift || 0;
+
   for (let i = 0; i < reference.wheels.length; i += 1) {
     const wheel = reference.wheels[i];
     const arm = [wheel.x, 0, wheel.z];
     const armRoad = simQuatRotate(q, arm);
     const cornerY = state.y + armRoad[1];
     const cornerVelocityY = velocity[1] + (omegaRoad[2] * armRoad[0] - omegaRoad[0] * armRoad[2]);
-    const springForce = reference.baseLoads[i] - reference.springRates[i] * cornerY;
-    const dampingForce = -reference.damperRateWheel[i] * cornerVelocityY;
+    let solved = null;
+    let springForce = 0;
+    let dampingForce = 0;
+    let coilLength = NaN;
+    let lengthDot = 0;
+    let ratio = 1;
+    if (geometry && design) {
+      const row = design[i];
+      solved = suspSolveCorner(geometry[i], bodyPos, bodyQuat, rackShift, sim.cornerSeed[i], true);
+      sim.cornerSeed[i] = solved.seed;
+      const instantRatio = solved.motionRatio != null ? solved.motionRatio : row.motionRatio;
+      const deltaDot = -cornerVelocityY;
+      if (solved.converged) {
+        const dLdDelta = -instantRatio;
+        lengthDot = dLdDelta * deltaDot;
+        coilLength = solved.coilLength;
+        springForce = row.coilRate * (coilLength - row.refLength) * dLdDelta;
+        dampingForce = row.coilDamping * lengthDot * dLdDelta;
+      } else {
+        // Diverged solve: fall back to the design linkage slope so the state
+        // stays finite, and flag it through the corner record.
+        const dLdDelta = row.dLdDelta;
+        lengthDot = dLdDelta * deltaDot;
+        coilLength = row.length0 + dLdDelta * (-cornerY);
+        springForce = row.coilRate * (coilLength - row.refLength) * dLdDelta;
+        dampingForce = row.coilDamping * dLdDelta * dLdDelta * deltaDot;
+      }
+      ratio = instantRatio;
+    } else {
+      springForce = reference.baseLoads[i] - reference.springRates[i] * cornerY;
+      dampingForce = -reference.damperRateWheel[i] * cornerVelocityY;
+    }
     const contactX = state.x + cy * wheel.x + sy * wheel.z;
     const contactZ = state.z - sy * wheel.x + cy * wheel.z;
     corners.push({
@@ -238,7 +277,11 @@ function simEvaluate(sim) {
       arbForce: 0,
       rawForce: springForce + dampingForce,
       force: 0,
-      contact: [contactX, 0, contactZ]
+      contact: [contactX, 0, contactZ],
+      solved,
+      coilLength,
+      lengthDot,
+      motionRatio: ratio
     });
   }
 
@@ -539,11 +582,33 @@ function simBuildModel(sim, source = state) {
   const px = cg[0] + projectionT * down[0];
   const pz = cg[2] + projectionT * down[2];
   const motionRatio = reference.motionRatio;
-  const springCompressionMm = corners.map((corner) => {
+  const designRow = reference.suspension ? reference.suspension.design : null;
+  const bodyVec = new THREE.Vector3(state.x, state.y, state.z);
+  const bodyQuat = new THREE.Quaternion(state.qx, state.qy, state.qz, state.qw);
+  const solved = corners.map((corner) => {
+    if (!corner.solved) return null;
+    const solvedCorner = corner.solved;
+    const position = solvedCorner.wheelPos.clone().applyQuaternion(bodyQuat).add(bodyVec);
+    const quaternion = bodyQuat.clone().multiply(solvedCorner.wheelQuat);
+    const contact = solvedCorner.contact.clone().applyQuaternion(bodyQuat).add(bodyVec);
+    return {
+      key: corner.key,
+      wheelPos: [position.x, position.y, position.z],
+      wheelQuat: [quaternion.x, quaternion.y, quaternion.z, quaternion.w],
+      contact: [contact.x, contact.y, contact.z],
+      rockerAngle: solvedCorner.rockerAngle,
+      coilLength: solvedCorner.coilLength,
+      motionRatio: solvedCorner.motionRatio,
+      converged: solvedCorner.converged
+    };
+  });
+  const springCompressionMm = corners.map((corner, index) => {
+    if (designRow && Number.isFinite(corner.coilLength)) return (designRow[index].length0 - corner.coilLength) * 1000;
     const ratio = corner.wheel.axle === 'front' ? motionRatio.front : motionRatio.rear;
     return -corner.cornerY * ratio * 1000;
   });
-  const damperCompressionRate = corners.map((corner) => {
+  const damperCompressionRate = corners.map((corner, index) => {
+    if (Number.isFinite(corner.lengthDot)) return -corner.lengthDot;
     const ratio = corner.wheel.axle === 'front' ? motionRatio.front : motionRatio.rear;
     return -corner.cornerVelocityY * ratio;
   });
@@ -594,6 +659,10 @@ function simBuildModel(sim, source = state) {
     cornerY: corners.map((corner) => corner.cornerY),
     cornerVelocityY: corners.map((corner) => corner.cornerVelocityY),
     travelMm: corners.map((corner) => -corner.cornerY * 1000),
+    solved,
+    rackShift: sim.rackShift || 0,
+    motionRatioInstant: corners.map((corner) => corner.motionRatio),
+    solverOk: corners.every((corner) => !corner.solved || corner.solved.converged),
     springCompressionMm,
     damperCompressionRate,
     springForce: corners.map((corner) => corner.springForce),

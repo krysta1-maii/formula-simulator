@@ -27,71 +27,6 @@ function initCarSceneGroups() {
   if (!S.bodyPivot) throw new Error('bodyPivot not created by initScene');
 }
 
-function buildCornerData(model) {
-  return model.wheels.map((wheel, index) => {
-    const front = wheel.axle === 'front';
-    const zSign = wheel.zSign;
-    const innerZ = front ? 0.17 : 0.125;
-    const rockerZ = front ? 0.225 : 0.15;
-    const body = {
-      lowerFront: V(wheel.x + (front ? 0.31 : 0.23), front ? 0.145 : 0.16, zSign * innerZ),
-      lowerRear: V(wheel.x - (front ? 0.30 : 0.22), front ? 0.145 : 0.16, zSign * innerZ),
-      upperFront: V(wheel.x + (front ? 0.21 : 0.17), front ? 0.345 : 0.355, zSign * (innerZ - 0.025)),
-      upperRear: V(wheel.x - (front ? 0.20 : 0.16), front ? 0.345 : 0.355, zSign * (innerZ - 0.025)),
-      track: front
-        ? V(wheel.x - 0.44, 0.315, zSign * 0.295)
-        : V(wheel.x + 0.34, 0.315, zSign * 0.115),
-      rocker: V(wheel.x + (front ? -0.42 : 0.30), front ? 0.43 : 0.40, zSign * rockerZ),
-      damper: V(wheel.x + (front ? -0.80 : 0.68), front ? 0.49 : 0.46, zSign * (front ? 0.10 : 0.09)),
-      diff: V(wheel.x + 0.08, 0.30, zSign * 0.17)
-    };
-    body.trackBase = body.track.clone();
-    const wheelLocal = {
-      lower: V(0.015, -0.215, -zSign * 0.105),
-      upper: V(-0.010, 0.215, -zSign * 0.105),
-      track: V(0.100, -0.020, -zSign * 0.105),
-      push: front ? V(0.040, -0.185, -zSign * 0.080) : V(0.000, 0.195, -zSign * 0.080),
-      drive: V(0.000, 0.000, -zSign * 0.060)
-    };
-    const rocker = {
-      pivot: body.rocker.clone(),
-      pushArm: front ? V(0.130, -0.010, 0) : V(-0.130, -0.010, 0),
-      damperArm: front ? V(-0.090, -0.050, 0) : V(0.090, -0.050, 0),
-      // Dedicated eye for the anti-roll-bar drop link. It is a short bracket
-      // above the rocker plate, not a second pushrod or damper pickup.
-      arbArm: front ? V(-0.060, 0.050, 0) : V(0.060, 0.050, 0),
-      baseAngle: front ? -0.10 : 0.10,
-      gain: 14,
-      mesh: null,
-      axle: null
-    };
-    const camber = -zSign * (front ? 1.15 : 0.8) * DEG;
-    const restCenter = V(wheel.x, model.dims.R, wheel.z);
-    const restQuat = new THREE.Quaternion().setFromAxisAngle(_axisX, camber);
-    return {
-      key: wheel.key,
-      index,
-      front,
-      zSign,
-      wheel,
-      body,
-      wheelLocal,
-      rocker,
-      restCenter,
-      restQuat,
-      wheelRoot: null,
-      wheelLocalPoints: null,
-      pushTip: new THREE.Vector3(),
-      damperTip: new THREE.Vector3(),
-      arbTip: new THREE.Vector3(),
-      angle: rocker.baseAngle,
-      tieRodLength0: 0,
-      pushRodLength0: 0,
-      rackShift: 0,
-      rockerSolveFailed: false
-    };
-  });
-}
 
 /* ------------------------------ wheel geometry ------------------------------ */
 
@@ -955,39 +890,13 @@ function buildSuspensionLinks(corners) {
   }
 }
 
-function updateSteeringRack(model, bodyMatrix) {
-  const rackGroup = CAR.mechanics.rackGroup;
-  const frontCorners = CAR.corners.filter((corner) => corner.front);
-  if (!rackGroup || frontCorners.length === 0) {
-    CAR.diag.rackTravelMm = 0;
-    CAR.diag.tieRodStretchMm = 0;
-    return;
+function applyRack(model) {
+  const shift = model && Number.isFinite(model.rackShift) ? model.rackShift : 0;
+  for (const corner of CAR.corners) {
+    corner.rackShift = corner.front ? shift : 0;
+    corner.body.track.z = corner.body.trackBase.z + corner.rackShift;
   }
-  const bodyZ = _vecC.set(0, 0, 1).transformDirection(bodyMatrix);
-  let shiftSum = 0;
-  for (const corner of frontCorners) {
-    corner.wheelRoot.updateMatrix();
-    const inner = _vecA.copy(corner.body.trackBase).applyMatrix4(bodyMatrix);
-    const outer = _vecB.copy(corner.wheelLocal.track).applyMatrix4(corner.wheelRoot.matrix);
-    const v = _vecD.subVectors(inner, outer);
-    const b = 2 * bodyZ.dot(v);
-    const c = v.lengthSq() - corner.tieRodLength0 * corner.tieRodLength0;
-    const disc = b * b - 4 * c;
-    let ideal = 0;
-    if (disc >= 0) {
-      const root = Math.sqrt(disc);
-      const s1 = (-b + root) * 0.5;
-      const s2 = (-b - root) * 0.5;
-      ideal = Math.abs(s1 - corner.rackShift) <= Math.abs(s2 - corner.rackShift) ? s1 : s2;
-    }
-    shiftSum += ideal;
-  }
-  const shift = shiftSum / frontCorners.length;
-  for (const corner of frontCorners) {
-    corner.rackShift = shift;
-    corner.body.track.z = corner.body.trackBase.z + shift;
-  }
-  rackGroup.position.z = shift;
+  if (CAR.mechanics.rackGroup) CAR.mechanics.rackGroup.position.z = shift;
   CAR.diag.rackTravelMm = shift * 1000;
 }
 
@@ -1034,7 +943,7 @@ function solveRockerAngle(corner, bodyMatrix, wheelMatrix, fallback) {
 
 function updateSuspension(model) {
   const bodyMatrix = S.bodyPivot.matrix;
-  updateSteeringRack(model, bodyMatrix);
+  applyRack(model);
   let maxLinkStretch = 0;
   let maxSuspLinkStretch = 0;
   let maxTieRodStretch = 0;
@@ -1046,7 +955,13 @@ function updateSuspension(model) {
     const wheelMatrix = corner.wheelRoot.matrix;
     const travel = -model.cornerY[i];
     const fallbackAngle = corner.rocker.baseAngle + travel * corner.rocker.gain;
-    corner.angle = solveRockerAngle(corner, bodyMatrix, wheelMatrix, fallbackAngle);
+    const solvedCorner = model.solved && model.solved[i] ? model.solved[i] : null;
+    if (solvedCorner && Number.isFinite(solvedCorner.rockerAngle)) {
+      corner.angle = solvedCorner.rockerAngle;
+      corner.rockerSolveFailed = false;
+    } else {
+      corner.angle = solveRockerAngle(corner, bodyMatrix, wheelMatrix, fallbackAngle);
+    }
     corner.rocker.mesh.rotation.z = corner.angle;
     // Rocker arm tips in body-local coordinates.
     const cos = Math.cos(corner.angle);
@@ -1190,27 +1105,41 @@ function updateCar(model) {
   }
   S.bodyPivot.updateMatrix();
 
-  for (const corner of CAR.corners) {
+  for (let index = 0; index < CAR.corners.length; index += 1) {
+    const corner = CAR.corners[index];
     const root = corner.wheelRoot;
     if (!root) continue;
-    if (corner.front) {
-      const axisLocal = _vecC.copy(corner.wheelLocal.upper).sub(corner.wheelLocal.lower).normalize();
-      const axisWorld = _vecD.copy(axisLocal).applyQuaternion(corner.restQuat);
-      const pivot = _vecE.copy(corner.wheelLocal.lower).applyQuaternion(corner.restQuat).add(corner.restCenter);
-      _qSteer.setFromAxisAngle(axisWorld, state.steer * DEG);
-      // The body's planar pose carries the wheel with it. Pitch and roll move
-      // the body relative to the contact plane and therefore load the springs,
-      // but the contact patch itself stays on the road.
-      const pivotPlan = _vecA.set(bodyPos.x, 0, bodyPos.z)
-        .add(_vecB.set(pivot.x, 0, pivot.z).applyQuaternion(_qYaw));
-      pivotPlan.y = pivot.y;
-      const offset = _vecC.copy(corner.restCenter).sub(pivot).applyQuaternion(_qSteer).applyQuaternion(_qYaw);
-      root.position.copy(pivotPlan).add(offset);
-      root.quaternion.copy(_qYaw).multiply(_qSteer).multiply(corner.restQuat);
+    const solvedCorner = model.solved && model.solved[index] ? model.solved[index] : null;
+    if (solvedCorner) {
+      // The solver output is already in the road frame and contains the bump
+      // camber, toe and steering angle produced by the linkage.
+      root.position.set(solvedCorner.wheelPos[0], solvedCorner.wheelPos[1], solvedCorner.wheelPos[2]);
+      root.quaternion.set(
+        solvedCorner.wheelQuat[0],
+        solvedCorner.wheelQuat[1],
+        solvedCorner.wheelQuat[2],
+        solvedCorner.wheelQuat[3]
+      );
     } else {
-      const offset = _vecA.set(corner.restCenter.x, 0, corner.restCenter.z).applyQuaternion(_qYaw);
-      root.position.set(bodyPos.x + offset.x, model.dims.R, bodyPos.z + offset.z);
-      root.quaternion.copy(_qYaw).multiply(corner.restQuat);
+          if (corner.front) {
+            const axisLocal = _vecC.copy(corner.wheelLocal.upper).sub(corner.wheelLocal.lower).normalize();
+            const axisWorld = _vecD.copy(axisLocal).applyQuaternion(corner.restQuat);
+            const pivot = _vecE.copy(corner.wheelLocal.lower).applyQuaternion(corner.restQuat).add(corner.restCenter);
+            _qSteer.setFromAxisAngle(axisWorld, state.steer * DEG);
+            // The body's planar pose carries the wheel with it. Pitch and roll move
+            // the body relative to the contact plane and therefore load the springs,
+            // but the contact patch itself stays on the road.
+            const pivotPlan = _vecA.set(bodyPos.x, 0, bodyPos.z)
+              .add(_vecB.set(pivot.x, 0, pivot.z).applyQuaternion(_qYaw));
+            pivotPlan.y = pivot.y;
+            const offset = _vecC.copy(corner.restCenter).sub(pivot).applyQuaternion(_qSteer).applyQuaternion(_qYaw);
+            root.position.copy(pivotPlan).add(offset);
+            root.quaternion.copy(_qYaw).multiply(_qSteer).multiply(corner.restQuat);
+          } else {
+            const offset = _vecA.set(corner.restCenter.x, 0, corner.restCenter.z).applyQuaternion(_qYaw);
+            root.position.set(bodyPos.x + offset.x, model.dims.R, bodyPos.z + offset.z);
+            root.quaternion.copy(_qYaw).multiply(corner.restQuat);
+          }
     }
     root.updateMatrix();
     root.updateMatrixWorld(true);
@@ -1231,7 +1160,9 @@ function buildCar(model) {
 
   CAR.shellMeshes = [];
   CAR.wheels = [];
-  CAR.corners = buildCornerData(model);
+  CAR.corners = model.suspension && model.suspension.corners
+    ? model.suspension.corners
+    : buildCornerData(model);
   CAR.links = [];
   CAR.joints = [];
   CAR.driveshafts = [];

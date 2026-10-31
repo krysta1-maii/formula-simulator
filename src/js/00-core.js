@@ -32,8 +32,6 @@ const NUM_LIMITS = {
   wheelRateR: [50, 320],
   dampingF: [0.05, 1.2],
   dampingR: [0.05, 1.2],
-  motionRatioF: [0.3, 0.9],
-  motionRatioR: [0.3, 0.9],
   arbFront: [0, 100],
   arbRear: [0, 100],
   steer: [-18, 18]
@@ -60,8 +58,6 @@ const DEFAULTS = Object.freeze({
   wheelRateR: 160,
   dampingF: 0.35,
   dampingR: 0.38,
-  motionRatioF: 0.58,
-  motionRatioR: 0.62,
   arbFront: 60,
   arbRear: 60,
   slope: 0,
@@ -324,21 +320,114 @@ function computeStatic(source = state) {
     [sumKZ, sumKXZ, -sumKZZ - arbRollStiffness]
   ];
   const solved = solve3(A, [b0, b1, b2]) || [0, 0, 0];
-  const heave = solved[0];
-  const pitch = solved[1];
-  const roll = solved[2];
+  let heave = solved[0];
+  let pitch = solved[1];
+  let roll = solved[2];
 
-  const cornerY = wheels.map((wheel) => heave + wheel.x * pitch - wheel.z * roll);
-  // A positive roll lowers the right side, so the right-hand bar arm is twisted
-  // in the bump direction and the bar pushes that wheel down (increasing its
-  // normal load); the left side receives the equal-and-opposite force.
-  const arbForce = wheels.map((wheel) => {
-    const rate = wheel.axle === 'front' ? arbRate.front : arbRate.rear;
-    const track = wheel.axle === 'front' ? dims.tf : dims.tr;
-    return wheel.zSign * rate * track * roll;
+  // Stage-02 dynamic reference. The wheel rate remains the design parameter; the
+  // motion ratio is no longer an input. It is measured from the actual hardpoint
+  // geometry by solving the four corner mechanisms, so the coil rate, the
+  // preload and the force path all follow the same linkage that is drawn.
+  const dampingRatio = {
+    front: clamp(Number.isFinite(source.dampingF) ? source.dampingF : DEFAULTS.dampingF, 0.02, 1.5),
+    rear: clamp(Number.isFinite(source.dampingR) ? source.dampingR : DEFAULTS.dampingR, 0.02, 1.5)
+  };
+  const cornerMass = baseLoads.map((value) => value / GRAVITY);
+  const criticalDamping = k.map((ki, i) => 2 * Math.sqrt(ki * Math.max(cornerMass[i], 1e-6)));
+  const damperRateWheel = k.map((ki, i) => {
+    const ratio = wheels[i].axle === 'front' ? dampingRatio.front : dampingRatio.rear;
+    return ratio * criticalDamping[i];
   });
+
+  const cornerGeometry = suspensionBuild({ dims, wheels });
+  const designQuat = new THREE.Quaternion();
+  const designLevel = cornerGeometry.corners.map((corner) =>
+    suspSolveCorner(corner, { x: 0, y: 0, z: 0 }, designQuat, 0, null, true));
+  const cornerRatio = designLevel.map((solution) => {
+    if (solution.motionRatio != null && Number.isFinite(solution.motionRatio) && Math.abs(solution.motionRatio) > 1e-3) {
+      return solution.motionRatio;
+    }
+    return 0.5;
+  });
+  const motionRatio = {
+    front: (Math.abs(cornerRatio[0]) + Math.abs(cornerRatio[1])) / 2,
+    rear: (Math.abs(cornerRatio[2]) + Math.abs(cornerRatio[3])) / 2
+  };
+  const springRateCoil = k.map((ki, i) => ki / Math.pow(cornerRatio[i], 2));
+  const damperRateShaft = damperRateWheel.map((ci, i) => ci / Math.pow(cornerRatio[i], 2));
+  const springDesign = designLevel.map((solution, i) => {
+    const dLdDelta = -cornerRatio[i];
+    const ratio = Math.abs(cornerRatio[i]) > 1e-3 ? cornerRatio[i] : 0.5;
+    const length0 = solution.coilLength;
+    const refLength = length0 + baseLoads[i] / (springRateCoil[i] * ratio);
+    return {
+      length0,
+      refLength,
+      motionRatio: cornerRatio[i],
+      dLdDelta,
+      rockerAngle0: solution.rockerAngle,
+      coilRate: springRateCoil[i],
+      coilDamping: damperRateShaft[i]
+    };
+  });
+
+  // Geometric static equilibrium. The linear solve only supplies a starting
+  // pose; the reference attitude is refined with the same mechanism forces that
+  // the integrator evaluates, so static and dynamic equilibria agree.
+  const staticSeeds = [null, null, null, null];
+  const evaluateStatic = (h, p, r) => {
+    const quat = new THREE.Quaternion()
+      .setFromAxisAngle(new THREE.Vector3(0, 0, 1), p)
+      .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), r));
+    const bodyPos = { x: 0, y: h, z: 0 };
+    const cornerY = wheels.map((wheel) => h + wheel.x * p - wheel.z * r);
+    const arb = [0, 0, 0, 0];
+    for (const pair of [[0, 1], [2, 3]]) {
+      const rate = arbRate[wheels[pair[0]].axle] || 0;
+      const delta = cornerY[pair[0]] - cornerY[pair[1]];
+      arb[pair[0]] = -rate * delta;
+      arb[pair[1]] = rate * delta;
+    }
+    const raw = cornerGeometry.corners.map((corner, i) => {
+      const solution = suspSolveCorner(corner, bodyPos, quat, 0, staticSeeds[i], true);
+      staticSeeds[i] = solution.seed;
+      const ratio = solution.motionRatio != null ? solution.motionRatio : springDesign[i].motionRatio;
+      const spring = springDesign[i].coilRate * (solution.coilLength - springDesign[i].refLength) * (-ratio);
+      return spring + arb[i];
+    });
+    const sum = raw.reduce((acc, value) => acc + value, 0);
+    const mx = raw.reduce((acc, value, i) => acc + value * wheels[i].x, 0);
+    const mz = raw.reduce((acc, value, i) => acc + value * wheels[i].z, 0);
+    return { raw, arb, cornerY, sum, mx, mz };
+  };
+  {
+    const target = [totalNormal, totalNormal * px, totalNormal * pz];
+    for (let iter = 0; iter < 6; iter += 1) {
+      const evaluation = evaluateStatic(heave, pitch, roll);
+      const residual = [evaluation.sum - target[0], evaluation.mx - target[1], evaluation.mz - target[2]];
+      if (Math.max(Math.abs(residual[0]), Math.abs(residual[1]), Math.abs(residual[2])) < 1e-7) break;
+      const hStep = 1e-4;
+      const aStep = 1e-5;
+      const eh = evaluateStatic(heave + hStep, pitch, roll);
+      const ep = evaluateStatic(heave, pitch + aStep, roll);
+      const er = evaluateStatic(heave, pitch, roll + aStep);
+      const J = [
+        [(eh.sum - evaluation.sum) / hStep, (ep.sum - evaluation.sum) / aStep, (er.sum - evaluation.sum) / aStep],
+        [(eh.mx - evaluation.mx) / hStep, (ep.mx - evaluation.mx) / aStep, (er.mx - evaluation.mx) / aStep],
+        [(eh.mz - evaluation.mz) / hStep, (ep.mz - evaluation.mz) / aStep, (er.mz - evaluation.mz) / aStep]
+      ];
+      const delta = solve3(J, [-residual[0], -residual[1], -residual[2]]);
+      if (!delta) break;
+      heave += clamp(delta[0], -0.01, 0.01);
+      pitch += clamp(delta[1], -0.005, 0.005);
+      roll += clamp(delta[2], -0.005, 0.005);
+    }
+  }
+  const staticState = evaluateStatic(heave, pitch, roll);
+  const cornerY = staticState.cornerY;
+  const arbForce = staticState.arb;
   const arbMoment = arbForce.reduce((acc, value, i) => acc + value * wheels[i].z, 0);
-  const rawLoads = cornerY.map((y, i) => baseLoads[i] - k[i] * y + arbForce[i]);
+  const rawLoads = staticState.raw;
   const loads = rawLoads.map((value) => Math.max(0, value));
   const minRawLoad = Math.min(...rawLoads);
   const liftedCount = rawLoads.filter((value) => value < -1e-6).length;
@@ -363,26 +452,6 @@ function computeStatic(source = state) {
   const levelLeft = levelLoads[0] + levelLoads[2];
   const levelRight = levelLoads[1] + levelLoads[3];
 
-  // Stage-02 dynamic reference. The wheel rate remains the primary spring
-  // parameter; the motion ratio maps it to the coil spring and to the damper
-  // shaft. Damping is specified as a fraction of critical damping at the wheel,
-  // which keeps the transient response readable when mass or wheel rate moves.
-  const motionRatio = {
-    front: clamp(Number.isFinite(source.motionRatioF) ? source.motionRatioF : DEFAULTS.motionRatioF, 0.3, 0.9),
-    rear: clamp(Number.isFinite(source.motionRatioR) ? source.motionRatioR : DEFAULTS.motionRatioR, 0.3, 0.9)
-  };
-  const dampingRatio = {
-    front: clamp(Number.isFinite(source.dampingF) ? source.dampingF : DEFAULTS.dampingF, 0.02, 1.5),
-    rear: clamp(Number.isFinite(source.dampingR) ? source.dampingR : DEFAULTS.dampingR, 0.02, 1.5)
-  };
-  const cornerMass = baseLoads.map((value) => value / GRAVITY);
-  const criticalDamping = k.map((ki, i) => 2 * Math.sqrt(ki * Math.max(cornerMass[i], 1e-6)));
-  const damperRateWheel = k.map((ki, i) => {
-    const ratio = wheels[i].axle === 'front' ? dampingRatio.front : dampingRatio.rear;
-    return ratio * criticalDamping[i];
-  });
-  const springRateCoil = k.map((ki, i) => ki / Math.pow(wheels[i].axle === 'front' ? motionRatio.front : motionRatio.rear, 2));
-  const damperRateShaft = damperRateWheel.map((ci, i) => ci / Math.pow(wheels[i].axle === 'front' ? motionRatio.front : motionRatio.rear, 2));
   const inertia = computeBodyInertia(source, dims);
   const heaveStiffness = sumK;
   const rollStiffnessSpring = wheels.reduce((acc, wheel, i) => acc + k[i] * Math.pow(wheel.z - zCG, 2), 0);
@@ -430,6 +499,10 @@ function computeStatic(source = state) {
     damperRateShaft,
     springRateCoil,
     motionRatio,
+    suspension: {
+      corners: cornerGeometry.corners,
+      design: springDesign
+    },
     inertia,
     stiffness: {
       heave: heaveStiffness,
