@@ -728,7 +728,7 @@ function poseAt(pitchDeg, rollDeg, patch) {
   check('simEvaluate has no bare simCross call', count === 0, String(count));
 }
 
-console.log('\n[10] render fallback quaternion');
+console.log('\n[13] render fallback quaternion');
 function matMul3(a, b) {
   const out = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
   for (let i = 0; i < 3; i += 1) for (let j = 0; j < 3; j += 1) for (let k = 0; k < 3; k += 1) out[i][j] += a[i][k] * b[k][j];

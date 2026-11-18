@@ -199,7 +199,7 @@ simApplyForceAt(sim, roadPoint, forceRoad, bucket)
 | 文件 | 归属 | 用途 |
 | --- | --- | --- |
 | `tools/test-physics-invariants.mjs` | 01 | 自由刚体、摇臂、角点、种子独立、运动比、变量遮蔽；分组由 01 §5 维护 |
-| `tools/test-dynamics.mjs` [10][11][12] | 02 | HOLD/SLIP、脉冲坐标、接地点唯一性与力矩分解 |
+| `tools/test-dynamics.mjs` [10][11][12] | 02 | HOLD/SLIP、脉冲坐标、接地点唯一性与力矩分解；[13] 渲染回退四元数归 04 |
 | `tools/test-runtime.mjs` | 03 | 帧时间、几何代际、自检、变量遮蔽的 sourceContract |
 | `tools/test-ui-browser.mjs` | 04 | 视口、键盘、焦点、状态、求解展示、离线 |
 | `tools/test-dev-server.mjs` | 04 | dev-server 路径纯函数与集成 |
@@ -207,7 +207,7 @@ simApplyForceAt(sim, roadPoint, forceRoad, bucket)
 | `tools/test-camera.mjs` | 04（B4-6 迁移 runner） | 相机冒烟；与动态测试共用 runner |
 | `tools/browser-runner.mjs` | 04 | Chrome 启动、CDP、清理、`browserGate` |
 | `tools/check-build.mjs` | 04 | 构建一致性；`build:check` 唯一产物门禁 |
-| `tools/test-harness.mjs` | 05 | 共享 `loadPhysics/makeSetup/check/mulberry32` |
+| `tools/audit/_harness.mjs` | 05 | 共享 `loadPhysics/makeSetup/check/mulberry32` |
 | `tools/audit/*` | 05 | 修复前红基线、JSON 报告、baseline；不进入 `npm test` |
 | `tools/bench.mjs` | 05 | 性能基准；单独运行，不进快速层 |
 
@@ -215,9 +215,9 @@ simApplyForceAt(sim, roadPoint, forceRoad, bucket)
 
 | 命令 | 覆盖 | 退出码 |
 | --- | --- | --- |
-| `npm test` | 静力 47 + 动力学 52；B1 起动力学项数增加 | 0 通过，1 失败 |
-| `npm run test:core` | 静力 47 | 0/1 |
-| `npm run test:dynamics` | 动力学 52，含 [10][11][12] 追加段 | 0/1 |
+| `npm test` | 静力 50 + 动力学 80（B4 后实测） | 0 通过，1 失败 |
+| `npm run test:core` | 静力 50 | 0/1 |
+| `npm run test:dynamics` | 动力学 80，含 [10][11][12][13] 追加段 | 0/1 |
 | `npm run test:invariants` | 01 的物理不变量 | 0/1 |
 | `npm run test:runtime` | 03 的帧时间、几何、自检 | 0/1 |
 | `npm run test:dev-server` | 04 的 dev-server 边界 | 0/1 |

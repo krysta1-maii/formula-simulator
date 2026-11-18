@@ -250,7 +250,7 @@ audit 默认严格模式，任何未通过即退出 1，因此 B0 阶段该命�
 | U5 轮载箭头 | 箭头长度与文档声明的载荷映射一致 | Node 线性断言 1e-12；浏览器只验证 height/load 比例与零载；非线性声明按公式复算 | test-ui-browser（B4-5 启用） | B4-5 |
 | U6 Chrome 清理 | 启动失败不残留 Chrome 与 profile | test 失败退出 1；audit 环境错误退出 2；缺 Chrome 默认 SKIP，严格变量下失败；无 fs-* 临时目录 | test-ui-browser / spawnCase | B4-6 |
 | A3 dev-server | 编码遍历与同前缀兄弟目录不可读 | 状态码 403/404 | test-dev-server / resolvePath | B4-6 |
-| A4 清理项 | 死代码、截图命名、四元数顺序与缩进符合约定 | createDefaultBodyMaterialSet 未定义；截图名匹配 FS-01_dynamic_*；回退四元数顺序为 Ry·Rz·Rx | test-dynamics.mjs [13] 清理项；test-core.mjs [10] 死代码/命名 | B4-7 |
+| A4 清理项 | 死代码、截图命名、四元数顺序与缩进符合约定 | createDefaultBodyMaterialSet 未定义；截图名匹配 FS-01_dynamic_*；回退四元数顺序为 Ry·Rz·Rx | test-core.mjs [10] 死代码/命名；test-dynamics.mjs [13] 渲染回退四元数 | B4-7 |
 
 阈值来源：B4.1-B4.5 的基线值来自 2026-11-19 的复核实验与分册 01、02 的现状表；B5.1-B5.4 的基线来自 B 报告与主册第 5.2 节。修复后的判据取物理可接受值与基线之间的保守值。例如阻尼峰值基线 30.7 kN、目标 15 kN，留出一倍裕度，避免把"修好一半"判为通过。同一工况在不同统计窗口下的残差与运动比会在 4.02-4.52 mm、-4.20 至 -6.73 之间变化，审计以首次不可达样本和峰值阻尼为判据，不以单点数值作为通过条件。B4.3 的 mode 字段由 B2-1 引入，B0 审计在修复前用 flags.holding/sliding 作为等价观测。
 
@@ -339,3 +339,9 @@ B0-1 无前置；B0-2、B0-3 依赖 B0-1。R1 依赖 B1 的求解器结果字段
 | M6 | npm run ci:node && npm run build:check && FS_REQUIRE_CHROME=1 npm run ci:browser && npm run audit | 四层全部通过，knownFailure 全为 false |
 
 所有新增测试必须在 fbb401d 上留下红色记录，PR 描述附命令与关键输出；只提交"修复后通过"的测试不算完成回归。
+
+## 9. B5-1/B5-2 文档同步
+
+B5-1：按主册第 10 节更新 README 19/81/100/164/170-215/212 与 DESIGN 20.2/20.3/20.7/20.9/20.10/544/640/578/648；数字以 B4 后实测 50+80、test:invariants 27、test:runtime 78、test:ui 44、自检 24 为准；删除 45/52/22/8/40/5890/50 ms/参考点积分旧表述。
+B5-2：同步自检与遥测文案：14+10=24、10 行检查表、solverOk/solverState/rockerResidualMm/motionRatioState；template 162/448/540 已由 B4 同步，B5 只核对，不改逻辑。
+验收：npm test 50+80、test:invariants 27、test:runtime 78、test:ui 44、audit 全绿、build:check strict；grep 旧值只允许出现在历史对照/审查报告。
