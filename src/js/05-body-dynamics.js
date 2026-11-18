@@ -29,8 +29,26 @@ const SIM_LINEAR_LIMIT = 80;
 const SIM_BOUND_X = 4.2;
 const SIM_BOUND_Z = 2.6;
 const SIM_IMPULSE_SECONDS = 0.12;
+// B2-1: latched contact state machine.
+const SIM_ARREST_SPEED = 2e-3;
+const SIM_ARREST_RATE = 2e-3;
+const SIM_ARREST_DWELL = 3;
+const SIM_HOLD_HYSTERESIS = 0.02;
 
 let SIM = null;
+
+function simContactState() {
+  return {
+    mode: 'HOLD',
+    dwell: 0,
+    since: 0,
+    changes: 0,
+    lastChangeStep: 0,
+    reason: null,
+    slipSpeed: 0,
+    usage: 0
+  };
+}
 
 /* ------------------------------ quaternion helpers ------------------------------ */
 
@@ -172,6 +190,7 @@ function simCreate(source = state, options = {}) {
     state: null,
     time: 0,
     impulse: null,
+    contact: simContactState(),
     running: true,
     accumulator: 0,
     lastSubsteps: 0,
@@ -201,6 +220,7 @@ function simReset(sim, source = state, options = {}) {
   sim.state = simEquilibriumState(sim.reference);
   sim.time = 0;
   sim.impulse = null;
+  sim.contact = simContactState();
   sim.accumulator = 0;
   sim.lastSubsteps = 0;
   sim.cornerSeed = [null, null, null, null];
@@ -220,22 +240,42 @@ function simReset(sim, source = state, options = {}) {
   return sim;
 }
 
+/**
+ * Swap the reference model of a running simulation without resetting the body
+ * state or the contact latch (B2-1 / A-06). Seeds belong to the old geometry
+ * and are cleared; the body state and sim.contact are preserved.
+ */
+function simRetargetReference(sim, source = state) {
+  const next = computeStatic(source);
+  const previousRevision = sim.reference ? sim.reference.geometryRevision : undefined;
+  const nextRevision = next.geometryRevision;
+  if (previousRevision !== undefined && nextRevision !== undefined && previousRevision !== nextRevision) {
+    throw new Error('simRetargetReference: geometryRevision mismatch (' + previousRevision + ' -> ' + nextRevision + ')');
+  }
+  sim.reference = next;
+  sim.cornerSeed = [null, null, null, null];
+  sim.cornerRatio = [null, null, null, null];
+  return sim;
+}
+
 function simActiveImpulse(sim) {
   return sim.impulse && sim.time < sim.impulse.until ? sim.impulse : null;
 }
 
 function simApplyImpulse(sim, kind = 'heave') {
+  // B2-2: offset is a body-frame point relative to the reference point;
+  // forceRoad is the road-frame impulse force, applied unchanged.
   const specs = {
-    heave: { label: '垂向脉冲', force: [0, -6800, 0], offset: [0, 0, 0] },
-    roll: { label: '侧倾脉冲', force: [0, -4200, 0], offset: [0, 0, 0.90] },
-    pitch: { label: '俯仰脉冲', force: [0, -6200, 0], offset: [0.95, 0, 0] }
+    heave: { label: '垂向脉冲', forceRoad: [0, -6800, 0], offset: [0, 0, 0] },
+    roll: { label: '侧倾脉冲', forceRoad: [0, -4200, 0], offset: [0, 0, 0.90] },
+    pitch: { label: '俯仰脉冲', forceRoad: [0, -6200, 0], offset: [0.95, 0, 0] }
   };
   const spec = specs[kind];
   if (!spec) return false;
   sim.impulse = {
     kind,
     label: spec.label,
-    force: spec.force.slice(),
+    forceRoad: spec.forceRoad.slice(),
     offset: spec.offset.slice(),
     until: sim.time + SIM_IMPULSE_SECONDS
   };
@@ -245,7 +285,35 @@ function simApplyImpulse(sim, kind = 'heave') {
 
 /* ------------------------------ force evaluation ------------------------------ */
 
-function simEvaluate(sim) {
+/**
+ * B2-4: single force-assembly entry. It reads and writes the transient
+ * sim._evalAccum created by simEvaluate; bucket selects the moment part.
+ * roadPoint and forceRoad are road-frame; the arm is measured from the CG.
+ */
+function simApplyForceAt(sim, roadPoint, forceRoad, bucket) {
+  const accum = sim._evalAccum;
+  if (!accum) {
+    throw new Error('simApplyForceAt: sim._evalAccum is missing (call inside simEvaluate)');
+  }
+  const part = accum.momentParts[bucket];
+  if (!part) {
+    throw new Error('simApplyForceAt: unknown bucket ' + bucket);
+  }
+  const arm = [
+    roadPoint[0] - accum.cg[0],
+    roadPoint[1] - accum.cg[1],
+    roadPoint[2] - accum.cg[2]
+  ];
+  const localMoment = simCross(arm, forceRoad);
+  accum.force[0] += forceRoad[0];
+  accum.force[1] += forceRoad[1];
+  accum.force[2] += forceRoad[2];
+  part[0] += localMoment[0];
+  part[1] += localMoment[1];
+  part[2] += localMoment[2];
+}
+
+function simEvaluate(sim, dt = SIM_DT) {
   const bodyState = sim.state;
   const reference = sim.reference;
   if (!reference || !reference.source) {
@@ -267,10 +335,19 @@ function simEvaluate(sim) {
     reference.frame.gravityLocal.y,
     reference.frame.gravityLocal.z
   ];
-  const force = [mass * gravity[0], mass * gravity[1], mass * gravity[2]];
-  const moment = [0, 0, 0];
-  const cy = Math.cos(euler.yaw);
-  const sy = Math.sin(euler.yaw);
+  // Transient accumulator for simApplyForceAt; created and deleted by this
+  // function, never part of the model snapshot.
+  const accum = {
+    cg: [cg[0], cg[1], cg[2]],
+    force: [mass * gravity[0], mass * gravity[1], mass * gravity[2]],
+    momentParts: {
+      normal: [0, 0, 0],
+      friction: [0, 0, 0],
+      impulse: [0, 0, 0]
+    }
+  };
+  sim._evalAccum = accum;
+  const force = accum.force;
   const corners = [];
 
   const geometry = reference.suspension ? reference.suspension.corners : null;
@@ -319,8 +396,35 @@ function simEvaluate(sim) {
       springForce = reference.baseLoads[i] - reference.springRates[i] * cornerY;
       dampingForce = -reference.damperRateWheel[i] * cornerVelocityY;
     }
-    const contactX = refPos.x + cy * wheel.x + sy * wheel.z;
-    const contactZ = refPos.z - sy * wheel.x + cy * wheel.z;
+    // B2-3: one road-frame contact point per corner. The solved mechanism
+    // provides it; the fallback (no suspension model) projects the design
+    // wheel centre onto the road plane with the full quaternion and the road
+    // normal [0,1,0], never the gravity direction.
+    let contactRoad;
+    let wheelPosRoad;
+    if (solved && solved.contactRoad) {
+      contactRoad = [solved.contactRoad.x, solved.contactRoad.y, solved.contactRoad.z];
+      wheelPosRoad = [solved.wheelPosRoad.x, solved.wheelPosRoad.y, solved.wheelPosRoad.z];
+    } else {
+      const rest = simQuatRotate(q, [wheel.x, 0, wheel.z]);
+      const px = refPos.x + rest[0];
+      const pz = refPos.z + rest[2];
+      contactRoad = [px, 0, pz];
+      wheelPosRoad = [px, reference.dims.R, pz];
+    }
+    const contactArm = [contactRoad[0] - cg[0], contactRoad[1] - cg[1], contactRoad[2] - cg[2]];
+    const contactVelocity = [
+      velocity[0] + (omegaRoad[1] * contactArm[2] - omegaRoad[2] * contactArm[1]),
+      velocity[1] + (omegaRoad[2] * contactArm[0] - omegaRoad[0] * contactArm[2]),
+      velocity[2] + (omegaRoad[0] * contactArm[1] - omegaRoad[1] * contactArm[0])
+    ];
+    // Parking friction only sees the planar degrees of freedom (translation +
+    // yaw); roll/pitch rates are absorbed by the suspension in this model, so
+    // they must not inject tangential slip at the contact patch.
+    const slipVelocity = [
+      velocity[0] + omegaRoad[1] * contactArm[2],
+      velocity[2] - omegaRoad[1] * contactArm[0]
+    ];
     corners.push({
       key: wheel.key,
       index: i,
@@ -332,7 +436,10 @@ function simEvaluate(sim) {
       arbForce: 0,
       rawForce: springForce + dampingForce,
       force: 0,
-      contact: [contactX, 0, contactZ],
+      contact: contactRoad,
+      contactVelocity,
+      slipVelocity,
+      wheelPos: wheelPosRoad,
       solved,
       coilLength,
       lengthDot,
@@ -357,21 +464,24 @@ function simEvaluate(sim) {
   let sumNormal = 0;
   for (const corner of corners) {
     corner.force = Math.max(0, corner.rawForce);
+    corner.normal = corner.force;
     sumNormal += corner.force;
-    const arm = [corner.contact[0] - cg[0], -cg[1], corner.contact[2] - cg[2]];
-    const vertical = [0, corner.force, 0];
-    const localMoment = simCross(arm, vertical);
-    moment[0] += localMoment[0];
-    moment[1] += localMoment[1];
-    moment[2] += localMoment[2];
-    force[1] += corner.force;
+    simApplyForceAt(sim, corner.contact, [0, corner.force, 0], 'normal');
   }
+  const normalMomentY = accum.momentParts.normal[1];
 
   const impulse = simActiveImpulse(sim);
+  const impulseLeverRoad = impulse
+    ? simQuatRotate(q, [
+      impulse.offset[0] - cgBody[0],
+      impulse.offset[1] - cgBody[1],
+      impulse.offset[2] - cgBody[2]
+    ])
+    : null;
   const externalTangent = [
-    mass * gravity[0] + (impulse ? impulse.force[0] : 0),
+    mass * gravity[0] + (impulse ? impulse.forceRoad[0] : 0),
     0,
-    mass * gravity[2] + (impulse ? impulse.force[2] : 0)
+    mass * gravity[2] + (impulse ? impulse.forceRoad[2] : 0)
   ];
   const demand = Math.hypot(externalTangent[0], externalTangent[2]);
   const frictionCoefficient = Number.isFinite(source.friction) ? source.friction : DEFAULTS.friction;
@@ -379,67 +489,158 @@ function simEvaluate(sim) {
   const atRest = Math.abs(bodyState.vx) < SIM_REST_SPEED &&
     Math.abs(bodyState.vz) < SIM_REST_SPEED &&
     Math.abs(bodyState.wy) < SIM_REST_SPEED;
-  const holding = atRest && sumNormal > 1e-6 && demand <= capacity + 1e-9;
-  let sliding = false;
+
+  // B2-1: latched HOLD/SLIP contact state. simEvaluate only proposes
+  // contactNext; simStep commits it after the integration step.
+  const previousContact = sim.contact || simContactState();
+  let maxSlipSpeed = 0;
+  for (const corner of corners) {
+    maxSlipSpeed = Math.max(maxSlipSpeed, Math.hypot(corner.slipVelocity[0], corner.slipVelocity[1]));
+  }
+  const planarSpeed = Math.hypot(bodyState.vx, bodyState.vz);
+  const lifted = corners.some((corner) => corner.force <= 1e-6);
+  let mode = previousContact.mode === 'SLIP' ? 'SLIP' : 'HOLD';
+  let reason = previousContact.reason;
+  let modeChanged = false;
+  if (mode === 'HOLD') {
+    if (planarSpeed > SIM_ARREST_SPEED) { mode = 'SLIP'; reason = 'speed'; }
+    else if (Math.abs(bodyState.wy) > SIM_ARREST_RATE) { mode = 'SLIP'; reason = 'yaw'; }
+    else if (maxSlipSpeed > SIM_ARREST_SPEED) { mode = 'SLIP'; reason = 'slip'; }
+    else if (sumNormal <= 1e-6 || lifted) { mode = 'SLIP'; reason = 'lift'; }
+    else if (demand > capacity) { mode = 'SLIP'; reason = 'demand'; }
+    modeChanged = mode === 'SLIP';
+  }
+
   const frictionForces = [];
+  let usage = 0;
+  const arrest = { planar: false, yaw: false };
+  const recordFriction = (corner, friction) => {
+    frictionForces.push(friction);
+    corner.friction = friction;
+    simApplyForceAt(sim, corner.contact, friction, 'friction');
+    if (frictionCoefficient > 1e-9 && corner.force > 1e-9) {
+      usage = Math.max(usage, Math.hypot(friction[0], friction[2]) / (frictionCoefficient * corner.force));
+    }
+  };
 
   if (sumNormal > 1e-6) {
-    if (holding) {
+    if (mode === 'HOLD') {
       for (const corner of corners) {
         const share = corner.force / sumNormal;
-        const friction = [-externalTangent[0] * share, 0, -externalTangent[2] * share];
-        frictionForces.push(friction);
-        const arm = [corner.contact[0] - cg[0], -cg[1], corner.contact[2] - cg[2]];
-        const localMoment = simCross(arm, friction);
-        moment[0] += localMoment[0];
-        moment[1] += localMoment[1];
-        moment[2] += localMoment[2];
-        force[0] += friction[0];
-        force[2] += friction[2];
+        recordFriction(corner, [-externalTangent[0] * share, 0, -externalTangent[2] * share]);
       }
     } else {
-      sliding = true;
-      const globalDirection = demand > 1e-9
-        ? [-externalTangent[0] / demand, 0, -externalTangent[2] / demand]
-        : [0, 0, 0];
+      // Near the arrest threshold the per-corner contact velocities are
+      // dominated by the yaw term and point in different directions; using
+      // them would let the friction impulse accelerate the body again. Below
+      // SIM_ARREST_SPEED every corner uses the body-level slip direction so
+      // the stopping-impulse budget is well defined.
+      let globalDirection = [0, 0, 0];
+      if (planarSpeed > 1e-9) {
+        globalDirection = [-bodyState.vx / planarSpeed, 0, -bodyState.vz / planarSpeed];
+      } else if (demand > 1e-9) {
+        globalDirection = [-externalTangent[0] / demand, 0, -externalTangent[2] / demand];
+      }
+      const raw = [];
+      const inertiaY = reference.inertia.Iyy;
+      const clampToStop = planarSpeed > 1e-9 || Math.abs(bodyState.wy) > SIM_ARREST_RATE;
       for (const corner of corners) {
-        const arm = [corner.contact[0] - cg[0], -cg[1], corner.contact[2] - cg[2]];
-        const contactVelocity = [
-          velocity[0] + (omegaRoad[1] * arm[2] - omegaRoad[2] * arm[1]),
-          0,
-          velocity[2] + (omegaRoad[0] * arm[1] - omegaRoad[1] * arm[0])
-        ];
-        const contactSpeed = Math.hypot(contactVelocity[0], contactVelocity[2]);
-        const direction = contactSpeed > 1e-3
-          ? [-contactVelocity[0] / contactSpeed, 0, -contactVelocity[2] / contactSpeed]
+        const slipVelocity = corner.slipVelocity;
+        const contactSpeed = Math.hypot(slipVelocity[0], slipVelocity[1]);
+        const direction = contactSpeed > SIM_ARREST_SPEED
+          ? [-slipVelocity[0] / contactSpeed, 0, -slipVelocity[1] / contactSpeed]
           : globalDirection;
-        const magnitude = frictionCoefficient * corner.force;
-        const friction = [magnitude * direction[0], 0, magnitude * direction[2]];
-        frictionForces.push(friction);
-        const momentArm = [corner.contact[0] - cg[0], -cg[1], corner.contact[2] - cg[2]];
-        const localMoment = simCross(momentArm, friction);
-        moment[0] += localMoment[0];
-        moment[1] += localMoment[1];
-        moment[2] += localMoment[2];
-        force[0] += friction[0];
-        force[2] += friction[2];
+        let magnitude = frictionCoefficient * corner.force;
+        if (clampToStop && contactSpeed > 1e-12) {
+          // Impulse needed to stop this contact patch; the effective mass
+          // includes the yaw coupling (r x t)_y^2 / Iyy.
+          const rxT = (corner.contact[2] - cg[2]) * direction[0] - (corner.contact[0] - cg[0]) * direction[2];
+          const effectiveMass = 1 / (1 / mass + (rxT * rxT) / inertiaY);
+          magnitude = Math.min(magnitude, contactSpeed * effectiveMass / dt);
+        }
+        raw.push([magnitude * direction[0], 0, magnitude * direction[2]]);
+      }
+      // Stopping-impulse budget: the friction impulse may not exceed the
+      // momentum it has to remove, otherwise one 2 ms step reverses the
+      // velocity. L_ext only contains non-friction moments (normal + impulse).
+      let jX = 0;
+      let jZ = 0;
+      let jY = 0;
+      for (let index = 0; index < corners.length; index += 1) {
+        const corner = corners[index];
+        const armX = corner.contact[0] - cg[0];
+        const armZ = corner.contact[2] - cg[2];
+        jX += raw[index][0] * dt;
+        jZ += raw[index][2] * dt;
+        jY += (armZ * raw[index][0] - armX * raw[index][2]) * dt;
+      }
+      const pNowX = mass * bodyState.vx + externalTangent[0] * dt;
+      const pNowZ = mass * bodyState.vz + externalTangent[2] * dt;
+      const needPlanar = Math.hypot(pNowX, pNowZ);
+      const havePlanar = Math.hypot(jX, jZ);
+      const extYawMoment = normalMomentY + (impulseLeverRoad
+        ? impulseLeverRoad[2] * impulse.forceRoad[0] - impulseLeverRoad[0] * impulse.forceRoad[2]
+        : 0);
+      const yawNow = reference.inertia.Iyy * bodyState.wy + extYawMoment * dt;
+      // Only clamp when the friction impulse opposes the momentum it would
+      // remove; otherwise it would scale a pure spin or a pure translation to
+      // zero and stop the contact entirely.
+      let kPlanar = 1;
+      if (jX * pNowX + jZ * pNowZ < -1e-12 && havePlanar > 1e-12 && needPlanar < havePlanar) {
+        kPlanar = needPlanar / havePlanar;
+      }
+      let kYaw = 1;
+      // Only a real spin can reverse its sign within one step; a yaw impulse
+      // acting on a body that is not spinning must not scale the friction to
+      // zero (that would cancel the linear slide arrest).
+      if (Math.abs(bodyState.wy) > SIM_ARREST_RATE && jY * yawNow < -1e-12 &&
+          Math.abs(jY) > 1e-12 && Math.abs(yawNow) < Math.abs(jY)) {
+        kYaw = Math.abs(yawNow) / Math.abs(jY);
+      }
+      const k = Math.min(kPlanar, kYaw);
+      arrest.planar = kPlanar < 1;
+      arrest.yaw = kYaw < 1;
+      arrest.kPlanar = kPlanar;
+      arrest.kYaw = kYaw;
+      arrest.k = k;
+      arrest.planarMoment = [pNowX, pNowZ];
+      arrest.planarImpulse = [jX, jZ];
+      arrest.yawMoment = yawNow;
+      arrest.yawImpulse = jY;
+      for (let index = 0; index < corners.length; index += 1) {
+        recordFriction(corners[index], [raw[index][0] * k, 0, raw[index][2] * k]);
       }
     }
   }
 
   if (impulse) {
-    force[0] += impulse.force[0];
-    force[1] += impulse.force[1];
-    force[2] += impulse.force[2];
-    const localMoment = simCross(impulse.offset, impulse.force);
-    moment[0] += localMoment[0];
-    moment[1] += localMoment[1];
-    moment[2] += localMoment[2];
+    const impulsePoint = [cg[0] + impulseLeverRoad[0], cg[1] + impulseLeverRoad[1], cg[2] + impulseLeverRoad[2]];
+    simApplyForceAt(sim, impulsePoint, impulse.forceRoad, 'impulse');
   }
+  const moment = [
+    accum.momentParts.normal[0] + accum.momentParts.friction[0] + accum.momentParts.impulse[0],
+    accum.momentParts.normal[1] + accum.momentParts.friction[1] + accum.momentParts.impulse[1],
+    accum.momentParts.normal[2] + accum.momentParts.friction[2] + accum.momentParts.impulse[2]
+  ];
+  const momentParts = accum.momentParts;
+  delete sim._evalAccum;
+
+  const stepIndex = Math.round(sim.time / dt);
+  const contactNext = {
+    mode,
+    dwell: modeChanged ? 0 : previousContact.dwell,
+    since: modeChanged ? sim.time : previousContact.since,
+    changes: modeChanged ? previousContact.changes + 1 : previousContact.changes,
+    lastChangeStep: modeChanged ? stepIndex : previousContact.lastChangeStep,
+    reason: mode === 'SLIP' ? reason : null,
+    slipSpeed: maxSlipSpeed,
+    usage
+  };
 
   return {
     force,
     moment,
+    momentParts,
     corners,
     frictionForces,
     cg,
@@ -449,11 +650,14 @@ function simEvaluate(sim) {
     omegaRoad,
     velocity,
     sumNormal,
+    normalMomentY,
     externalTangent,
     demand,
     capacity,
-    holding,
-    sliding,
+    holding: mode === 'HOLD',
+    sliding: mode === 'SLIP',
+    contactNext,
+    arrest,
     impulse,
     atRest,
     degraded,
@@ -466,7 +670,7 @@ function simEvaluate(sim) {
 function simIntegrate(sim, dt) {
   const bodyState = sim.state;
   const reference = sim.reference;
-  const evaluation = simEvaluate(sim);
+  const evaluation = simEvaluate(sim, dt);
   const mass = reference.mass;
   const inertia = reference.inertia;
   const q = [bodyState.qw, bodyState.qx, bodyState.qy, bodyState.qz];
@@ -501,6 +705,14 @@ function simIntegrate(sim, dt) {
     bodyState.vx = 0;
     bodyState.vz = 0;
     bodyState.wy = 0;
+  } else if (evaluation.arrest) {
+    // B2-1: the clamped friction impulse is enough to stop the planar or yaw
+    // motion this step; project the component to zero instead of overshooting.
+    if (evaluation.arrest.planar) {
+      bodyState.vx = 0;
+      bodyState.vz = 0;
+    }
+    if (evaluation.arrest.yaw) bodyState.wy = 0;
   }
 
   const linearSpeed = Math.hypot(bodyState.vx, bodyState.vy, bodyState.vz);
@@ -564,6 +776,7 @@ function simIntegrate(sim, dt) {
     sim.state = simEquilibriumState(reference);
     sim.cornerSeed = [null, null, null, null];
     sim.cornerRatio = [null, null, null, null];
+    sim.contact = simContactState();
     sim.solverDegraded = false;
     sim.solverFailed = false;
     sim.solverFailureSteps = 0;
@@ -580,8 +793,40 @@ function simIntegrate(sim, dt) {
     sim.solverFailureSteps = 0;
   }
 
-  sim.flags.holding = evaluation.holding;
-  sim.flags.sliding = evaluation.sliding;
+  // B2-1: SLIP -> HOLD after SIM_ARREST_DWELL consecutive arrested substeps.
+  const contactNext = evaluation.contactNext;
+  if (contactNext.mode === 'SLIP') {
+    const speed = Math.hypot(bodyState.vx, bodyState.vz);
+    const qPost = [bodyState.qw, bodyState.qx, bodyState.qy, bodyState.qz];
+    const omegaPost = simQuatRotate(qPost, [bodyState.wx, bodyState.wy, bodyState.wz]);
+    let slip = 0;
+    for (const corner of evaluation.corners) {
+      const arm = [corner.contact[0] - bodyState.x, corner.contact[1] - bodyState.y, corner.contact[2] - bodyState.z];
+      const vx = bodyState.vx + omegaPost[1] * arm[2];
+      const vz = bodyState.vz - omegaPost[1] * arm[0];
+      slip = Math.max(slip, Math.hypot(vx, vz));
+    }
+    contactNext.slipSpeed = slip;
+    const canPark = evaluation.demand <= evaluation.capacity * (1 - SIM_HOLD_HYSTERESIS);
+    if (speed <= SIM_ARREST_SPEED && Math.abs(bodyState.wy) <= SIM_ARREST_RATE &&
+        slip <= SIM_ARREST_SPEED && canPark) {
+      contactNext.dwell += 1;
+    } else {
+      contactNext.dwell = 0;
+    }
+    if (contactNext.dwell >= SIM_ARREST_DWELL) {
+      contactNext.mode = 'HOLD';
+      contactNext.since = sim.time + dt;
+      contactNext.changes += 1;
+      contactNext.lastChangeStep = Math.round((sim.time + dt) / dt);
+      contactNext.reason = null;
+      bodyState.vx = 0;
+      bodyState.vz = 0;
+      bodyState.wy = 0;
+    }
+  }
+  sim.flags.holding = contactNext.mode === 'HOLD';
+  sim.flags.sliding = contactNext.mode === 'SLIP';
   sim.time += dt;
   if (sim.impulse && sim.time >= sim.impulse.until) sim.impulse = null;
   return evaluation;
@@ -589,7 +834,9 @@ function simIntegrate(sim, dt) {
 
 function simStep(sim, dt = SIM_DT) {
   if (!sim || !sim.state) return null;
-  return simIntegrate(sim, dt);
+  const evaluation = simIntegrate(sim, dt);
+  if (evaluation && evaluation.contactNext) sim.contact = evaluation.contactNext;
+  return evaluation;
 }
 
 function simRunFor(sim, seconds, dt = SIM_DT) {
@@ -640,9 +887,9 @@ function simBuildModel(sim, source = state) {
     z: corner.contact[2]
   }));
   const wheelCenters = corners.map((corner) => ({
-    x: corner.contact[0],
-    y: reference.dims.R,
-    z: corner.contact[2]
+    x: corner.wheelPos[0],
+    y: corner.wheelPos[1],
+    z: corner.wheelPos[2]
   }));
   const normalMomentX = loads.reduce((acc, value, i) => acc + value * contactPoints[i].x, 0);
   const normalMomentZ = loads.reduce((acc, value, i) => acc + value * contactPoints[i].z, 0);
@@ -660,19 +907,16 @@ function simBuildModel(sim, source = state) {
   const motionRatio = reference.motionRatio;
   const designRow = reference.suspension ? reference.suspension.design : null;
   const refPos = evaluation.refPos;
-  const bodyVec = new THREE.Vector3(refPos.x, refPos.y, refPos.z);
   const bodyQuat = new THREE.Quaternion(state.qx, state.qy, state.qz, state.qw);
   const solved = corners.map((corner) => {
     if (!corner.solved) return null;
     const solvedCorner = corner.solved;
-    const position = solvedCorner.wheelPos.clone().applyQuaternion(bodyQuat).add(bodyVec);
     const quaternion = bodyQuat.clone().multiply(solvedCorner.wheelQuat);
-    const contact = solvedCorner.contact.clone().applyQuaternion(bodyQuat).add(bodyVec);
     return {
       key: corner.key,
-      wheelPos: [position.x, position.y, position.z],
+      wheelPos: [corner.wheelPos[0], corner.wheelPos[1], corner.wheelPos[2]],
       wheelQuat: [quaternion.x, quaternion.y, quaternion.z, quaternion.w],
-      contact: [contact.x, contact.y, contact.z],
+      contact: [corner.contact[0], corner.contact[1], corner.contact[2]],
       rockerAngle: solvedCorner.rockerAngle,
       rocker: {
         angle: solvedCorner.rocker.angle,
@@ -717,7 +961,15 @@ function simBuildModel(sim, source = state) {
     impulse: evaluation.impulse ? evaluation.impulse.label : null,
     resetCount: sim.resetCount,
     solverDegraded: Boolean(sim.solverDegraded),
-    solverFailed: Boolean(sim.solverFailed)
+    solverFailed: Boolean(sim.solverFailed),
+    mode: sim.contact ? sim.contact.mode : 'HOLD',
+    dwell: sim.contact ? sim.contact.dwell : 0,
+    since: sim.contact ? sim.contact.since : 0,
+    changes: sim.contact ? sim.contact.changes : 0,
+    lastChangeStep: sim.contact ? sim.contact.lastChangeStep : 0,
+    reason: sim.contact ? sim.contact.reason : null,
+    slipSpeed: sim.contact ? sim.contact.slipSpeed : 0,
+    usage: sim.contact ? sim.contact.usage : 0
   };
 
   return Object.assign({}, reference, {
@@ -759,6 +1011,11 @@ function simBuildModel(sim, source = state) {
     dampingForce: corners.map((corner) => corner.dampingForce),
     arbForce: corners.map((corner) => corner.arbForce),
     frictionForce: evaluation.frictionForces.map((friction) => ({ x: friction[0], z: friction[2] })),
+    momentParts: {
+      normal: evaluation.momentParts.normal.slice(),
+      friction: evaluation.momentParts.friction.slice(),
+      impulse: evaluation.momentParts.impulse.slice()
+    },
     loads,
     rawLoads,
     liftedCount,
@@ -903,6 +1160,26 @@ function runDynamicSelfTests(source = state) {
     '动态法向载荷非负',
     contactModel.loads.every((value) => value >= 0) && contactModel.loads.every(Number.isFinite),
     'min ' + contactModel.minLoad.toFixed(1) + ' N'
+  );
+
+  const holdSim = simCreate(Object.assign({}, source, { slope: 0, bank: 0 }), { settle: 0.5 });
+  holdSim.state.vx = 0.0005;
+  for (let i = 0; i < 4; i += 1) simStep(holdSim);
+  record(
+    '低速驻车',
+    Math.abs(holdSim.state.vx) < 1e-12 && holdSim.contact.mode === 'HOLD',
+    'vx ' + holdSim.state.vx.toExponential(1) + ' · ' + holdSim.contact.mode
+  );
+
+  const stopSim = simCreate(Object.assign({}, source, { slope: 0, bank: 0 }), { settle: 0.5 });
+  const stopX = stopSim.state.x;
+  stopSim.state.vx = 0.01;
+  simStep(stopSim);
+  const stopDx = stopSim.state.x - stopX;
+  record(
+    '滑移不反向',
+    stopSim.state.vx >= 0 && stopSim.state.vx < 1e-6 && stopDx >= 0 && stopDx < 1e-4,
+    'vx ' + stopSim.state.vx.toExponential(2) + ' · dx ' + (stopDx * 1000).toFixed(3) + ' mm'
   );
 
   return tests;

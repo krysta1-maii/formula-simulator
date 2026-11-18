@@ -514,6 +514,14 @@ function suspSolveCorner(corner, bodyPos, bodyQuat, rackShift, seed, withRatio) 
   down.addScaledVector(state.axle, -down.dot(state.axle));
   if (down.lengthSq() > 1e-12) down.normalize(); else down.set(0, -1, 0);
   const contact = state.C.clone().addScaledVector(down, d.tireRadius);
+  // B2-3: one road-frame contact point and one road-frame wheel centre per
+  // corner; this is the single source consumed by forces, telemetry and the
+  // renderer. contactBody/wheelPosBody stay available for the mechanism.
+  const wheelPosBody = state.C.clone();
+  const contactBody = contact.clone();
+  const bodyOrigin = new THREE.Vector3(bodyPos.x, bodyPos.y, bodyPos.z);
+  const wheelPosRoad = wheelPosBody.clone().applyQuaternion(bodyQuat).add(bodyOrigin);
+  const contactRoad = contactBody.clone().applyQuaternion(bodyQuat).add(bodyOrigin);
   return {
     thL: raw.thL,
     thU: raw.thU,
@@ -530,6 +538,10 @@ function suspSolveCorner(corner, bodyPos, bodyQuat, rackShift, seed, withRatio) 
     wheelPos: state.C.clone(),
     wheelQuat: state.wheelQuat.clone(),
     contact,
+    contactBody,
+    wheelPosBody,
+    contactRoad,
+    wheelPosRoad,
     pushPoint: state.P.clone(),
     rockerAngle: rocker.angle
   };
