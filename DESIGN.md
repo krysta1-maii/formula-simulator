@@ -644,7 +644,7 @@ Node 验证包括：
 - `tools/test-core.mjs`：50 项静力、边界和随机包线检查；
 - `tools/test-dynamics.mjs`：80 项动力学检查，含 [10] HOLD/SLIP、[11] 脉冲坐标、[12] 接地点与力矩分解、[13] 渲染回退四元数；覆盖机构闭合、运动比、线圈行程与遥测一致性、惯量与频率、水平/倾斜收敛、防倾杆、阻尼、确定性、帧率、驻车/滑移和 120 组随机参数；
 - `tools/test-dynamics-browser.mjs`：无头 Chrome 中的 26 项交互检查，覆盖暂停/继续、脉冲、画面线圈行程与遥测一致性、机构闭合、低附着滑移、重置、阻尼参数、几何重建和模型说明列表；
-- `tools/test-ui-browser.mjs`：44 项 UI 可访问性与求解展示检查，覆盖横屏、空格键、面板焦点、暂停/状态同步、10 行检查表、求解徽标、轮载箭头和离线加载。
+- `tools/test-ui-browser.mjs`：45 项 UI 可访问性与求解展示检查，覆盖横屏、空格键、面板焦点、暂停/状态同步、10 行检查表、求解徽标、轮载箭头、离线加载，以及 B5.4 材质/几何释放断言。
 
 默认参数下，水平动态解与静力解的法向载荷差为 0；倾斜 8°/7° 时约 0.5 N，包线内最大约 0.8 N；总法向力收敛到 `mg cosβ`。质心状态改造后新增自由刚体解析轨迹、摇臂可达性、求解种子独立性与运动比连续性检查；解析运动比在极限行程引入约 `10⁻⁵` 相对噪声，静力平衡容差相应为 0.05 N 量级。60 Hz 和 144 Hz 帧率的最终状态差小于 `10^{-9}`，仿真时间差不超过一个固定子步。相同输入重复运行的最终状态逐位相同。120 组随机参数工况没有出现 NaN 或负法向载荷。帧时间语义另由 `tools/test-runtime.mjs` 的 frame 组 78 项覆盖：0.5 s 接受上限、128 子步、0.5 s 积压、2 Hz 约 0.512× 与 droppedTime；物理不变量由 `tools/test-physics-invariants.mjs` 27 项覆盖，包含质心解析轨迹、摇臂可达性、种子独立性和运动比连续性。
 
@@ -693,4 +693,4 @@ npm run docs:capture
 
 每次 `buildCar` 重置 `CAR.assets.lastBuild`，`disposeGroupChildren` 一次遍历释放非共享几何、实例材质和贴图，并跳过共享/缓存材质；计数写入 `assets.totals` 与 `lastBuild`。正常重建后实例材质创建数与释放数相等（7/7），`lastBuild.geometryDisposed` 大于 300，共享与缓存材质释放数保持 0。
 
-`FSApp.dispose()` 调用 `teardownScene`，按“场景 → 注册表 → 渲染器”顺序释放，记录 `assets.lastTeardown`、清空注册表并释放渲染器与画布；重复调用是幂等的。Node 侧由 `tools/test-runtime.mjs` 的 assets 组覆盖 7/7、共享/缓存跳过、二次调用无副作用；浏览器侧材质重建与 teardown 的 7/7 计数尚未纳入 `test-ui-browser.mjs`，B6 前需补或明确降级为 Node 口径。
+`FSApp.dispose()` 调用 `teardownScene`，按“场景 → 注册表 → 渲染器”顺序释放，记录 `assets.lastTeardown`、清空注册表并释放渲染器与画布；重复调用是幂等的。Node 侧由 `tools/test-runtime.mjs` 的 assets 组覆盖 7/7、共享/缓存跳过、二次调用无副作用；浏览器侧材质重建的释放计数已由 `test-ui-browser` 的 B5.4 断言覆盖（material/geometry dispose ≥3 >0）；`FSApp.dispose()` 的 teardown 归零与幂等尚未纳入自动断言，属阶段三开局的补测项。

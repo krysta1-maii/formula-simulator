@@ -1,6 +1,6 @@
 {
   "name": "formula-simulator",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "方程式赛车动力学模拟器 · 阶段二六自由度车身与动态悬架",
   "type": "module",

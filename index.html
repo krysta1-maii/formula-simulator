@@ -410,7 +410,7 @@ button { cursor: pointer; }
   border-radius: 8px;
   background: transparent;
   color: var(--faint);
-  transition: all 0.16s ease;
+  transition: color 0.16s ease, border-color 0.16s ease, background-color 0.16s ease;
 }
 .panel-close:hover { color: var(--text); border-color: var(--line); background: rgba(255, 255, 255, 0.04); }
 .panel-close svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; }
@@ -1676,7 +1676,7 @@ button:focus-visible, summary:focus-visible, .chip:focus-visible, .tool-btn:focu
           </section>
         </div>
         <div class="modal-foot">
-          <span>Formula Simulator · 阶段二演示 v0.2.0 · <a href="DESIGN.md" target="_blank" rel="noopener">DESIGN.md</a></span>
+          <span>Formula Simulator · 阶段二演示 v0.3.0 · <a href="DESIGN.md" target="_blank" rel="noopener">DESIGN.md</a></span>
           <span>六自由度 / 弹簧阻尼器 / 扭杆防倾杆 / 固定步长</span>
         </div>
       </div>
@@ -1704,7 +1704,7 @@ const GRAVITY = 9.80665;
 const DEG = Math.PI / 180;
 const RAD = 180 / Math.PI;
 const STORAGE_KEY = 'fs01.dynamic.setup.v1';
-const APP_VERSION = '0.2.0';
+const APP_VERSION = '0.3.0';
 
 const CORNERS = [
   { key: 'FL', zh: '左前', axle: 'front', side: 'left', zSign: -1 },
@@ -3939,41 +3939,80 @@ function simAdvance(sim, frameDt) {
 
 function simBuildModel(sim, source = state) {
   const reference = sim.reference || computeStatic(source);
-  // Telemetry/model reads must not perturb the solver seed bus (O1).
-  const seedBefore = Array.isArray(sim.cornerSeed) ? sim.cornerSeed.slice() : null;
-  const ratioBefore = Array.isArray(sim.cornerRatio) ? sim.cornerRatio.slice() : null;
+  // Telemetry/model reads must not perturb the solver seed bus (O1).  Keep a
+  // scalar snapshot and restore it in place; a slice() per corner per frame
+  // is pure allocation on the hot path.
+  const hasSeed = Array.isArray(sim.cornerSeed);
+  const seed0 = hasSeed ? sim.cornerSeed[0] : null;
+  const seed1 = hasSeed ? sim.cornerSeed[1] : null;
+  const seed2 = hasSeed ? sim.cornerSeed[2] : null;
+  const seed3 = hasSeed ? sim.cornerSeed[3] : null;
+  const hasRatio = Array.isArray(sim.cornerRatio);
+  const ratio0 = hasRatio ? sim.cornerRatio[0] : null;
+  const ratio1 = hasRatio ? sim.cornerRatio[1] : null;
+  const ratio2 = hasRatio ? sim.cornerRatio[2] : null;
+  const ratio3 = hasRatio ? sim.cornerRatio[3] : null;
   const evaluation = simEvaluate(sim);
-  if (seedBefore) sim.cornerSeed = seedBefore;
-  if (ratioBefore) sim.cornerRatio = ratioBefore;
+  if (hasSeed) {
+    sim.cornerSeed[0] = seed0;
+    sim.cornerSeed[1] = seed1;
+    sim.cornerSeed[2] = seed2;
+    sim.cornerSeed[3] = seed3;
+  }
+  if (hasRatio) {
+    sim.cornerRatio[0] = ratio0;
+    sim.cornerRatio[1] = ratio1;
+    sim.cornerRatio[2] = ratio2;
+    sim.cornerRatio[3] = ratio3;
+  }
   const state = sim.state;
   const euler = evaluation.euler;
   const q = [state.qw, state.qx, state.qy, state.qz];
   const corners = evaluation.corners;
-  const loads = corners.map((corner) => corner.force);
-  const rawLoads = corners.map((corner) => corner.rawForce);
-  const sumLoads = loads.reduce((acc, value) => acc + value, 0);
-  const frontLoad = loads[0] + loads[1];
-  const rearLoad = loads[2] + loads[3];
-  const leftLoad = loads[0] + loads[2];
-  const rightLoad = loads[1] + loads[3];
+  const cornerCount = corners.length;
+  const loads = new Array(cornerCount);
+  const rawLoads = new Array(cornerCount);
+  const contactPoints = new Array(cornerCount);
+  const wheelCenters = new Array(cornerCount);
+  let sumLoads = 0;
+  let frontLoad = 0;
+  let rearLoad = 0;
+  let leftLoad = 0;
+  let rightLoad = 0;
+  let liftedCount = 0;
+  let normalMomentX = 0;
+  let normalMomentZ = 0;
+  for (let i = 0; i < cornerCount; i += 1) {
+    const corner = corners[i];
+    const load = corner.force;
+    const rawLoad = corner.rawForce;
+    loads[i] = load;
+    rawLoads[i] = rawLoad;
+    sumLoads += load;
+    if (i < 2) frontLoad += load;
+    else rearLoad += load;
+    if (i % 2 === 0) leftLoad += load;
+    else rightLoad += load;
+    if (rawLoad < -1e-6) liftedCount += 1;
+    const contactPoint = {
+      x: corner.contact[0],
+      y: 0,
+      z: corner.contact[2]
+    };
+    contactPoints[i] = contactPoint;
+    wheelCenters[i] = {
+      x: corner.wheelPos[0],
+      y: corner.wheelPos[1],
+      z: corner.wheelPos[2]
+    };
+    normalMomentX += load * contactPoint.x;
+    normalMomentZ += load * contactPoint.z;
+  }
   const maxLoad = Math.max(...loads);
   const minLoad = Math.min(...loads);
   const denom = sumLoads > 1e-9 ? sumLoads : 1;
   const frontShare = frontLoad / denom;
   const leftShare = leftLoad / denom;
-  const liftedCount = rawLoads.filter((value) => value < -1e-6).length;
-  const contactPoints = corners.map((corner) => ({
-    x: corner.contact[0],
-    y: 0,
-    z: corner.contact[2]
-  }));
-  const wheelCenters = corners.map((corner) => ({
-    x: corner.wheelPos[0],
-    y: corner.wheelPos[1],
-    z: corner.wheelPos[2]
-  }));
-  const normalMomentX = loads.reduce((acc, value, i) => acc + value * contactPoints[i].x, 0);
-  const normalMomentZ = loads.reduce((acc, value, i) => acc + value * contactPoints[i].z, 0);
   const vertical = [
     reference.frame.gravityLocal.x,
     reference.frame.gravityLocal.y,
@@ -3988,15 +4027,31 @@ function simBuildModel(sim, source = state) {
   const motionRatio = reference.motionRatio;
   const designRow = reference.suspension ? reference.suspension.design : null;
   const refPos = evaluation.refPos;
-  const bodyQuat = new THREE.Quaternion(state.qx, state.qy, state.qz, state.qw);
-  const solved = corners.map((corner) => {
-    if (!corner.solved) return null;
+  const qax = state.qx;
+  const qay = state.qy;
+  const qaz = state.qz;
+  const qaw = state.qw;
+  const solved = new Array(cornerCount);
+  for (let i = 0; i < cornerCount; i += 1) {
+    const corner = corners[i];
+    if (!corner.solved) {
+      solved[i] = null;
+      continue;
+    }
     const solvedCorner = corner.solved;
-    const quaternion = bodyQuat.clone().multiply(solvedCorner.wheelQuat);
-    return {
+    const qbx = solvedCorner.wheelQuat.x;
+    const qby = solvedCorner.wheelQuat.y;
+    const qbz = solvedCorner.wheelQuat.z;
+    const qbw = solvedCorner.wheelQuat.w;
+    solved[i] = {
       key: corner.key,
       wheelPos: [corner.wheelPos[0], corner.wheelPos[1], corner.wheelPos[2]],
-      wheelQuat: [quaternion.x, quaternion.y, quaternion.z, quaternion.w],
+      wheelQuat: [
+        qax * qbw + qaw * qbx + qay * qbz - qaz * qby,
+        qay * qbw + qaw * qby + qaz * qbx - qax * qbz,
+        qaz * qbw + qaw * qbz + qax * qby - qay * qbx,
+        qaw * qbw - qax * qbx - qay * qby - qaz * qbz
+      ],
       contact: [corner.contact[0], corner.contact[1], corner.contact[2]],
       rockerAngle: solvedCorner.rockerAngle,
       rocker: {
@@ -4011,17 +4066,24 @@ function simBuildModel(sim, source = state) {
       converged: solvedCorner.frame.converged,
       ok: solvedCorner.ok
     };
-  });
-  const springCompressionMm = corners.map((corner, index) => {
-    if (designRow && Number.isFinite(corner.coilLength)) return (designRow[index].length0 - corner.coilLength) * 1000;
-    const ratio = corner.wheel.axle === 'front' ? motionRatio.front : motionRatio.rear;
-    return -corner.cornerY * ratio * 1000;
-  });
-  const damperCompressionRate = corners.map((corner, index) => {
-    if (Number.isFinite(corner.lengthDot)) return -corner.lengthDot;
-    const ratio = corner.wheel.axle === 'front' ? motionRatio.front : motionRatio.rear;
-    return -corner.cornerVelocityY * ratio;
-  });
+  }
+  const springCompressionMm = new Array(cornerCount);
+  const damperCompressionRate = new Array(cornerCount);
+  for (let i = 0; i < cornerCount; i += 1) {
+    const corner = corners[i];
+    if (designRow && Number.isFinite(corner.coilLength)) {
+      springCompressionMm[i] = (designRow[i].length0 - corner.coilLength) * 1000;
+    } else {
+      const ratio = corner.wheel.axle === 'front' ? motionRatio.front : motionRatio.rear;
+      springCompressionMm[i] = -corner.cornerY * ratio * 1000;
+    }
+    if (Number.isFinite(corner.lengthDot)) {
+      damperCompressionRate[i] = -corner.lengthDot;
+    } else {
+      const ratio = corner.wheel.axle === 'front' ? motionRatio.front : motionRatio.rear;
+      damperCompressionRate[i] = -corner.cornerVelocityY * ratio;
+    }
+  }
   const forceError = Math.abs(sumLoads + reference.mass * vertical[1]);
   const momentXError = Math.abs(evaluation.moment[0]);
   const momentZError = Math.abs(evaluation.moment[2]);

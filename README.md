@@ -1,6 +1,6 @@
 # Formula Simulator · FS-01 动态底盘台
 
-阶段二交付：一个可离线运行、可交互调参的方程式赛车六自由度车身与动态悬架演示。当前版本 `0.2.0`。入口是仓库根目录的 [`index.html`](index.html)，Three.js r149 已内嵌，不依赖网络、构建环境或本地服务器，直接用浏览器打开即可。
+阶段二交付：一个可离线运行、可交互调参的方程式赛车六自由度车身与动态悬架演示。当前版本 `0.3.0`。入口是仓库根目录的 [`index.html`](index.html)，Three.js r149 已内嵌，不依赖网络、构建环境或本地服务器，直接用浏览器打开即可。
 
 ![FS-01 动态底盘台总览](docs/01-overview.png)
 
@@ -64,7 +64,9 @@ npm run dev
 # 打开 http://127.0.0.1:8731
 ```
 
-构建脚本把 `src/index.template.html`、`src/styles.css`、`src/js/*.js` 和 `vendor/three.min.js` 合并成单个 `index.html`。这也是入口文件体积约 920 KiB 的原因。
+构建脚本把 `src/index.template.html`、`src/styles.css`、`src/js/*.js` 和 `vendor/three.min.js` 合并成单个 `index.html`。这也是入口文件体积约 1.0 MiB（1,021,578 B）的原因。
+
+Node 版本有两档约束。`package.json` 的 `engines.node` 为 `>=18`，该下限只覆盖非浏览器命令：`npm test`、`npm run test:core`、`npm run test:dynamics`、`npm run test:invariants`、`npm run test:runtime`、`npm run test:dev-server`、`npm run build:check` 与 Node 侧审计脚本。浏览器命令（`npm run test:ui`、`npm run test:browser`、`npm run test:camera` 以及 `npm run audit` 的 browser 组）通过 CDP 连接 Chrome，依赖 Node 21+ 提供的全局 `WebSocket`；在 Node 18/20 上不能运行这些命令，也不能把 `engines >=18` 解读为浏览器测试的版本下限。当前验证环境为 Node 24.22.1 与 Chrome 156。
 
 ## 页面操作
 
@@ -215,7 +217,7 @@ f_i = −F_t · N_contact,i / ΣN_contact
 9. 低速驻车。
 10. 滑移不反向。
 
-Node 验证覆盖静力核心 50 项、动力学核心 80 项（含机构闭合、接触点、运动比与线圈行程一致性）；浏览器测试覆盖暂停/继续、脉冲、低附着滑移、重置、几何重建、阻尼参数和模型说明列表，另有 44 项 UI 可访问性与求解展示检查。默认配置下 30 根连杆、68 个端点；悬架杆长偏差 0.000 mm，横拉杆长度偏差 0.000 mm，防倾杆闭合误差小于 0.001 mm。
+Node 验证覆盖静力核心 50 项、动力学核心 80 项（含机构闭合、接触点、运动比与线圈行程一致性）；浏览器测试覆盖暂停/继续、脉冲、低附着滑移、重置、几何重建、阻尼参数和模型说明列表，另有 45 项 UI 可访问性与求解展示检查（含 B5.4 材质/几何释放断言）。默认配置下 30 根连杆、68 个端点；悬架杆长偏差 0.000 mm，横拉杆长度偏差 0.000 mm，防倾杆闭合误差小于 0.001 mm。
 
 阶段二验收对照：
 
