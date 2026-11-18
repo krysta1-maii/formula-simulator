@@ -13,6 +13,7 @@
     "test:invariants": "node tools/test-physics-invariants.mjs",
     "test:runtime": "node tools/test-runtime.mjs",
     "ci:node": "npm test && npm run test:invariants && npm run test:runtime && npm run test:dev-server",
+    "bench": "node tools/bench.mjs",
     "test:browser": "node tools/test-dynamics-browser.mjs",
     "test:camera": "node tools/test-camera.mjs",
     "test:ui": "node tools/test-ui-browser.mjs",
