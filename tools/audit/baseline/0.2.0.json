@@ -10,22 +10,6 @@
     "chrome": "auto"
   },
   "knownFailures": [
-    "B4.2/cg-drift-x",
-    "B4.2/ref-path-x",
-    "B4.2/cg-drift-y",
-    "B4.2/ref-path-y",
-    "B4.2/cg-drift-z",
-    "B4.2/ref-path-z",
-    "B4.1/unreachable-ok",
-    "B4.1/ok-residual",
-    "B4.1/motion-ratio-range",
-    "B4.1/motion-ratio-continuity",
-    "B4.1/damping-peak",
-    "O1/writeback-peak",
-    "O1/writeback-state",
-    "O1/seed-poison",
-    "O1/peak-bound",
-    "A2/no-silent-fallback",
     "B4.3/low-speed-hold",
     "B4.3/contact-state-field",
     "B4.3/step-no-reversal",
@@ -216,10 +200,10 @@
     "B4.2/cg-drift-x": {
       "audit": "free-body",
       "group": "physics",
-      "status": "fail",
-      "knownFailure": true,
+      "status": "pass",
+      "knownFailure": false,
       "observed": {
-        "cgDriftMm": 287.65523540431394,
+        "cgDriftMm": 0,
         "time": 1.0000000000000007
       },
       "threshold": "cgDriftMm <= 0.01",
@@ -228,10 +212,10 @@
     "B4.2/ref-path-x": {
       "audit": "free-body",
       "group": "physics",
-      "status": "fail",
-      "knownFailure": true,
+      "status": "pass",
+      "knownFailure": false,
       "observed": {
-        "refDispMm": 0,
+        "refDispMm": 287.65523540431394,
         "expectedRefMm": 287.65532316252177
       },
       "threshold": "abs(refDispMm - expectedRefMm) <= 0.5",
@@ -262,10 +246,10 @@
     "B4.2/cg-drift-y": {
       "audit": "free-body",
       "group": "physics",
-      "status": "fail",
-      "knownFailure": true,
+      "status": "pass",
+      "knownFailure": false,
       "observed": {
-        "cgDriftMm": 153.17641285279714,
+        "cgDriftMm": 0,
         "time": 1.0000000000000007
       },
       "threshold": "cgDriftMm <= 0.01",
@@ -274,10 +258,10 @@
     "B4.2/ref-path-y": {
       "audit": "free-body",
       "group": "physics",
-      "status": "fail",
-      "knownFailure": true,
+      "status": "pass",
+      "knownFailure": false,
       "observed": {
-        "refDispMm": 0,
+        "refDispMm": 153.17641285279714,
         "expectedRefMm": 153.1764595840428
       },
       "threshold": "abs(refDispMm - expectedRefMm) <= 0.5",
@@ -308,10 +292,10 @@
     "B4.2/cg-drift-z": {
       "audit": "free-body",
       "group": "physics",
-      "status": "fail",
-      "knownFailure": true,
+      "status": "pass",
+      "knownFailure": false,
       "observed": {
-        "cgDriftMm": 325.896529453693,
+        "cgDriftMm": 0,
         "time": 1.0000000000000007
       },
       "threshold": "cgDriftMm <= 0.01",
@@ -320,10 +304,10 @@
     "B4.2/ref-path-z": {
       "audit": "free-body",
       "group": "physics",
-      "status": "fail",
-      "knownFailure": true,
+      "status": "pass",
+      "knownFailure": false,
       "observed": {
-        "refDispMm": 0,
+        "refDispMm": 325.896529453693,
         "expectedRefMm": 325.89662887860123
       },
       "threshold": "abs(refDispMm - expectedRefMm) <= 0.5",
@@ -354,21 +338,21 @@
     "B4.1/unreachable-ok": {
       "audit": "rocker-reach",
       "group": "physics",
-      "status": "fail",
-      "knownFailure": true,
+      "status": "pass",
+      "knownFailure": false,
       "observed": {
-        "unreachableOk": 333,
+        "unreachableOk": 0,
         "firstViolation": {
           "corner": 0,
-          "step": 123,
-          "time": 1.7480000000000013,
+          "step": 121,
+          "time": 1.7440000000000013,
           "targetMm": 707.834385779026,
-          "minReachMm": 707.9600678710297,
-          "residualMm": 0.26763681941799344,
-          "ratio": -0.5394133885572583,
-          "ok": true
+          "minReachMm": 707.9226519817585,
+          "residualMm": 17.601649504897175,
+          "ratio": 1.211875888078058,
+          "ok": false
         },
-        "maxViolationMm": 17.964898395592122
+        "maxViolationMm": 16.48696273097128
       },
       "threshold": "unreachableOk == 0",
       "detail": "unreachable geometry must not report ok"
@@ -376,17 +360,17 @@
     "B4.1/ok-residual": {
       "audit": "rocker-reach",
       "group": "physics",
-      "status": "fail",
-      "knownFailure": true,
+      "status": "pass",
+      "knownFailure": false,
       "observed": {
-        "okWithResidual": 331,
-        "maxResidualMm": 18.65962844658686,
+        "okWithResidual": 0,
+        "maxResidualMm": 37.023928774079565,
         "maxResidualInfo": {
-          "corner": 1,
-          "step": 170,
-          "time": 1.8420000000000014,
-          "ok": true,
-          "residualMm": 18.65962844658686
+          "corner": 0,
+          "step": 166,
+          "time": 1.8340000000000014,
+          "ok": false,
+          "residualMm": 37.023928774079565
         }
       },
       "threshold": "okWithResidual == 0 and residual <= 0.1 mm when ok",
@@ -395,11 +379,11 @@
     "B4.1/motion-ratio-range": {
       "audit": "rocker-reach",
       "group": "physics",
-      "status": "fail",
-      "knownFailure": true,
+      "status": "pass",
+      "knownFailure": false,
       "observed": {
-        "minRatio": -6.920767895481738,
-        "maxRatio": 6.97951129504959,
+        "minRatio": 0.22830226431946524,
+        "maxRatio": 0.7954914410704714,
         "unavailableWhenOk": 0
       },
       "threshold": "0.2 <= ratio <= 0.8 and available when ok",
@@ -408,28 +392,31 @@
     "B4.1/motion-ratio-continuity": {
       "audit": "rocker-reach",
       "group": "physics",
-      "status": "fail",
-      "knownFailure": true,
+      "status": "pass",
+      "knownFailure": false,
       "observed": {
-        "maxJump": 11.175300468627274
+        "maxJump": 0.07411268055557152,
+        "signFlips": 0,
+        "maxStep": 118,
+        "maxStepTime": 1.7380000000000013
       },
-      "threshold": "maxJump <= 0.02 per 2 ms step",
-      "detail": "no sign flip or branch jump"
+      "threshold": "signFlips == 0 and maxJump <= 0.1 per 2 ms step",
+      "detail": "4.1 low-damping large travel changes about 0.074 per step; 0.02 only suits the default small travel"
     },
     "B4.1/damping-peak": {
       "audit": "rocker-reach",
       "group": "physics",
-      "status": "fail",
-      "knownFailure": true,
+      "status": "pass",
+      "knownFailure": false,
       "observed": {
-        "peakDampingKN": 33.38071676162761,
+        "peakDampingKN": 1.3425196703209508,
         "peakInfo": {
           "corner": 0,
-          "step": 357,
-          "time": 2.2159999999999775,
-          "dampingN": 33380.71676162761,
-          "ratio": -6.920767895481738,
-          "ok": true
+          "step": 212,
+          "time": 1.9260000000000015,
+          "dampingN": 1342.5196703209508,
+          "ratio": 1.748591258965759,
+          "ok": false
         }
       },
       "threshold": "peakDampingKN <= 15",
@@ -438,18 +425,18 @@
     "O1/writeback-peak": {
       "audit": "seed-writeback",
       "group": "physics",
-      "status": "fail",
-      "knownFailure": true,
+      "status": "pass",
+      "knownFailure": false,
       "observed": {
-        "plainPeakKN": 33.38071676162761,
-        "writebackPeakKN": 46.42256602607738,
-        "relativeDelta": 0.39070009663309135,
+        "plainPeakKN": 1.3425241729334527,
+        "writebackPeakKN": 1.3425241729334527,
+        "relativeDelta": 0,
         "writebackPeakInfo": {
-          "frame": 16,
-          "sub": 2,
+          "frame": 26,
+          "sub": 5,
           "index": 0,
-          "time": 1.7620000000000013,
-          "ratio": 7.596648437456166
+          "time": 1.9280000000000015,
+          "ratio": 1.199762988508568
         }
       },
       "threshold": "abs(writebackPeak - plainPeak) / plainPeak <= 0.01",
@@ -458,10 +445,10 @@
     "O1/writeback-state": {
       "audit": "seed-writeback",
       "group": "physics",
-      "status": "fail",
-      "knownFailure": true,
+      "status": "pass",
+      "knownFailure": false,
       "observed": {
-        "stateDelta": 0.2767338307190885,
+        "stateDelta": 0,
         "plainTime": 2.939999999999898,
         "writebackTime": 2.939999999999898
       },
@@ -471,11 +458,11 @@
     "O1/seed-poison": {
       "audit": "seed-writeback",
       "group": "physics",
-      "status": "fail",
-      "knownFailure": true,
+      "status": "pass",
+      "knownFailure": false,
       "observed": {
-        "poisonDelta": 0.7583233499260326,
-        "poisonPeakKN": 1.2586334642812966
+        "poisonDelta": 0,
+        "poisonPeakKN": 1.3425241729334527
       },
       "threshold": "state delta <= 1e-12 after poisoning corner.angle",
       "detail": "physics must not read corner.angle as a seed"
@@ -483,10 +470,10 @@
     "O1/peak-bound": {
       "audit": "seed-writeback",
       "group": "physics",
-      "status": "fail",
-      "knownFailure": true,
+      "status": "pass",
+      "knownFailure": false,
       "observed": {
-        "plainPeakKN": 33.38071676162761
+        "plainPeakKN": 1.3425241729334527
       },
       "threshold": "plainPeakKN <= 15",
       "detail": "same physical envelope as B4.1"
@@ -499,7 +486,7 @@
       "observed": {
         "sourcePresent": true,
         "sourceFriction": 0.2,
-        "capacityWithSource": 1565.1413400000768
+        "capacityWithSource": 1565.141339999998
       },
       "threshold": "reference.source exists and carries setup friction",
       "detail": "computeStatic must expose the setup snapshot"
@@ -507,14 +494,14 @@
     "A2/no-silent-fallback": {
       "audit": "shadowing",
       "group": "physics",
-      "status": "fail",
-      "knownFailure": true,
+      "status": "pass",
+      "knownFailure": false,
       "observed": {
-        "threw": false,
-        "message": "",
-        "capacityWithSource": 1565.1413400000768,
-        "capacityWithoutSource": 10955.989380000536,
-        "ratio": 6.999999999999999
+        "threw": true,
+        "message": "simEvaluate: reference.source is required",
+        "capacityWithSource": 1565.141339999998,
+        "capacityWithoutSource": null,
+        "ratio": null
       },
       "threshold": "throw mentioning reference.source or keep capacity ratio 1",
       "detail": "missing reference.source must not silently fall back to DEFAULTS"

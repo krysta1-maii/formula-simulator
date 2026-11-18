@@ -22,13 +22,17 @@ function neutralise(reference) {
 }
 
 function cgAt(sim, cgBody) {
+  // B1-1 contract: sim.state.x/y/z is the centre of mass.
   const state = sim.state;
-  const arm = api.simQuatRotate([state.qw, state.qx, state.qy, state.qz], cgBody);
-  return [state.x + arm[0], state.y + arm[1], state.z + arm[2]];
+  return [state.x, state.y, state.z];
 }
 
 function refAt(sim) {
-  return [sim.state.x, sim.state.y, sim.state.z];
+  // Reference point derived from the CG: p = r_CG - R(q)·cgBody.
+  const state = sim.state;
+  const cgBody = [sim.reference.cgBody.x, sim.reference.cgBody.y, sim.reference.cgBody.z];
+  const arm = api.simQuatRotate([state.qw, state.qx, state.qy, state.qz], cgBody);
+  return [state.x - arm[0], state.y - arm[1], state.z - arm[2]];
 }
 
 function run(axis) {

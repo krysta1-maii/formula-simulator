@@ -57,6 +57,11 @@ function fallbackCase() {
   fallback.reference.suspension = null;
   const evaluation = api.simEvaluate(fallback);
   const state = fallback.state;
+  // B1-1 contract: sim.state is the CG; the yaw-only baseline is defined from
+  // the body reference point p = r_CG - R(q)·cgBody.
+  const cgBody = [fallback.reference.cgBody.x, fallback.reference.cgBody.y, fallback.reference.cgBody.z];
+  const cgArm = api.simQuatRotate([state.qw, state.qx, state.qy, state.qz], cgBody);
+  const referencePoint = { x: state.x - cgArm[0], y: state.y - cgArm[1], z: state.z - cgArm[2] };
   const cy = Math.cos(evaluation.euler.yaw);
   const sy = Math.sin(evaluation.euler.yaw);
   let maxY = 0;
@@ -67,9 +72,9 @@ function fallbackCase() {
     const wheel = corner.wheel;
     const contact = corner.contact;
     const yawOnly = [
-      state.x + cy * wheel.x + sy * wheel.z,
+      referencePoint.x + cy * wheel.x + sy * wheel.z,
       0,
-      state.z - sy * wheel.x + cy * wheel.z
+      referencePoint.z - sy * wheel.x + cy * wheel.z
     ];
     const distance = Math.hypot(contact[0] - yawOnly[0], contact[1] - yawOnly[1], contact[2] - yawOnly[2]);
     const solved = solvedContacts[index];
