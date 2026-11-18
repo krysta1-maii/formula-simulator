@@ -229,6 +229,10 @@ suspRockerAngle(corner, pushPoint, seed)
 5. **B1-1 与 B2-2 同行冲突**：`05:379-382` 的脉冲力矩在 B1-1（力臂减 `cgBody`）与 B2-2（旋转到路面系）各改一次，需约定顺序，避免合并冲突。
 6. **测试迁移遗漏**：`state.y` 语义变化影响 §10.1 全部断言，迁移前这些测试会红；逐条改完后 `npm test` 必须回到 52/52，且新增的 `--group cg` 转绿。
 
+### 10.4 审计阈值重定记录
+
+`B4.1/motion-ratio-continuity` 的原判据 `maxJump <= 0.02` 只适用于默认小行程；4.1 低阻尼工况的大行程使运动比在 40 ms 内从 0.51 升到 0.79，实测逐步变化 0.074，且不可达段结束后恢复值仍属同一装配支。经 lead 裁决，该 check 拆为两项同时成立：`signFlips === 0`（相邻步 ratio 不跨 0、branch 不换支）与 `maxJump <= 0.1`；metrics 增记 `signFlips`、`maxStep`、`maxStepTime`。阈值按物理行程重定，不放宽符号/分支判据；求解器未做平滑或限幅。B1-5 的 `sim.cornerRatio` 连续性（20%）与 `suspSolveCorner` 的分支保持策略不变。
+
 ## 11. 提交切分
 
 | 提交 | 内容 | 前置 | 验收 |

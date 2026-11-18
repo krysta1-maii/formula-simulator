@@ -524,6 +524,7 @@ function computeStatic(source = state) {
     heave,
     pitch,
     roll,
+    referencePoint: { x: 0, y: heave, z: 0 },
     poseDeg: {
       pitch: pitch * RAD,
       roll: roll * RAD

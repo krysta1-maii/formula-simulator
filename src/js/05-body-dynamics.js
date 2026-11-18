@@ -105,12 +105,53 @@ function simCross(a, b) {
 
 /* ------------------------------ simulation state ------------------------------ */
 
+function simBodyPointFromCg(cg, q, cgBody) {
+  const arm = simQuatRotate(q, cgBody);
+  return [cg[0] - arm[0], cg[1] - arm[1], cg[2] - arm[2]];
+}
+
+function simCgFromBodyPoint(bodyPoint, q, cgBody) {
+  const arm = simQuatRotate(q, cgBody);
+  return [bodyPoint[0] + arm[0], bodyPoint[1] + arm[1], bodyPoint[2] + arm[2]];
+}
+
+function simReferencePoint(sim) {
+  const state = sim.state;
+  const reference = sim.reference;
+  if (!state) return { x: 0, y: 0, z: 0 };
+  const cgBody = reference && reference.cgBody ? reference.cgBody : { x: 0, y: 0, z: 0 };
+  const point = simBodyPointFromCg(
+    [state.x, state.y, state.z],
+    [state.qw, state.qx, state.qy, state.qz],
+    [cgBody.x, cgBody.y, cgBody.z]
+  );
+  return { x: point[0], y: point[1], z: point[2] };
+}
+
+function simRatioState(sim, index, row, instantRatio) {
+  const design = Math.abs(row && row.dLdDelta) > 1e-6 ? Math.abs(row.dLdDelta) : 0.5;
+  const previous = sim.cornerRatio[index];
+  const finite = Number.isFinite(instantRatio);
+  const inRange = finite && instantRatio > 0.05 && instantRatio < 2.0;
+  const nearDesign = inRange && instantRatio / design > 0.3 && instantRatio / design < 3.0;
+  const continuous = previous == null ||
+    (finite && Math.abs(instantRatio - previous) / Math.max(Math.abs(previous), 1e-6) < 0.2);
+  if (finite && nearDesign && continuous) {
+    sim.cornerRatio[index] = instantRatio;
+    return { ok: true, ratio: instantRatio };
+  }
+  if (previous != null) return { ok: false, ratio: previous };
+  return { ok: false, ratio: design };
+}
+
 function simEquilibriumState(reference) {
   const q = simQuatFromEuler(0, reference.pitch, reference.roll);
+  const cgBody = [reference.cgBody.x, reference.cgBody.y, reference.cgBody.z];
+  const cg = simCgFromBodyPoint([0, reference.heave, 0], q, cgBody);
   return {
-    x: 0,
-    y: reference.heave,
-    z: 0,
+    x: cg[0],
+    y: cg[1],
+    z: cg[2],
     vx: 0,
     vy: 0,
     vz: 0,
@@ -135,6 +176,10 @@ function simCreate(source = state, options = {}) {
     accumulator: 0,
     lastSubsteps: 0,
     cornerSeed: [null, null, null, null],
+    cornerRatio: [null, null, null, null],
+    solverDegraded: false,
+    solverFailed: false,
+    solverFailureSteps: 0,
     rackShift: 0,
     flags: {
       holding: true,
@@ -159,6 +204,10 @@ function simReset(sim, source = state, options = {}) {
   sim.accumulator = 0;
   sim.lastSubsteps = 0;
   sim.cornerSeed = [null, null, null, null];
+  sim.cornerRatio = [null, null, null, null];
+  sim.solverDegraded = false;
+  sim.solverFailed = false;
+  sim.solverFailureSteps = 0;
   sim.flags = {
     holding: true,
     sliding: false,
@@ -197,18 +246,22 @@ function simApplyImpulse(sim, kind = 'heave') {
 /* ------------------------------ force evaluation ------------------------------ */
 
 function simEvaluate(sim) {
-  const state = sim.state;
+  const bodyState = sim.state;
   const reference = sim.reference;
-  const source = reference.source || state;
+  if (!reference || !reference.source) {
+    throw new Error('simEvaluate: reference.source is required');
+  }
+  const source = reference.source;
   const mass = reference.mass;
-  const q = [state.qw, state.qx, state.qy, state.qz];
+  const q = [bodyState.qw, bodyState.qx, bodyState.qy, bodyState.qz];
   const euler = simEulerFromQuat(q);
   const cgBody = [reference.cgBody.x, reference.cgBody.y, reference.cgBody.z];
-  const cgArm = simQuatRotate(q, cgBody);
-  const cg = [state.x + cgArm[0], state.y + cgArm[1], state.z + cgArm[2]];
-  const omegaBody = [state.wx, state.wy, state.wz];
+  const cg = [bodyState.x, bodyState.y, bodyState.z];
+  const bodyPoint = simBodyPointFromCg(cg, q, cgBody);
+  const refPos = { x: bodyPoint[0], y: bodyPoint[1], z: bodyPoint[2] };
+  const omegaBody = [bodyState.wx, bodyState.wy, bodyState.wz];
   const omegaRoad = simQuatRotate(q, omegaBody);
-  const velocity = [state.vx, state.vy, state.vz];
+  const velocity = [bodyState.vx, bodyState.vy, bodyState.vz];
   const gravity = [
     reference.frame.gravityLocal.x,
     reference.frame.gravityLocal.y,
@@ -222,15 +275,16 @@ function simEvaluate(sim) {
 
   const geometry = reference.suspension ? reference.suspension.corners : null;
   const design = reference.suspension ? reference.suspension.design : null;
-  const bodyPos = { x: state.x, y: state.y, z: state.z };
-  const bodyQuat = new THREE.Quaternion(state.qx, state.qy, state.qz, state.qw);
+  const bodyPos = refPos;
+  const bodyQuat = new THREE.Quaternion(bodyState.qx, bodyState.qy, bodyState.qz, bodyState.qw);
   const rackShift = sim.rackShift || 0;
+  let degraded = false;
 
   for (let i = 0; i < reference.wheels.length; i += 1) {
     const wheel = reference.wheels[i];
-    const arm = [wheel.x, 0, wheel.z];
+    const arm = [wheel.x - cgBody[0], -cgBody[1], wheel.z - cgBody[2]];
     const armRoad = simQuatRotate(q, arm);
-    const cornerY = state.y + armRoad[1];
+    const cornerY = cg[1] + armRoad[1];
     const cornerVelocityY = velocity[1] + (omegaRoad[2] * armRoad[0] - omegaRoad[0] * armRoad[2]);
     let solved = null;
     let springForce = 0;
@@ -242,10 +296,11 @@ function simEvaluate(sim) {
       const row = design[i];
       solved = suspSolveCorner(geometry[i], bodyPos, bodyQuat, rackShift, sim.cornerSeed[i], true);
       sim.cornerSeed[i] = solved.seed;
-      const instantRatio = solved.motionRatio != null ? solved.motionRatio : row.motionRatio;
+      const ratioCheck = simRatioState(sim, i, row, solved.motionRatio);
+      if (!ratioCheck.ok) degraded = true;
       const deltaDot = -cornerVelocityY;
-      if (solved.converged) {
-        const dLdDelta = -instantRatio;
+      if (solved.frame.converged) {
+        const dLdDelta = -ratioCheck.ratio;
         lengthDot = dLdDelta * deltaDot;
         coilLength = solved.coilLength;
         springForce = row.coilRate * (coilLength - row.refLength) * dLdDelta;
@@ -259,13 +314,13 @@ function simEvaluate(sim) {
         springForce = row.coilRate * (coilLength - row.refLength) * dLdDelta;
         dampingForce = row.coilDamping * dLdDelta * dLdDelta * deltaDot;
       }
-      ratio = instantRatio;
+      ratio = ratioCheck.ratio;
     } else {
       springForce = reference.baseLoads[i] - reference.springRates[i] * cornerY;
       dampingForce = -reference.damperRateWheel[i] * cornerVelocityY;
     }
-    const contactX = state.x + cy * wheel.x + sy * wheel.z;
-    const contactZ = state.z - sy * wheel.x + cy * wheel.z;
+    const contactX = refPos.x + cy * wheel.x + sy * wheel.z;
+    const contactZ = refPos.z - sy * wheel.x + cy * wheel.z;
     corners.push({
       key: wheel.key,
       index: i,
@@ -321,9 +376,9 @@ function simEvaluate(sim) {
   const demand = Math.hypot(externalTangent[0], externalTangent[2]);
   const frictionCoefficient = Number.isFinite(source.friction) ? source.friction : DEFAULTS.friction;
   const capacity = frictionCoefficient * sumNormal;
-  const atRest = Math.abs(state.vx) < SIM_REST_SPEED &&
-    Math.abs(state.vz) < SIM_REST_SPEED &&
-    Math.abs(state.wy) < SIM_REST_SPEED;
+  const atRest = Math.abs(bodyState.vx) < SIM_REST_SPEED &&
+    Math.abs(bodyState.vz) < SIM_REST_SPEED &&
+    Math.abs(bodyState.wy) < SIM_REST_SPEED;
   const holding = atRest && sumNormal > 1e-6 && demand <= capacity + 1e-9;
   let sliding = false;
   const frictionForces = [];
@@ -348,7 +403,7 @@ function simEvaluate(sim) {
         ? [-externalTangent[0] / demand, 0, -externalTangent[2] / demand]
         : [0, 0, 0];
       for (const corner of corners) {
-        const arm = [corner.contact[0] - state.x, -state.y, corner.contact[2] - state.z];
+        const arm = [corner.contact[0] - cg[0], -cg[1], corner.contact[2] - cg[2]];
         const contactVelocity = [
           velocity[0] + (omegaRoad[1] * arm[2] - omegaRoad[2] * arm[1]),
           0,
@@ -388,6 +443,8 @@ function simEvaluate(sim) {
     corners,
     frictionForces,
     cg,
+    bodyPoint: bodyPoint.slice(),
+    refPos,
     euler,
     omegaRoad,
     velocity,
@@ -398,23 +455,27 @@ function simEvaluate(sim) {
     holding,
     sliding,
     impulse,
-    atRest
+    atRest,
+    degraded,
+    solverOk: corners.every((corner) => !corner.solved || corner.solved.ok)
   };
 }
 
 /* ------------------------------ integration ------------------------------ */
 
 function simIntegrate(sim, dt) {
-  const state = sim.state;
+  const bodyState = sim.state;
   const reference = sim.reference;
   const evaluation = simEvaluate(sim);
   const mass = reference.mass;
   const inertia = reference.inertia;
-  const q = [state.qw, state.qx, state.qy, state.qz];
+  const q = [bodyState.qw, bodyState.qx, bodyState.qy, bodyState.qz];
 
+  // B1-1: bodyState.x/y/z is the centre of mass, so F/m is already the CG
+  // acceleration and the moment about the CG drives the rotation directly.
   const accel = [evaluation.force[0] / mass, evaluation.force[1] / mass, evaluation.force[2] / mass];
   const momentBody = simQuatRotateInverse(q, evaluation.moment);
-  const omega = [state.wx, state.wy, state.wz];
+  const omega = [bodyState.wx, bodyState.wy, bodyState.wz];
   const inertiaMoment = [inertia.Ixx * omega[0], inertia.Iyy * omega[1], inertia.Izz * omega[2]];
   const gyroscopic = simCross(omega, inertiaMoment);
   const alpha = [
@@ -429,39 +490,39 @@ function simIntegrate(sim, dt) {
     alpha[1] = 0;
   }
 
-  state.vx += accel[0] * dt;
-  state.vy += accel[1] * dt;
-  state.vz += accel[2] * dt;
-  state.wx += alpha[0] * dt;
-  state.wy += alpha[1] * dt;
-  state.wz += alpha[2] * dt;
+  bodyState.vx += accel[0] * dt;
+  bodyState.vy += accel[1] * dt;
+  bodyState.vz += accel[2] * dt;
+  bodyState.wx += alpha[0] * dt;
+  bodyState.wy += alpha[1] * dt;
+  bodyState.wz += alpha[2] * dt;
 
   if (evaluation.holding) {
-    state.vx = 0;
-    state.vz = 0;
-    state.wy = 0;
+    bodyState.vx = 0;
+    bodyState.vz = 0;
+    bodyState.wy = 0;
   }
 
-  const linearSpeed = Math.hypot(state.vx, state.vy, state.vz);
+  const linearSpeed = Math.hypot(bodyState.vx, bodyState.vy, bodyState.vz);
   if (linearSpeed > SIM_LINEAR_LIMIT) {
     const scale = SIM_LINEAR_LIMIT / linearSpeed;
-    state.vx *= scale;
-    state.vy *= scale;
-    state.vz *= scale;
+    bodyState.vx *= scale;
+    bodyState.vy *= scale;
+    bodyState.vz *= scale;
   }
-  const angularSpeed = Math.hypot(state.wx, state.wy, state.wz);
+  const angularSpeed = Math.hypot(bodyState.wx, bodyState.wy, bodyState.wz);
   if (angularSpeed > SIM_ANGULAR_LIMIT) {
     const scale = SIM_ANGULAR_LIMIT / angularSpeed;
-    state.wx *= scale;
-    state.wy *= scale;
-    state.wz *= scale;
+    bodyState.wx *= scale;
+    bodyState.wy *= scale;
+    bodyState.wz *= scale;
   }
 
-  state.x += state.vx * dt;
-  state.y += state.vy * dt;
-  state.z += state.vz * dt;
+  bodyState.x += bodyState.vx * dt;
+  bodyState.y += bodyState.vy * dt;
+  bodyState.z += bodyState.vz * dt;
 
-  const derivative = simQuatDerivative(q, [state.wx, state.wy, state.wz]);
+  const derivative = simQuatDerivative(q, [bodyState.wx, bodyState.wy, bodyState.wz]);
   let nextQ = simQuatNormalize([
     q[0] + derivative[0] * dt,
     q[1] + derivative[1] * dt,
@@ -472,36 +533,51 @@ function simIntegrate(sim, dt) {
     const nextEuler = simEulerFromQuat(nextQ);
     nextQ = simQuatFromEuler(evaluation.euler.yaw, nextEuler.pitch, nextEuler.roll);
   }
-  state.qw = nextQ[0];
-  state.qx = nextQ[1];
-  state.qy = nextQ[2];
-  state.qz = nextQ[3];
+  bodyState.qw = nextQ[0];
+  bodyState.qx = nextQ[1];
+  bodyState.qy = nextQ[2];
+  bodyState.qz = nextQ[3];
 
-  if (Math.abs(state.x) > SIM_BOUND_X) {
-    state.x = Math.sign(state.x) * SIM_BOUND_X;
-    state.vx = 0;
-    state.vz = 0;
+  // Centre-of-mass bounds of the test rig.
+  if (Math.abs(bodyState.x) > SIM_BOUND_X) {
+    bodyState.x = Math.sign(bodyState.x) * SIM_BOUND_X;
+    bodyState.vx = 0;
+    bodyState.vz = 0;
     sim.flags.boundary = true;
   }
-  if (Math.abs(state.z) > SIM_BOUND_Z) {
-    state.z = Math.sign(state.z) * SIM_BOUND_Z;
-    state.vx = 0;
-    state.vz = 0;
+  if (Math.abs(bodyState.z) > SIM_BOUND_Z) {
+    bodyState.z = Math.sign(bodyState.z) * SIM_BOUND_Z;
+    bodyState.vx = 0;
+    bodyState.vz = 0;
     sim.flags.boundary = true;
   }
 
   const finite = [
-    state.x, state.y, state.z,
-    state.vx, state.vy, state.vz,
-    state.qw, state.qx, state.qy, state.qz,
-    state.wx, state.wy, state.wz
+    bodyState.x, bodyState.y, bodyState.z,
+    bodyState.vx, bodyState.vy, bodyState.vz,
+    bodyState.qw, bodyState.qx, bodyState.qy, bodyState.qz,
+    bodyState.wx, bodyState.wy, bodyState.wz
   ].every(Number.isFinite);
   if (!finite) {
     sim.flags.finite = false;
     sim.flags.recovered = true;
     sim.state = simEquilibriumState(reference);
+    sim.cornerSeed = [null, null, null, null];
+    sim.cornerRatio = [null, null, null, null];
+    sim.solverDegraded = false;
+    sim.solverFailed = false;
+    sim.solverFailureSteps = 0;
     sim.impulse = null;
     sim.accumulator = 0;
+  }
+
+  if (evaluation.degraded) {
+    sim.solverDegraded = true;
+    sim.solverFailureSteps += 1;
+    if (sim.solverFailureSteps >= 10) sim.solverFailed = true;
+  } else {
+    sim.solverDegraded = false;
+    sim.solverFailureSteps = 0;
   }
 
   sim.flags.holding = evaluation.holding;
@@ -583,7 +659,8 @@ function simBuildModel(sim, source = state) {
   const pz = cg[2] + projectionT * down[2];
   const motionRatio = reference.motionRatio;
   const designRow = reference.suspension ? reference.suspension.design : null;
-  const bodyVec = new THREE.Vector3(state.x, state.y, state.z);
+  const refPos = evaluation.refPos;
+  const bodyVec = new THREE.Vector3(refPos.x, refPos.y, refPos.z);
   const bodyQuat = new THREE.Quaternion(state.qx, state.qy, state.qz, state.qw);
   const solved = corners.map((corner) => {
     if (!corner.solved) return null;
@@ -597,9 +674,17 @@ function simBuildModel(sim, source = state) {
       wheelQuat: [quaternion.x, quaternion.y, quaternion.z, quaternion.w],
       contact: [contact.x, contact.y, contact.z],
       rockerAngle: solvedCorner.rockerAngle,
+      rocker: {
+        angle: solvedCorner.rocker.angle,
+        residual: solvedCorner.rocker.residual,
+        feasible: solvedCorner.rocker.feasible,
+        branch: solvedCorner.rocker.branch
+      },
       coilLength: solvedCorner.coilLength,
       motionRatio: solvedCorner.motionRatio,
-      converged: solvedCorner.converged
+      motionRatioState: solvedCorner.motionRatioState,
+      converged: solvedCorner.frame.converged,
+      ok: solvedCorner.ok
     };
   });
   const springCompressionMm = corners.map((corner, index) => {
@@ -630,18 +715,20 @@ function simBuildModel(sim, source = state) {
     demand: evaluation.demand,
     capacity: evaluation.capacity,
     impulse: evaluation.impulse ? evaluation.impulse.label : null,
-    resetCount: sim.resetCount
+    resetCount: sim.resetCount,
+    solverDegraded: Boolean(sim.solverDegraded),
+    solverFailed: Boolean(sim.solverFailed)
   };
 
   return Object.assign({}, reference, {
     dynamic: true,
     sim: simInfo,
-    bodyPos: { x: state.x, y: state.y, z: state.z },
+    bodyPos: { x: refPos.x, y: refPos.y, z: refPos.z },
     bodyQuat: q,
     bodyYaw: euler.yaw,
     bodyPitch: euler.pitch,
     bodyRoll: euler.roll,
-    heave: state.y,
+    heave: refPos.y,
     pitch: euler.pitch,
     roll: euler.roll,
     yaw: euler.yaw,
@@ -662,7 +749,10 @@ function simBuildModel(sim, source = state) {
     solved,
     rackShift: sim.rackShift || 0,
     motionRatioInstant: corners.map((corner) => corner.motionRatio),
-    solverOk: corners.every((corner) => !corner.solved || corner.solved.converged),
+    motionRatioState: solved.map((row) => (row ? row.motionRatioState : 'unavailable')),
+    rockerResidualMm: solved.map((row) => (row ? row.rocker.residual * 1000 : NaN)),
+    rockerFeasible: solved.map((row) => (row ? row.rocker.feasible : false)),
+    solverOk: corners.every((corner) => !corner.solved || corner.solved.ok),
     springCompressionMm,
     damperCompressionRate,
     springForce: corners.map((corner) => corner.springForce),
@@ -738,7 +828,7 @@ function runDynamicSelfTests(source = state) {
   let heavePeak = 0;
   for (let i = 0; i < 600; i += 1) {
     simStep(heaveSim);
-    heavePeak = Math.max(heavePeak, Math.abs(heaveSim.state.y - heaveSim.reference.heave));
+    heavePeak = Math.max(heavePeak, Math.abs(simReferencePoint(heaveSim).y - heaveSim.reference.heave));
   }
   simRunFor(heaveSim, 2.0);
   const heaveTail = Math.abs(simBuildModel(heaveSim).heave - heaveSim.reference.heave);
@@ -774,7 +864,9 @@ function runDynamicSelfTests(source = state) {
   simApplyImpulse(detB, 'pitch');
   simRunFor(detA, 0.5);
   simRunFor(detB, 0.5);
-  const detDelta = Math.abs(detA.state.y - detB.state.y) +
+  const detAReference = simReferencePoint(detA);
+  const detBReference = simReferencePoint(detB);
+  const detDelta = Math.abs(detAReference.y - detBReference.y) +
     Math.abs(detA.state.qx - detB.state.qx) +
     Math.abs(detA.state.qz - detB.state.qz);
   record('固定步长可重复', detDelta < 1e-12, 'Δ ' + detDelta.toExponential(1));
@@ -786,7 +878,9 @@ function runDynamicSelfTests(source = state) {
   const fixedSim = simCreate(source, { settle: 0.4 });
   simApplyImpulse(fixedSim, 'roll');
   simRunFor(fixedSim, frameSteps * SIM_DT);
-  const frameDelta = Math.abs(frameSim.state.y - fixedSim.state.y) +
+  const frameReference = simReferencePoint(frameSim);
+  const fixedReference = simReferencePoint(fixedSim);
+  const frameDelta = Math.abs(frameReference.y - fixedReference.y) +
     Math.abs(frameSim.state.qx - fixedSim.state.qx) +
     Math.abs(frameSim.state.wx - fixedSim.state.wx);
   record(

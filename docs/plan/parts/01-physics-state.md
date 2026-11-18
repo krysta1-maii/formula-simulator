@@ -229,7 +229,7 @@ npm test                                                  # 全量回归
 4. 摇臂可达性：4.1 工况 `feasible=false` 且残差 > 1e-3；默认参数 ±25 mm 行程残差 < 1e-12。
 5. 分支一致性：高低探测与主解 `branch` 全等；退化时角度差 < 1e-6。
 6. 种子独立性（R-02）：同一参数建两个 sim，A 每步把 `corner.angle` 设为 `baseAngle`、B 设为 `baseAngle + 1.2`，比较完整 state、`sim.time` 与 `sim.flags`，要求逐位相同；fbb401d 上首个子步即失败（默认俯仰 300 步最大差 0.61 m），B1-4 后通过。
-7. 运动比连续性：默认参数、settle 1.2 s、俯仰脉冲 500 步无符号跳变；解析值与差分值相对误差 < 1e-3。
+7. 运动比连续性：默认参数、settle 1.2 s、俯仰脉冲 500 步无符号跳变；解析值与差分值相对误差 < 1e-3。审计侧 `B4.1/motion-ratio-continuity` 拆为 `signFlips === 0` 且 `maxJump <= 0.1`：4.1 低阻尼大行程实测逐步变化 0.074，原 0.02 只适用于默认小行程；阈值按物理行程重定，未放宽符号/分支判据（详见 `docs/plan/notes/b1-recon.md` §10.4）。
 8. 性能计数：单子步 `suspEval` ≤ 30 为通过条件，`simBuildModel` 单独记录且 ≤30；30–60 只按临时降级登记，不判通过（O-11）。
 9. 静态/动态一致：level 工况 `computeStatic` 与 `simBuildModel` 的四角载荷差 < 1e-6 N。
 10. 旧断言迁移清单：`05-body-dynamics.js:741/744/777-779/789-791`、`tools/test-dynamics.mjs:205-206/210-211/223` 改为参考点派生量；迁移后保留一条“旧写法在新语义下会失败”的反向用例，防止回退。

@@ -956,10 +956,14 @@ function updateSuspension(model) {
     const travel = -model.cornerY[i];
     const fallbackAngle = corner.rocker.baseAngle + travel * corner.rocker.gain;
     const solvedCorner = model.solved && model.solved[i] ? model.solved[i] : null;
-    if (solvedCorner && Number.isFinite(solvedCorner.rockerAngle)) {
-      corner.angle = solvedCorner.rockerAngle;
-      corner.rockerSolveFailed = false;
+    if (solvedCorner && solvedCorner.rocker && Number.isFinite(solvedCorner.rocker.angle)) {
+      // Render-only display copy: the physics layer owns the seed and never
+      // reads corner.angle back (B1-4).
+      corner.angle = solvedCorner.rocker.angle;
+      corner.rockerSolveFailed = !solvedCorner.rocker.feasible;
     } else {
+      // Static rebuild before the first physics model exists: a display-only
+      // fallback. Its result is never fed back into the solver.
       corner.angle = solveRockerAngle(corner, bodyMatrix, wheelMatrix, fallbackAngle);
     }
     corner.rocker.mesh.rotation.z = corner.angle;

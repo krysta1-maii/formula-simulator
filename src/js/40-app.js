@@ -23,9 +23,12 @@ function liveModel() {
 function calibrateRack(sim, steerDeg) {
   if (!sim || !sim.reference || !sim.reference.suspension) return 0;
   const st = sim.state;
+  // B1-1: sim.state is the centre of mass; the linkage solver expects the
+  // body reference point.
+  const ref = simReferencePoint(sim);
   return suspRackForSteer(
     sim.reference.suspension.corners,
-    { x: st.x, y: st.y, z: st.z },
+    { x: ref.x, y: ref.y, z: ref.z },
     new THREE.Quaternion(st.qx, st.qy, st.qz, st.qw),
     steerDeg * DEG
   );

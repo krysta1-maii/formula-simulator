@@ -152,7 +152,18 @@ function suspSolve3(J, b) {
   return out.every(Number.isFinite) ? out : null;
 }
 
+let SUSP_EVAL_COUNT = 0;
+
+function suspEvalReset() {
+  SUSP_EVAL_COUNT = 0;
+}
+
+function suspEvalCount() {
+  return SUSP_EVAL_COUNT;
+}
+
 function suspEval(corner, bodyPos, bodyQuat, rackShift, thL, thU, spin) {
+  SUSP_EVAL_COUNT += 1;
   const d = suspDesign(corner);
   const inlet = d.innerTrack0.clone();
   if (corner.front) inlet.z += rackShift;
@@ -179,6 +190,82 @@ function suspEval(corner, bodyPos, bodyQuat, rackShift, thL, thU, spin) {
   return { f, BL, BU, C, T, P, qU, axle, nb, cb, downProjection, wheelQuat: qU.clone().multiply(d.restQuat) };
 }
 
+function suspJacobianAt(corner, bodyPos, bodyQuat, rackShift, e, thL, thU, spin) {
+  const J = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+  const eps = 1e-6;
+  const eL = suspEval(corner, bodyPos, bodyQuat, rackShift, thL + eps, thU, spin);
+  const eU = suspEval(corner, bodyPos, bodyQuat, rackShift, thL, thU + eps, spin);
+  const eS = suspEval(corner, bodyPos, bodyQuat, rackShift, thL, thU, spin + eps);
+  for (let i = 0; i < 3; i += 1) {
+    J[i][0] = (eL.f[i] - e.f[i]) / eps;
+    J[i][1] = (eU.f[i] - e.f[i]) / eps;
+    J[i][2] = (eS.f[i] - e.f[i]) / eps;
+  }
+  return J;
+}
+
+function suspJacobianAnalytic(corner, state, rackShift, thL, thU, spin) {
+  const d = suspDesign(corner);
+  const line = state.BU.clone().sub(state.BL).normalize();
+  const segLen = state.BU.distanceTo(state.BL);
+  if (!(segLen > 1e-12)) return null;
+  const q0 = new THREE.Quaternion().setFromUnitVectors(d.line0, line);
+  const qSpin = new THREE.Quaternion().setFromAxisAngle(line, spin);
+  const qU = state.qU;
+  if (!qU) return null;
+  const project = (v) => v.clone().sub(line.clone().multiplyScalar(line.dot(v)));
+  const omegaOf = (dqU) => {
+    const conj = new THREE.Quaternion(-qU.x, -qU.y, -qU.z, qU.w);
+    const prod = new THREE.Quaternion().multiplyQuaternions(dqU, conj);
+    return new THREE.Vector3(2 * prod.x, 2 * prod.y, 2 * prod.z);
+  };
+  const q0Derivative = (dLine) => {
+    const axd = new THREE.Vector3().crossVectors(d.line0, dLine);
+    const ad = d.line0.dot(dLine);
+    const nrm = (1 + d.line0.dot(line)) / q0.w;
+    return new THREE.Quaternion(
+      (axd.x - (ad * q0.x) / nrm) / nrm,
+      (axd.y - (ad * q0.y) / nrm) / nrm,
+      (axd.z - (ad * q0.z) / nrm) / nrm,
+      (ad - (ad * q0.w) / nrm) / nrm
+    );
+  };
+  const dBL = new THREE.Vector3().crossVectors(d.axisL, state.BL.clone().sub(d.axisLPoint));
+  const dBU = new THREE.Vector3().crossVectors(d.axisU, state.BU.clone().sub(d.axisUPoint));
+  const dLineL = project(dBL.clone().negate()).divideScalar(segLen);
+  const dLineU = project(dBU).divideScalar(segLen);
+  const omegaL = omegaOf(qSpin.clone().multiply(q0Derivative(dLineL)));
+  const omegaU = omegaOf(qSpin.clone().multiply(q0Derivative(dLineU)));
+  const omegaS = omegaOf(new THREE.Quaternion(0.5 * line.x, 0.5 * line.y, 0.5 * line.z, 0).multiply(qU));
+  const inlet = d.innerTrack0.clone();
+  if (corner.front) inlet.z += rackShift || 0;
+  const tVec = state.T.clone().sub(inlet);
+  const tLen = tVec.length();
+  const f1Dir = tLen > 1e-12 ? tVec.clone().divideScalar(tLen) : new THREE.Vector3();
+  const nb = state.nb;
+  const down = state.downProjection;
+  const J = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+  const cols = [
+    { bl: dBL, bu: null, omega: omegaL },
+    { bl: null, bu: dBU, omega: omegaU },
+    { bl: null, bu: null, omega: omegaS }
+  ];
+  for (let c = 0; c < 3; c += 1) {
+    const col = cols[c];
+    const bl = col.bl || new THREE.Vector3();
+    const bu = col.bu || new THREE.Vector3();
+    J[0][c] = line.dot(bu.clone().sub(bl));
+    const dT = new THREE.Vector3().crossVectors(col.omega, state.T.clone().sub(state.BL)).add(bl);
+    J[1][c] = f1Dir.dot(dT);
+    const dC = new THREE.Vector3().crossVectors(col.omega, state.C.clone().sub(state.BL)).add(bl);
+    const dAxle = new THREE.Vector3().crossVectors(col.omega, state.axle.clone());
+    const nbDotAxle = nb.dot(state.axle);
+    const dDown = down > 1e-9 ? -(nbDotAxle * nb.dot(dAxle)) / down : 0;
+    J[2][c] = nb.dot(dC) - d.tireRadius * dDown;
+  }
+  return J;
+}
+
 function suspSolveRaw(corner, bodyPos, bodyQuat, rackShift, seed, cold) {
   const start = seed && !cold ? seed : { thL: 0, thU: 0, spin: 0 };
   let thL = start.thL || 0;
@@ -186,6 +273,8 @@ function suspSolveRaw(corner, bodyPos, bodyQuat, rackShift, seed, cold) {
   let spin = start.spin || 0;
   let best = null;
   let bestNorm = Infinity;
+  let lastJ = null;
+  let final = null;
   for (let iter = 0; iter < 12; iter += 1) {
     const e = suspEval(corner, bodyPos, bodyQuat, rackShift, thL, thU, spin);
     const norm = Math.max(Math.abs(e.f[0]), Math.abs(e.f[1]), Math.abs(e.f[2]));
@@ -193,17 +282,15 @@ function suspSolveRaw(corner, bodyPos, bodyQuat, rackShift, seed, cold) {
       bestNorm = norm;
       best = e;
     }
-    if (norm < 1e-10) break;
-    const J = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
-    const eps = 1e-6;
-    const eL = suspEval(corner, bodyPos, bodyQuat, rackShift, thL + eps, thU, spin);
-    const eU = suspEval(corner, bodyPos, bodyQuat, rackShift, thL, thU + eps, spin);
-    const eS = suspEval(corner, bodyPos, bodyQuat, rackShift, thL, thU, spin + eps);
-    for (let i = 0; i < 3; i += 1) {
-      J[i][0] = (eL.f[i] - e.f[i]) / eps;
-      J[i][1] = (eU.f[i] - e.f[i]) / eps;
-      J[i][2] = (eS.f[i] - e.f[i]) / eps;
+    if (norm < 1e-9) {
+      final = e;
+      break;
     }
+    const analyticJ = suspJacobianAnalytic(corner, e, rackShift, thL, thU, spin);
+    const J = (analyticJ && analyticJ.every((row) => row.every(Number.isFinite)))
+      ? analyticJ
+      : suspJacobianAt(corner, bodyPos, bodyQuat, rackShift, e, thL, thU, spin);
+    lastJ = J;
     const delta = suspSolve3(J, [-e.f[0], -e.f[1], -e.f[2]]);
     if (!delta) break;
     const scale = Math.max(Math.abs(delta[0]), Math.abs(delta[1]), Math.abs(delta[2]));
@@ -213,20 +300,33 @@ function suspSolveRaw(corner, bodyPos, bodyQuat, rackShift, seed, cold) {
     spin += delta[2] * limiter;
     if (!Number.isFinite(thL) || !Number.isFinite(thU) || !Number.isFinite(spin)) break;
   }
-  const final = suspEval(corner, bodyPos, bodyQuat, rackShift, thL, thU, spin);
-  const norm = Math.max(Math.abs(final.f[0]), Math.abs(final.f[1]), Math.abs(final.f[2]));
+  const finalEval = final || suspEval(corner, bodyPos, bodyQuat, rackShift, thL, thU, spin);
+  const norm = Math.max(Math.abs(finalEval.f[0]), Math.abs(finalEval.f[1]), Math.abs(finalEval.f[2]));
   const converged = norm < 1e-6;
+  const analyticFinal = suspJacobianAnalytic(corner, finalEval, rackShift, thL, thU, spin);
+  const jacobian = lastJ ||
+    ((analyticFinal && analyticFinal.every((row) => row.every(Number.isFinite))) ? analyticFinal : null) ||
+    suspJacobianAt(corner, bodyPos, bodyQuat, rackShift, finalEval, thL, thU, spin);
   return {
     thL,
     thU,
     spin,
     converged,
     error: norm,
-    evalState: final
+    evalState: finalEval,
+    jacobian
   };
 }
 
-function suspRockerAngle(corner, pushPoint, seed) {
+function suspRockerResidual(corner, pushPoint, angle) {
+  return Math.abs(suspRockerPoint(corner, corner.rocker.pushArm, angle).distanceTo(pushPoint) - suspDesign(corner).pushLen0);
+}
+
+/**
+ * Legacy Newton solver, kept only as a numerical reference for tests.
+ * Production code uses the closed-form suspRockerAngle below.
+ */
+function suspRockerAngleNewton(corner, pushPoint, seed) {
   const d = suspDesign(corner);
   const target = d.pushLen0;
   let angle = Number.isFinite(seed) ? seed : corner.rocker.baseAngle;
@@ -246,8 +346,142 @@ function suspRockerAngle(corner, pushPoint, seed) {
   return angle;
 }
 
+/**
+ * Closed-form pushrod-rocker closure. The rocker tip travels on a circle of
+ * radius rho about the pivot; the pushrod length fixes its distance to the
+ * push point, so the two circle intersections give at most two branches.
+ */
+function suspRockerAngle(corner, pushPoint, seed) {
+  const d = suspDesign(corner);
+  const target = d.pushLen0;
+  const pivot = corner.rocker.pivot;
+  const arm = corner.rocker.pushArm;
+  const rho = Math.hypot(arm.x, arm.y);
+  const phi = Math.atan2(arm.y, arm.x);
+  const ux = pushPoint.x - pivot.x;
+  const uy = pushPoint.y - pivot.y;
+  const uz = pushPoint.z - (pivot.z + arm.z);
+  const a = Math.hypot(ux, uy);
+  const seedAngle = Number.isFinite(seed) ? seed : corner.rocker.baseAngle;
+  const residualAt = (angle) => suspRockerResidual(corner, pushPoint, angle);
+  const alpha = Math.atan2(uy, ux);
+  const base = alpha - phi;
+  const pickNearest = (candidates) => {
+    let best = seedAngle;
+    let bestResidual = Infinity;
+    for (const angle of candidates) {
+      const residual = residualAt(angle);
+      if (residual < bestResidual) {
+        bestResidual = residual;
+        best = angle;
+      }
+    }
+    return { angle: best, residual: bestResidual };
+  };
+  const D2 = target * target - uz * uz;
+  if (a < 1e-12 || D2 < 0) {
+    // Unreachable: hold the seeded angle instead of jumping to a tangent
+    // point, so the seed chain stays on the assembly branch and recovers
+    // smoothly when the geometry becomes reachable again.
+    const held = Number.isFinite(seedAngle) ? seedAngle : base;
+    return { angle: held, residual: residualAt(held), feasible: false, branch: 0 };
+  }
+  const c = (rho * rho + a * a - D2) / (2 * rho * a);
+  if (!Number.isFinite(c) || Math.abs(c) > 1 + 1e-12) {
+    const held = Number.isFinite(seedAngle) ? seedAngle : base;
+    return { angle: held, residual: residualAt(held), feasible: false, branch: 0 };
+  }
+  const psi = Math.acos(Math.max(-1, Math.min(1, c)));
+  const candidates = [base + psi, base - psi];
+  const useFirst = Math.abs(candidates[0] - seedAngle) <= Math.abs(candidates[1] - seedAngle);
+  const angle = useFirst ? candidates[0] : candidates[1];
+  const residual = residualAt(angle);
+  const degenerate = psi < 1e-9 || Math.PI - psi < 1e-9;
+  return {
+    angle,
+    residual,
+    feasible: residual <= 1e-9,
+    branch: degenerate ? 0 : (useFirst ? 1 : -1)
+  };
+}
+
 function suspCoilLength(corner, angle) {
   return suspRockerPoint(corner, corner.rocker.damperArm, angle).distanceTo(corner.body.damper);
+}
+
+/**
+ * Analytic motion ratio. The linkage constraints depend on the reference-point
+ * height y through f(q; y) = 0 with df/dy = [0, 0, 1]; the implicit derivative
+ * dq/dy then propagates through the push point P and the pushrod closure.
+ */
+function suspMotionRatioAnalytic(corner, state, raw, rockerAngle) {
+  const d = suspDesign(corner);
+  if (!raw.jacobian) return null;
+  const dqdy = suspSolve3(raw.jacobian, [0, 0, -1]);
+  if (!dqdy || !dqdy.every(Number.isFinite)) return null;
+  const dthL = dqdy[0];
+  const dthU = dqdy[1];
+  const dspin = dqdy[2];
+  const line = state.BU.clone().sub(state.BL).normalize();
+  const segLen = state.BU.distanceTo(state.BL);
+  if (segLen < 1e-12) return null;
+  const q0 = new THREE.Quaternion().setFromUnitVectors(d.line0, line);
+  const qSpin = new THREE.Quaternion().setFromAxisAngle(line, raw.spin);
+  const qU = state.qU;
+  if (!qU) return null;
+  const project = (v) => v.clone().sub(line.clone().multiplyScalar(line.dot(v)));
+  const omegaOf = (dqU) => {
+    const conj = new THREE.Quaternion(-qU.x, -qU.y, -qU.z, qU.w);
+    const prod = new THREE.Quaternion().multiplyQuaternions(dqU, conj);
+    return new THREE.Vector3(2 * prod.x, 2 * prod.y, 2 * prod.z);
+  };
+  const q0Derivative = (dLine) => {
+    const axd = new THREE.Vector3().crossVectors(d.line0, dLine);
+    const ad = d.line0.dot(dLine);
+    const nrm = (1 + d.line0.dot(line)) / q0.w;
+    return new THREE.Quaternion(
+      (axd.x - (ad * q0.x) / nrm) / nrm,
+      (axd.y - (ad * q0.y) / nrm) / nrm,
+      (axd.z - (ad * q0.z) / nrm) / nrm,
+      (ad - (ad * q0.w) / nrm) / nrm
+    );
+  };
+  const dBL = new THREE.Vector3().crossVectors(d.axisL, state.BL.clone().sub(d.axisLPoint));
+  const dLineL = project(dBL.clone().negate()).divideScalar(segLen);
+  const dP_L = dBL.clone().add(new THREE.Vector3().crossVectors(
+    omegaOf(qSpin.clone().multiply(q0Derivative(dLineL))),
+    state.P.clone().sub(state.BL)
+  ));
+  const dBU = new THREE.Vector3().crossVectors(d.axisU, state.BU.clone().sub(d.axisUPoint));
+  const dLineU = project(dBU).divideScalar(segLen);
+  const dP_U = new THREE.Vector3().crossVectors(
+    omegaOf(qSpin.clone().multiply(q0Derivative(dLineU))),
+    state.P.clone().sub(state.BL)
+  );
+  const dP_S = new THREE.Vector3().crossVectors(line, state.P.clone().sub(state.BL));
+  const dPdy = dP_L.multiplyScalar(dthL).add(dP_U.multiplyScalar(dthU)).add(dP_S.multiplyScalar(dspin));
+  const cos = Math.cos(rockerAngle);
+  const sin = Math.sin(rockerAngle);
+  const pushArm = corner.rocker.pushArm;
+  const tip = suspRockerPoint(corner, pushArm, rockerAngle);
+  const dTip = new THREE.Vector3(-pushArm.x * sin - pushArm.y * cos, pushArm.x * cos - pushArm.y * sin, 0);
+  const w = tip.clone().sub(state.P);
+  const denom = w.dot(dTip);
+  if (!Number.isFinite(denom) || Math.abs(denom) < 1e-12) return null;
+  const dTheta = w.dot(dPdy) / denom;
+  const damperArm = corner.rocker.damperArm;
+  const damperTip = suspRockerPoint(corner, damperArm, rockerAngle);
+  const dDamperTip = new THREE.Vector3(
+    -damperArm.x * sin - damperArm.y * cos,
+    damperArm.x * cos - damperArm.y * sin,
+    0
+  );
+  const v = damperTip.clone().sub(corner.body.damper);
+  const vLen = v.length();
+  if (vLen < 1e-12) return null;
+  const dLdTheta = v.dot(dDamperTip) / vLen;
+  const ratio = dLdTheta * dTheta;
+  return Number.isFinite(ratio) ? ratio : null;
 }
 
 /**
@@ -261,19 +495,20 @@ function suspSolveCorner(corner, bodyPos, bodyQuat, rackShift, seed, withRatio) 
     if (cold.error < raw.error) raw = cold;
   }
   const state = raw.evalState;
-  const angle = suspRockerAngle(corner, state.P, corner.angle);
-  const coilLength = suspCoilLength(corner, angle);
+  const seedAngle = seed && Number.isFinite(seed.rockerAngle) ? seed.rockerAngle : corner.rocker.baseAngle;
+  const rocker = suspRockerAngle(corner, state.P, seedAngle);
+  const coilLength = suspCoilLength(corner, rocker.angle);
   let motionRatio = null;
-  const epsilon = 1e-3;
+  let motionRatioState = 'unavailable';
   if (withRatio) {
-    const high = suspSolveRaw(corner, { x: bodyPos.x, y: bodyPos.y + epsilon, z: bodyPos.z }, bodyQuat, rackShift, raw, false);
-    const low = suspSolveRaw(corner, { x: bodyPos.x, y: bodyPos.y - epsilon, z: bodyPos.z }, bodyQuat, rackShift, raw, false);
-    if (high.converged && low.converged) {
-      const lHigh = suspCoilLength(corner, suspRockerAngle(corner, high.evalState.P, angle));
-      const lLow = suspCoilLength(corner, suspRockerAngle(corner, low.evalState.P, angle));
-      motionRatio = (lHigh - lLow) / (2 * epsilon);
+    const ratio = suspMotionRatioAnalytic(corner, state, raw, rocker.angle);
+    if (ratio != null && Number.isFinite(ratio)) {
+      motionRatio = ratio;
+      motionRatioState = (ratio > 0.2 && ratio < 0.8) ? 'ok' : 'unavailable';
     }
   }
+  const frame = { converged: raw.converged, error: raw.error };
+  const ok = frame.converged && rocker.feasible && motionRatioState === 'ok';
   const d = suspDesign(corner);
   const down = state.nb.clone().multiplyScalar(-1);
   down.addScaledVector(state.axle, -down.dot(state.axle));
@@ -283,16 +518,20 @@ function suspSolveCorner(corner, bodyPos, bodyQuat, rackShift, seed, withRatio) 
     thL: raw.thL,
     thU: raw.thU,
     spin: raw.spin,
+    frame,
+    rocker,
+    coilLength,
+    motionRatio,
+    motionRatioState,
+    ok,
+    seed: { thL: raw.thL, thU: raw.thU, spin: raw.spin, rockerAngle: rocker.angle },
     converged: raw.converged,
     error: raw.error,
     wheelPos: state.C.clone(),
     wheelQuat: state.wheelQuat.clone(),
     contact,
     pushPoint: state.P.clone(),
-    rockerAngle: angle,
-    coilLength,
-    motionRatio,
-    seed: { thL: raw.thL, thU: raw.thU, spin: raw.spin }
+    rockerAngle: rocker.angle
   };
 }
 
