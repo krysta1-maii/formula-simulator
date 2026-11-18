@@ -35,6 +35,15 @@ B3 尚未解冻；本节只冻结两项 audit 口径、baseline 授权与解冻�
 3. 施工顺序按 lead 裁决保持 B3-1 → B3-2 → B3-3/B3-4 → B4-4；30-ui/40-app 由 40-app 单点合并；B4-6 runner 先迁移或只追加独立块。
 4. B3 解冻前不写 src/；本文件只登记裁决与清单。
 
+### 0.4 完成验收
+
+B3 全部合入后必须执行：
+
+1. node tools/audit/run-all.mjs --group runtime，退出码 0；该组覆盖 B5.1 六条、B5.2/geometry-generation、B5.3/telemetry-dom、B5.4/material-release、O1/chunked-vs-one-shot。
+2. npm run audit:baseline，退出码 0；全量 baseline match。B1/B2 已修条目由其 owner 同步后应保持 match；若仍 mismatch，先判断是否为 B3 runtime 组未同步，不越权修改其他组。
+3. B3 完成后 npm run ci:node 全绿；test:runtime 只追加在 ci:node，不并入 npm test 的 47+52。
+4. 浏览器 audit 需要 Chrome；缺 Chrome 时按契约 SKIP 不计通过，CI 中用 FS_REQUIRE_CHROME=1 严格运行。
+
 ## 1. 前置接口与解冻条件
 
 B3 的四项都不能在 B1/B2 之前冻结，原因不在文件冲突，而在字段语义：B3-2 的 geometryRevision 被 B2-1 的 simRetargetReference 用作校验；B3-3 的 10 项动态自检由 B2-1 增加；B3-4 的 updateCar 守卫要落在 B1-4 改写后的 updateSuspension 之前。解冻条件按主册与契约：
