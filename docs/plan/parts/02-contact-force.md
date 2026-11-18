@@ -57,7 +57,7 @@ C-1 至 C-4 出自同一结构原因：`atRest`（05:324-326）是每步重算�
 3. 转换条件。
    - `HOLD → SLIP`：平面速度超过 `SIM_ARREST_SPEED`、或横摆角速度超过 `SIM_ARREST_RATE`、或四角接地点滑移速度最大值超过 `SIM_ARREST_SPEED`，或 `demand > capacity·(1 - SIM_HOLD_HYSTERESIS)`，或任一角法向力不大于 1e-6 N（离地），或外部切向冲量本身超过容量。速度条件是必要的：HOLD 分支会无条件把平面速度投影为零，若状态仍锁存 HOLD 而车体已在运动，就会出现“瞬移停车”。判定在当步力评估之前完成，用当步载荷，不用上一步残值。
    - `SLIP → HOLD`：平面速度小于 `SIM_ARREST_SPEED`、横摆角速度小于 `SIM_ARREST_RATE`、四角接地点滑移速度最大值小于 `SIM_ARREST_SPEED`、且 `demand ≤ capacity·(1 - SIM_HOLD_HYSTERESIS)` 连续保持 `SIM_ARREST_DWELL` 个子步；满足时清零 `vx`、`vz`、`wy`，置 `since = sim.time` 并累加 `changes`。
-4. 摩擦冲量上限。`simEvaluate` 增加 `dt` 参数（默认 `SIM_DT`，保持既有调用兼容）。SLIP 分支先按饱和库仑得到各角摩擦力 f_i，再计算两个预算：平面动量 `p = m·(vx,vz) + F_ext,t·dt` 与横摆动量 `h = Iyy·wy + L_ext·dt`（`F_ext,t` 即 05:316-320 的 `externalTangent`，含脉冲切向分量；`L_ext` 必须取 `momentParts.normal[1] + momentParts.friction[1] + momentParts.impulse[1]`，即法向、摩擦与脉冲力矩的 y 分量之和，不能只算外部切向力，O-14）。若合冲量 `|Σ f_i·dt|` 大于 `|p|`，或合横摆冲量大于 `|h|`，按两者的较小比例 `k` 统一缩放 f_i。缩放后若 `k<1`，在速度更新之后、位置更新之前（05:443 与 05:460 之间）把对应分量投影为零：平面预算触发则置 `vx=vz=0`，横摆预算触发则置 `wy=0`。由此单步速度不会反向，归零是投影而不是数值巧合，且本步不会因为残留速度产生额外位移。
+4. 摩擦冲量上限。`simEvaluate` 增加 `dt` 参数（默认 `SIM_DT`，保持既有调用兼容）。SLIP 分支先按饱和库仑得到各角摩擦力 f_i，再计算两个预算：平面动量 `p = m·(vx,vz) + F_ext,t·dt` 与横摆动量 `h = Iyy·wy + L_ext·dt`（`F_ext,t` 即 05:316-320 的 `externalTangent`，含脉冲切向分量；`L_ext` 只取非摩擦项 `momentParts.normal[1] + momentParts.impulse[1]`，即法向与脉冲力矩的 y 分量之和。`momentParts.friction[1]` 是本次要缩放的被控量，只作观测与能量核算，计入预算会把控制量加进被控量，O-14 已裁决）。若合冲量 `|Σ f_i·dt|` 大于 `|p|`，或合横摆冲量大于 `|h|`，按两者的较小比例 `k` 统一缩放 f_i。缩放后若 `k<1`，在速度更新之后、位置更新之前（05:443 与 05:460 之间）把对应分量投影为零：平面预算触发则置 `vx=vz=0`，横摆预算触发则置 `wy=0`。由此单步速度不会反向，归零是投影而不是数值巧合，且本步不会因为残留速度产生额外位移。
 5. 与现有标志的映射。`flags.holding = (mode==='HOLD')`、`flags.sliding = (mode==='SLIP')` 保持不变，保证 30-ui.js:588、656、782 与 test-dynamics-browser.mjs:195、213 不需要同步改动；`flags.atRest` 保留为纯运动学谓词，但扩展为平面速度、三轴角速度和四角接地点滑移速度同时小于 `SIM_REST_SPEED`（1e-4），仅供遥测，不参与模式判定。
 6. 遥测。`simBuildModel` 的 `sim` 字段（05:618-634）只读已提交的 `sim.contact`，输出投影 `mode`、`dwell`、`changes`、`lastChangeStep`、`slipSpeed`、`usage`（`max |f_i|/(μN_i)`）；05:671 的 `frictionForce` 旁增加 `frictionUse` 数组；每条角点记录增加 `slipVelocity` 与 `contactVelocity`。求解状态与残差不在本册另起名字：`solverOk`、`solverState`、`rockerResidualMm`、`motionRatioState` 直接引用分册 01 冻结的快照字段（R-10），本册只新增切向接触字段。界面展示位置与文案由分册 04 的 B4-4 落地。
 7. 自检。在 `runDynamicSelfTests`（05:711-815）增加“低速驻车”与“滑移不反向”两项，动态自检由 8 项变 10 项，页面合计 14+10=24 项（R-06）。新增两项必须按测试名称断言；浏览器断言由 `>= 8` 改为 `>= 10`（test-dynamics-browser.mjs:225），弹窗断言改为 `>= 24`；README 第 19/172/245 行、DESIGN 第 544/640 行与 30-ui 的数量文案由主册 B5-2 统一。
@@ -74,7 +74,7 @@ C-1 至 C-4 出自同一结构原因：`atRest`（05:324-326）是每步重算�
 5. 容量边界不抖振：构造 demand/capacity 分别为 0.99 与 1.01 的两组坡面，各运行 5 s，`changes` 分别不超过 0 与 2。
 6. 帧率一致（A-05）：同一场景（低附着滑移后切水平）分别以 10、12、30、60、144 Hz 驱动到相同的 `sim.time` 与相同的子步数 0.8 s。驱动循环为：`wall += 1/f`，每帧 `simAdvance(sim, Math.min(1/f, target - sim.time))`，循环条件 `sim.time < target - 1e-12`，末帧按剩余时间截断；不得用固定帧数代替，也不得依赖 `1/f` 恰好整除 2 ms。断言四项：`sim.time` 与子步数完全相同；完整 `state`（x/y/z、vx/vy/vz、qw/qx/qy/qz、wx/wy/wz）逐位相等（用 `===`，不用 1e-12 容差）；`sim.contact` 的 `mode/dwell/changes/lastChangeStep` 完全相同；模式切换的子步序号序列完全相同。断言信息必须打印 `sim.time` 与子步数。帧率造成的时间丢弃由分册 03 的 B3-1 处理，这里只要求状态机与帧率无关。
 7. 遥测无副作用（O-13）：同一 sim 连续调用 `simBuildModel` 100 次，`sim.time`、`sim.contact.changes/dwell/since/lastChangeStep` 逐位不变，第 100 次返回的 `sim.mode` 与第 1 次相同。
-8. 横摆冲量预算（O-14）：在 8°/7° 与 10°/10° 两组倾斜工况各做一次 SLIP→HOLD 转换，断言驻车判定使用的横摆预算与独立复算的 `Iyy·wy + (momentParts.normal[1] + momentParts.friction[1] + momentParts.impulse[1])·dt` 一致（差小于 1e-9）；当前法向力为竖直力时 `momentParts.normal[1]` 恒为 0，该断言守的是聚合路径而非单点数值。
+8. 横摆冲量预算（O-14 裁决）：在 8°/7° 与 10°/10° 两组倾斜工况各做一次 SLIP→HOLD 转换，断言驻车判定使用的横摆预算与独立复算的 `Iyy·wy + (momentParts.normal[1] + momentParts.impulse[1])·dt` 一致（差小于 1e-9）；同时断言该预算不含 `momentParts.friction[1]`：把摩擦项加回会得到可观测差异（大于 1e-3 N·m·s）。当前法向力为竖直力时 `momentParts.normal[1]` 恒为 0，该断言守的是聚合路径与非摩擦口径。
 9. 回归：`npm test` 原 52 项全绿，其中 test-dynamics.mjs:152、236、239、242 四条驻车/滑移断言不改阈值。
 
 **风险与回滚。** 主要风险是状态机在容量边界抖振，以及刹停冲量把“应当继续下滑”的工况误判为可驻车。前者由 2% 迟滞、3 子步驻留与 `changes` 计数覆盖；后者由驻车条件同时要求 `demand` 小于容量排除，容量不足时驻留计数不会累积。第二个风险是刹停缩放同时影响摩擦力矩，使滑移中的侧倾/俯仰响应略有变化；120 组随机包线（test-dynamics.mjs:244-280）与浏览器滑移用例（:208-216）用于兜底。回滚方式为整体 revert B2-1 提交，审计脚本保留作为“已知失败”基线；不设长期特性开关，避免两套摩擦路径同时存在。
@@ -83,13 +83,13 @@ C-1 至 C-4 出自同一结构原因：`atRest`（05:324-326）是每步重算�
 
 **现状。** `simApplyImpulse`（05:178-195）把 `offset` 按车体坐标定义（俯仰脉冲 0.95 m 沿车体 x，侧倾脉冲 0.90 m 沿车体 z），`simEvaluate`（05:375-383）直接计算 `simCross(impulse.offset, impulse.force)`：既没有把车体力臂旋转到路面系，也没有把力臂原点从车身参考点移到质心。C-5 的实测结果是横摆 90° 后俯仰脉冲变成 5890 N·m 的侧倾力矩。5890 是这条缺陷的症状值，不是基线；R-01 裁定后正确值为 6880.45 N·m。
 
-**目标。** 作用点按 `P = refPos + R·offset` 定义，`offset` 是相对车身参考点的车体系绝对点；绕质心的力臂为 `leverBody = offset - cgBody`；车体系力 `forceBody` 先旋转到路面系再施加，力矩为 `R·(leverBody × forceBody)`，等价于 `(R·leverBody) × (R·forceBody)`。力臂原点与 B2-3 的接地点力臂统一为质心。
+**目标。** 作用点按 `P = refPos + R(q)·offset` 定义，`offset` 是相对车身参考点的车体系绝对点；绕质心的力臂为 `leverBody = offset - cgBody`；脉冲力只在路面系定义一次（`forceRoad`），力矩为 `M = (R(q)·leverBody) × forceRoad`。因 `R` 保持叉乘结构，`(R·a)×(R·b) = R·(a×b)`，车体系中与之等价的写法是 `R·(leverBody × (R⁻¹·forceRoad))`；该式只作核对恒等式，不引入第二种力定义。力臂原点与 B2-3 的接地点力臂统一为质心。
 
-1. 数据结构：`sim.impulse = { kind, label, offset, forceBody, until }`。`offset` 保留现有数值 `[0,0,0]`、`[0,0,0.90]`、`[0.95,0,0]`，语义是车体系绝对点；`forceBody` 是车体系力 `[0,-6800,0]`、`[0,-4200,0]`、`[0,-6200,0]`。不再引入 `leverBody` 或 `forceRoad` 作为存储字段，避免出现第二种力臂或第二种力方向的定义。
-2. 计算：在 05:375-383 改为 `const forceRoad = simQuatRotate(q, impulse.forceBody); const leverBody = [impulse.offset[0]-cgBody[0], impulse.offset[1]-cgBody[1], impulse.offset[2]-cgBody[2]]; const localMoment = simQuatRotate(q, simCross(leverBody, impulse.forceBody));`；`force` 的累加与 `externalTangent`（05:316-320）改用 `forceRoad`。`q` 在 05:204、`cgBody` 在 05:206 已就绪，无需新增状态。
-3. 默认数值（xCG=-0.15975 m、cgHeight=0.30 m）：俯仰 `offset=[0.95,0,0]` → lever `[1.10975,-0.30,0]`，`M_body=(0,0,-6880.45)` N·m；侧倾 `offset=[0,0,0.90]` → lever `[0.15975,-0.30,0.90]`，`M_body=(3780,0,-670.95)` N·m；垂向 `offset=[0,0,0]` → lever `[0.15975,-0.30,0]`，`M_body=(0,0,-1086.30)` N·m。三者与姿态无关，`M_road = R·M_body`。俯仰的 6880.45 N·m 是本册主基线（xCG 圆整为 -0.160 m 时为 6882 N·m，仅作记录）。
-4. 需重定的脉冲基线（R-01 强制，旧值一律作废）：(a) 0°/90°/24 姿态扫描的力差与力矩差；(b) 4.1 工况（600 kg、前后 50 N/mm、阻尼比 0.05、ARB 0）的阻尼峰值与运动比区间，旧 30.7 kN / 46.3 kN 与 -4.20 不再作为验收值；(c) 浏览器 26 项中侧倾与俯仰脉冲的峰值断言；(d) README:79-81 与 DESIGN 20.2、20.6 的表述，把“在质心处 / 右侧 0.90 m / 车头方向 0.95 m”改为“作用点为相对车身参考点的车体系偏移，绕质心力矩由 `offset - cgBody` 计算”，并补一句“脉冲力按车体系给出、随姿态旋转到路面系”。以上由主册 B5-1 与分册 05 的 audit-impulse-frame、audit-seed-writeback、audit-rocker-reach 落地。
-5. 与 B2-4 的衔接：B2-2 合入时 `simApplyForceAt` 尚未实现（R-07 归 B2-4），本步先按上式内联计算；B2-4 合入后统一改为 `simApplyForceAt(sim, roadPoint, forceRoad, 'impulse')`，数值必须逐位不变（由 B2-4 的等价性断言守护）。
+1. 数据结构：`sim.impulse = { kind, label, offset, forceRoad, until }`。`offset` 保留现有数值 `[0,0,0]`、`[0,0,0.90]`、`[0.95,0,0]`，语义是车体系绝对点；`forceRoad` 是路面系力 `[0,-6800,0]`、`[0,-4200,0]`、`[0,-6200,0]`。全册只定义 `forceRoad` 一种力方向，不设车体系力字段；`leverBody` 是计算中间量，不存进 `sim.impulse`。
+2. 计算：在 05:375-383 改为 `const leverBody = [impulse.offset[0]-cgBody[0], impulse.offset[1]-cgBody[1], impulse.offset[2]-cgBody[2]]; const leverRoad = simQuatRotate(q, leverBody); const localMoment = simCross(leverRoad, impulse.forceRoad);`；`force` 的累加与 `externalTangent`（05:316-320）直接使用 `impulse.forceRoad`。`q` 在 05:204、`cgBody` 在 05:206 已就绪，无需新增状态。
+3. 默认数值（xCG=-0.15975 m、cgHeight=0.30 m，零姿态 `R=I`）：俯仰 `offset=[0.95,0,0]` → lever `[1.10975,-0.30,0]`，`M=(0,0,-6880.45)` N·m；侧倾 `offset=[0,0,0.90]` → lever `[0.15975,-0.30,0.90]`，`M=(3780,0,-670.95)` N·m；垂向 `offset=[0,0,0]` → lever `[0.15975,-0.30,0]`，`M=(0,0,-1086.30)` N·m。三值在零姿态成立；纯横摆下因 `R^T·forceRoad = forceRoad`，车体系力矩仍为这三值；含俯仰或侧倾时按 `(R·leverBody) × forceRoad` 逐姿态计算，模长不再恒等于 6880.45。俯仰的 6880.45 N·m 是本册主基线（xCG 圆整为 -0.160 m 时为 6882 N·m，仅作记录）。
+4. 需重定的脉冲基线（R-01 强制，旧值一律作废）：(a) 0°/90°/24 姿态扫描的力差与力矩差；(b) 4.1 工况（600 kg、前后 50 N/mm、阻尼比 0.05、ARB 0）的阻尼峰值与运动比区间，旧 30.7 kN / 46.3 kN 与 -4.20 不再作为验收值；(c) 浏览器 26 项中侧倾与俯仰脉冲的峰值断言；(d) README:79-81 与 DESIGN 20.2、20.6 的表述，把“在质心处 / 右侧 0.90 m / 车头方向 0.95 m”改为“作用点为相对车身参考点的车体系偏移，绕质心力矩由 `offset - cgBody` 计算”，并补一句“脉冲力为路面系竖直力，绕质心力矩由 `(R·(offset−cgBody)) × forceRoad` 计算”。以上由主册 B5-1 与分册 05 的 audit-impulse-frame、audit-seed-writeback、audit-rocker-reach 落地。
+5. 与 B2-4 的衔接：B2-2 合入时 `simApplyForceAt` 尚未实现（R-07 归 B2-4），本步先按上式内联计算；B2-4 合入后统一改为 `simApplyForceAt(sim, P, impulse.forceRoad, 'impulse')`（`P = refPos + R·offset`），数值必须逐位不变（由 B2-4 的等价性断言守护）。
 6. 遥测：`simInfo.impulse` 仍只暴露标签（05:632），`sim.impulse` 不进入快照，避免 UI 依赖内部结构。
 
 **依赖。** B0、B1-1。`cgBody` 与 `q` 均已存在；B1-1 完成后力臂仍按 `offset - cgBody` 计算，不随积分变量改变，因此本任务可与 B1-1 并行开发。
@@ -99,11 +99,11 @@ C-1 至 C-4 出自同一结构原因：`atRest`（05:324-326）是每步重算�
 1. 横摆 0°：俯仰脉冲的路面系力矩为 `(0,0,-6880.45)` N·m，分量容差 1e-6。
 2. 横摆 90°：有脉冲与无脉冲两次评估的力矩差旋转到车体系后为 `(0,0,-6880.45)`，`|ΔM_x| < 1e-9`、`|ΔM_z + 6880.45| < 1e-9`；同一工况的路面系力矩差为 `(-6880.45,0,0)`。当前症状是车体系 `(5890,0,0)`，断言方向相反即失败。
 3. 横摆 0 至 345°、步长 15° 的 24 个姿态下，车体系力矩差的 z 分量与 -6880.45 的偏差均小于 1e-9，x、y 分量小于 1e-9。
-4. 复合姿态（侧倾 10°、俯仰 10°）：`ΔM_body` 仍为 `(0,0,-6880.45)`（差小于 1e-9），`ΔM_road` 等于 `R·(0,0,-6880.45)`，模为 6880.45（差小于 1e-9）。
+4. 复合姿态（侧倾 10°、俯仰 10°）：`ΔM` 与独立复算的 `(R·leverBody) × forceRoad` 逐分量一致（差小于 1e-9）。不得断言固定值 6880.45：路面系竖直力在复合姿态下不保该模长（纯横摆才保）。
 5. 垂向与侧倾脉冲：车体系力矩差分别为 `(0,0,-1086.30)` 与 `(3780,0,-670.95)`，容差 1e-6。不得再断言“垂向脉冲力矩为零”。
-6. 有/无脉冲两次评估的差只含脉冲项：`|ΔM - R·(leverBody × forceBody)| < 1e-9`，且力差等于 `R·forceBody`，说明悬挂项未被扰动。
+6. 有/无脉冲两次评估的差只含脉冲项：`|ΔM - (R·leverBody) × forceRoad| < 1e-9`，且力差等于 `forceRoad`（姿态无关），说明悬挂项未被扰动。
 
-**风险与回滚。** 有两项必须被接受的行为变化。第一，力臂原点由车身参考点改为质心，俯仰脉冲力矩由 5890 变为 6880.45 N·m（增 16.8%），侧倾与垂向脉冲同时获得俯仰分量（-670.95 与 -1086.30 N·m），全部脉冲类基线按第 4 步重定。第二，力按车体系给出并随姿态旋转，纯横摆工况与旧行为完全相同，只有复合姿态出现差异。若团队决定保持路面系竖直力，则力矩必须写成 `(R·leverBody) × forceRoad`，R-01 的公式与本文数值在复合姿态下不再成立，需回到 06 复审，不得在本册局部改。回滚为 revert 单文件改动，不影响其他工作项。
+**风险与回滚。** 有两项必须被接受的行为变化。第一，力臂原点由车身参考点改为质心，俯仰脉冲力矩由 5890 变为 6880.45 N·m（增 16.8%），侧倾与垂向脉冲同时获得俯仰分量（-670.95 与 -1086.30 N·m），全部脉冲类基线按第 4 步重定。第二，脉冲力为路面系竖直力，不随姿态旋转：纯横摆工况与旧行为完全一致，复合姿态下力矩按 `(R·leverBody) × forceRoad` 变化，模长可能偏离 6880.45。若将来需要“力随车身转动”的车体系语义，必须另立契约并重测全部复合姿态基线，不得在本册局部改。回滚为 revert 单文件改动，不影响其他工作项。
 
 ### 4.3 B2-3 接地点单一来源（1.0 人日）
 
@@ -144,24 +144,27 @@ C-1 至 C-4 出自同一结构原因：`atRest`（05:324-326）是每步重算�
 
 **目标。** 冻结并实现 `simApplyForceAt(sim, roadPoint, forceRoad, bucket)`，法向、摩擦、脉冲三条路径全部经它累加力与力矩；把力矩拆成可核对的三个分量；新增独立复算与 grep 守卫，使接地点、力臂、力矩三者任何一处不一致时测试立即失败。
 
-1. 新增 `simApplyForceAt(sim, roadPoint, forceRoad, bucket)`：`const arm = [roadPoint[0]-cg[0], roadPoint[1]-cg[1], roadPoint[2]-cg[2]]; const m = simCross(arm, forceRoad);` 把 `forceRoad` 累加到 `force`，把 `m` 同时累加到 `moment` 与 `momentParts[bucket]`，`bucket` 取 `'normal'`、`'friction'`、`'impulse'`。签名与分册 01 §6 冻结的四参数形式一致。
-2. 替换三条路径的四处手写叉乘：法向 05:306-311、摩擦的静分支 05:337-341、摩擦的动分支 05:364-368、脉冲 05:379-382，全部改为调用 `simApplyForceAt`（摩擦两个分支共用 `'friction'` 桶）。脉冲路径传 `roadPoint = refPos + R·offset`、`forceRoad = R·forceBody`（B2-2 的公式），合入后数值必须逐位不变。
-3. `momentParts = { normal, friction, impulse }` 随 `simEvaluate` 返回，三项之和与 `moment` 的差小于 1e-9；`simBuildModel` 透传，供遥测与测试共用。
-4. 独立复算测试：对每个角点计算 `cross(contact - cg, [0, N_i, 0])` 与 `cross(contact - cg, f_i)`，分别与 `momentParts.normal`、`momentParts.friction` 比对，容差 1e-6 N·m。
-5. grep 守卫：`awk '/^function simEvaluate/,/^}/' src/js/05-body-dynamics.js | grep -c 'simCross('` 必须为 0；`simCross` 在 05 中只允许出现在 `simApplyForceAt` 函数体与四元数辅助函数处。
+1. 累加器（裁决 r1，实现细节，不进入 `contracts.v1` 字段表）：`simEvaluate` 入口创建 `sim._evalAccum = { force: [0,0,0], momentParts: { normal: [0,0,0], friction: [0,0,0], impulse: [0,0,0] } }`，在 `try/finally` 的收尾处读取 `force` 与 `momentParts` 并 `delete sim._evalAccum`。该字段是瞬时中间量，不进入 `simBuildModel` 快照，其他函数不得依赖；`simEvaluate` 每次调用（含 `simBuildModel` 的遥测调用）都必须重建并清理。
+2. 新增 `simApplyForceAt(sim, roadPoint, forceRoad, bucket)`：只读写 `sim._evalAccum`，`const arm = [roadPoint[0]-cg[0], roadPoint[1]-cg[1], roadPoint[2]-cg[2]]; const m = simCross(arm, forceRoad);`，把 `forceRoad` 累加到 `accum.force`，把 `m` 累加到 `accum.momentParts[bucket]`，`bucket` 取 `'normal'`、`'friction'`、`'impulse'`。`sim._evalAccum` 缺失时抛错，错误消息必须含 `_evalAccum`，不得静默新建。四参签名与分册 01 §6 冻结的一致。
+3. `moment` 由三个 `momentParts` 相加得到，不再单独累加；三项之和与 `moment` 的差小于 1e-9。
+4. 替换三条路径的四处手写叉乘：法向 05:306-311、摩擦的静分支 05:337-341、摩擦的动分支 05:364-368、脉冲 05:379-382，全部改为调用 `simApplyForceAt`（摩擦两个分支共用 `'friction'` 桶）。脉冲路径传 `roadPoint = refPos + R·offset` 与 `impulse.forceRoad`（B2-2 的公式），合入后数值必须逐位不变。
+5. `momentParts = { normal, friction, impulse }` 随 `simEvaluate` 返回，`simBuildModel` 透传，供遥测与测试共用。
+6. 独立复算测试：对每个角点计算 `cross(contact - cg, [0, N_i, 0])` 与 `cross(contact - cg, f_i)`，分别与 `momentParts.normal`、`momentParts.friction` 比对，容差 1e-6 N·m。
+7. grep 守卫：`awk '/^function simEvaluate/,/^}/' src/js/05-body-dynamics.js | grep -c 'simCross('` 必须为 0；`simCross` 在 05 中只允许出现在 `simApplyForceAt` 函数体与四元数辅助函数处。
 
 **依赖。** B2-3（统一接地点）。本任务改动物理路径（统一力装配），但只做等价替换；数值等价由验收第 5 条与 `npm test` 守护。
 
 **验收。** 入口命令 `node tools/audit/audit-contact-gap.mjs --group full`（完整组，含从 B2-3 移交的力矩一致性条目，O-12）与 `npm test` 的 `[12]` 段：
 
 1. 三项分解之和等于总力矩，差小于 1e-9。
-2. 法向力矩独立复算差小于 1e-6 N·m，摩擦力矩同理，覆盖水平、8°/7° 倾斜、10° 俯仰与低附着滑移四种工况。
-3. 水平对称工况（驻车，或 vz=0、wy=0 的直线滑移）下 `|momentParts.friction[1]| < 1e-6`（左右对称摩擦不产生横摆力矩）。
-4. `normalMomentX/Z`（05:571-572）与由 `contactPoints`、`loads` 重算的值一致，差小于 1e-6 N·m。
-5. 等价性：以 B2-1 合入后的 HEAD 为对照基线，`simApplyForceAt` 改造前后同一组确定性用例的最终 state 逐位相同（含 B2-2 的脉冲工况）。
-6. grep 守卫输出为 0。
+2. 累加器生命周期：在 `simEvaluate` 之外调用 `simApplyForceAt` 必须抛错且消息含 `_evalAccum`；`simEvaluate` 与 `simBuildModel` 返回后 `sim._evalAccum === undefined`；连续 100 次 `simBuildModel` 不残留该字段，也不改变 `sim.contact`。
+3. 法向力矩独立复算差小于 1e-6 N·m，摩擦力矩同理，覆盖水平、8°/7° 倾斜、10° 俯仰与低附着滑移四种工况。
+4. 水平对称工况（驻车，或 vz=0、wy=0 的直线滑移）下 `|momentParts.friction[1]| < 1e-6`（左右对称摩擦不产生横摆力矩）。
+5. `normalMomentX/Z`（05:571-572）与由 `contactPoints`、`loads` 重算的值一致，差小于 1e-6 N·m。
+6. 等价性：以 B2-1 合入后的 HEAD 为对照基线，`simApplyForceAt` 改造前后同一组确定性用例的最终 state 逐位相同（含 B2-2 的脉冲工况）。
+7. grep 守卫输出为 0。
 
-**风险与回滚。** `simApplyForceAt` 是纯累加替换，风险集中在力臂原点写错（必须是质心）与 bucket 漏记，两者由验收第 1、2、6 条覆盖。字段命名若与分册 01 的 `ForceEvaluation` 冲突，以分册 01 为准并在同一提交更新本册用例。回滚为 revert B2-4，B2-3 与 B2-1 不依赖其字段。
+**风险与回滚。** `simApplyForceAt` 是纯累加替换，风险集中在力臂原点写错（必须是质心）、bucket 漏记与 `_evalAccum` 未清理，三者由验收第 1、2、7 条覆盖。字段命名若与分册 01 的 `ForceEvaluation` 冲突，以分册 01 为准并在同一提交更新本册用例。回滚为 revert B2-4，B2-3 与 B2-1 不依赖其字段。
 
 ## 5. 与分册 01 的接口契约
 
@@ -206,7 +209,7 @@ C-1 至 C-4 出自同一结构原因：`atRest`（05:324-326）是每步重算�
 | --- | --- | --- |
 | `normal` | 四角法向力对质心的力矩之和 | 竖直法向力下 y 分量恒为 0；由 `simApplyForceAt(..., 'normal')` 累加 |
 | `friction` | 四角切向摩擦力对质心的力矩之和 | 与法向力矩使用同一 `contactRoad` |
-| `impulse` | 脉冲力对质心的力矩 | 等于 B2-2 的 `R·(leverBody × forceBody)` |
+| `impulse` | 脉冲力对质心的力矩 | 等于 B2-2 的 `(R(q)·leverBody) × forceRoad` |
 | 合计 | `moment = normal + friction + impulse` | 逐分量差小于 1e-9 |
 
 **5.4 质心原点与求解失败。** B2-1 的接地点速度、B2-2 的力臂、B2-3 的力矩都要求“以质心为原点”。B1-1 完成后状态位置即质心，力臂写成 `contact - state`；未完成时用 `contact - evaluation.cg`，只用于旧基线，不得进入生产路径。求解失败时 `contactRoad` 仍由最佳迭代的 `contactBody` 经完整四元数给出；分册 01 的降级策略只影响弹簧力与运动比，不影响接地点来源（A-03：法向力分支只看 `frame.converged`）。
@@ -225,7 +228,7 @@ C-1 至 C-4 出自同一结构原因：`atRest`（05:324-326）是每步重算�
 | `tools/audit/audit-impulse-frame.mjs` | 4.2 节验收第 1～6 条 | 修复前退出码 1，B2-2 后 0 |
 | `tools/audit/audit-contact-gap.mjs` | `--group contact`：4.3 节第 1～4 条；`--group full`：再加 4.4 节第 1～6 条 | 修复前退出码 1；B2-3 后 contact 组 0，B2-4 后 full 组 0 |
 | grep 守卫（R-07） | `awk '/^function simEvaluate/,/^}/' src/js/05-body-dynamics.js \| grep -c 'simCross('` | 输出非 0 即失败 |
-| `tools/test-dynamics.mjs` 新增 `[10] 接触状态机` | 低速停止、单步过零、重新驻车、容量边界、帧率一致（A-05）、遥测 100 次无副作用（O-13）、横摆预算（O-14） | 任一 `check` 失败即非零退出 |
+| `tools/test-dynamics.mjs` 新增 `[10] 接触状态机` | 低速停止、单步过零、重新驻车、容量边界、帧率一致（A-05）、遥测 100 次无副作用（O-13）、横摆预算（L_ext 只取 normal+impulse，O-14 裁决） | 任一 `check` 失败即非零退出 |
 | `tools/test-dynamics.mjs` 新增 `[11] 脉冲坐标` | 横摆 0/90°、24 姿态扫描与复合姿态的力矩差（6880.45 基线） | 同上 |
 | `tools/test-dynamics.mjs` 新增 `[12] 接地点唯一性` | 0/2/5/10° 四角一致性、力矩分解复算、`simApplyForceAt` 等价性 | 同上 |
 
