@@ -2,7 +2,7 @@
   "schema": 1,
   "appVersion": "0.2.0",
   "commit": "fbb401d",
-  "generatedAt": "2026-11-18T17:04:37.944Z",
+  "generatedAt": "2026-11-18T17:36:20.169Z",
   "environment": {
     "node": "v24.22.1",
     "platform": "linux",
@@ -10,17 +10,6 @@
     "chrome": "auto"
   },
   "knownFailures": [
-    "B4.3/low-speed-hold",
-    "B4.3/contact-state-field",
-    "B4.3/step-no-reversal",
-    "B4.3/slope-perturbation",
-    "B4.3/repark",
-    "B4.4/body-moment",
-    "B4.4/road-magnitude",
-    "B4.4/yaw90-axis",
-    "B4.5/default-sample",
-    "B4.5/attitudes",
-    "B4.5/fallback-full-quaternion",
     "B5.1/10-time",
     "B5.1/5-time",
     "B5.1/5-clamp50-time",
@@ -43,13 +32,7 @@
         "B4.1/motion-ratio-continuity",
         "B4.1/damping-peak"
       ],
-      "failing": [
-        "B4.1/unreachable-ok",
-        "B4.1/ok-residual",
-        "B4.1/motion-ratio-range",
-        "B4.1/motion-ratio-continuity",
-        "B4.1/damping-peak"
-      ]
+      "failing": []
     },
     "B4.2": {
       "checks": [
@@ -66,14 +49,7 @@
         "B4.2/omega-z",
         "B4.2/quat-norm-z"
       ],
-      "failing": [
-        "B4.2/cg-drift-x",
-        "B4.2/ref-path-x",
-        "B4.2/cg-drift-y",
-        "B4.2/ref-path-y",
-        "B4.2/cg-drift-z",
-        "B4.2/ref-path-z"
-      ]
+      "failing": []
     },
     "B4.3": {
       "checks": [
@@ -83,13 +59,7 @@
         "B4.3/slope-perturbation",
         "B4.3/repark"
       ],
-      "failing": [
-        "B4.3/low-speed-hold",
-        "B4.3/contact-state-field",
-        "B4.3/step-no-reversal",
-        "B4.3/slope-perturbation",
-        "B4.3/repark"
-      ]
+      "failing": []
     },
     "B4.4": {
       "checks": [
@@ -97,11 +67,7 @@
         "B4.4/road-magnitude",
         "B4.4/yaw90-axis"
       ],
-      "failing": [
-        "B4.4/body-moment",
-        "B4.4/road-magnitude",
-        "B4.4/yaw90-axis"
-      ]
+      "failing": []
     },
     "B4.5": {
       "checks": [
@@ -110,11 +76,7 @@
         "B4.5/contact-plane",
         "B4.5/fallback-full-quaternion"
       ],
-      "failing": [
-        "B4.5/default-sample",
-        "B4.5/attitudes",
-        "B4.5/fallback-full-quaternion"
-      ]
+      "failing": []
     },
     "B5.1": {
       "checks": [
@@ -165,10 +127,6 @@
         "O1/chunked-vs-one-shot"
       ],
       "failing": [
-        "O1/writeback-peak",
-        "O1/writeback-state",
-        "O1/seed-poison",
-        "O1/peak-bound",
         "O1/chunked-vs-one-shot"
       ]
     },
@@ -177,9 +135,7 @@
         "A2/source-contract",
         "A2/no-silent-fallback"
       ],
-      "failing": [
-        "A2/no-silent-fallback"
-      ]
+      "failing": []
     },
     "UI": {
       "checks": [
@@ -509,20 +465,20 @@
     "B4.3/low-speed-hold": {
       "audit": "friction-low-speed",
       "group": "contact",
-      "status": "fail",
-      "knownFailure": true,
+      "status": "pass",
+      "knownFailure": false,
       "observed": {
         "afterOne": {
-          "vx": 0.0005,
-          "x": 0.000001,
-          "mode": "SLIP",
-          "hasContactState": false
+          "vx": 0,
+          "x": -0.15974999999999995,
+          "mode": "HOLD",
+          "hasContactState": true
         },
         "afterFour": {
-          "vx": 0.0005,
-          "x": 0.000004,
-          "mode": "SLIP",
-          "displacement": 0.000004
+          "vx": 0,
+          "x": -0.15974999999999995,
+          "mode": "HOLD",
+          "displacement": 0
         }
       },
       "threshold": "vx <= 1e-12 after one step; HOLD after four; displacement <= 2e-6 m",
@@ -531,11 +487,11 @@
     "B4.3/contact-state-field": {
       "audit": "friction-low-speed",
       "group": "contact",
-      "status": "fail",
-      "knownFailure": true,
+      "status": "pass",
+      "knownFailure": false,
       "observed": {
-        "hasContactState": false,
-        "mode": "SLIP"
+        "hasContactState": true,
+        "mode": "HOLD"
       },
       "threshold": "sim.contact.mode in HOLD/SLIP",
       "detail": "state machine must be observable"
@@ -543,11 +499,11 @@
     "B4.3/step-no-reversal": {
       "audit": "friction-low-speed",
       "group": "contact",
-      "status": "fail",
-      "knownFailure": true,
+      "status": "pass",
+      "knownFailure": false,
       "observed": {
-        "vx": -0.017458620000001347,
-        "x": -0.0000349172400000027,
+        "vx": 0,
+        "x": 0,
         "mode": "SLIP"
       },
       "threshold": "0 <= vx < 1e-6 and 0 <= x < 1e-4 after one 2 ms step",
@@ -556,12 +512,12 @@
     "B4.3/slope-perturbation": {
       "audit": "friction-low-speed",
       "group": "contact",
-      "status": "fail",
-      "knownFailure": true,
+      "status": "pass",
+      "knownFailure": false,
       "observed": {
-        "vx": -0.010539618848534854,
-        "displacement": 0.00005765578240903479,
-        "mode": "SLIP"
+        "vx": 0,
+        "displacement": 0,
+        "mode": "HOLD"
       },
       "threshold": "HOLD, vx <= 1e-12, displacement < 1e-4 m",
       "detail": "8 degree slope, mu=1.4, vx=0.0005 m/s"
@@ -569,30 +525,30 @@
     "B4.3/repark": {
       "audit": "friction-low-speed",
       "group": "contact",
-      "status": "fail",
-      "knownFailure": true,
+      "status": "pass",
+      "knownFailure": false,
       "observed": {
         "before": {
           "time": 1.0000000000000007,
-          "vx": -0.3620201581621636,
-          "vz": 0.3566000804016967,
+          "vx": -0.36210494419272854,
+          "vz": 0.35668387055416556,
           "mode": "SLIP",
-          "displacement": 0.249565444533955
+          "displacement": 0.372196796804775
         },
-        "retargetMethod": "direct-reference",
+        "retargetMethod": "simRetargetReference",
         "after100ms": {
-          "vx": 0.00046319478967715884,
-          "vz": -0.0006649685388252571,
-          "wy": 0.00006491368020086886,
-          "mode": "SLIP",
-          "speed": 0.0008103903817367682
+          "vx": 0,
+          "vz": 0,
+          "wy": 0,
+          "mode": "HOLD",
+          "speed": 0
         },
         "after11s": {
-          "vx": 0.00046319478967715884,
-          "vz": -0.0006649685388252571,
-          "wy": 0.0000644081963102831,
-          "mode": "SLIP",
-          "displacement": 0.013477328111045777
+          "vx": 0,
+          "vz": 0,
+          "wy": 0,
+          "mode": "HOLD",
+          "displacement": 0
         }
       },
       "threshold": "HOLD within 0.1 s, velocities zero, drift < 1e-9 m",
@@ -601,10 +557,10 @@
     "B4.4/body-moment": {
       "audit": "impulse-frame",
       "group": "contact",
-      "status": "fail",
-      "knownFailure": true,
+      "status": "pass",
+      "knownFailure": false,
       "observed": {
-        "maxBodyError": 12770.45,
+        "maxBodyError": 8.185452315956354e-12,
         "expected": [
           0,
           0,
@@ -613,12 +569,12 @@
         "yaw0Body": [
           0,
           0,
-          -5890
+          -6880.45
         ],
         "yaw90Body": [
-          5889.999999999999,
           0,
-          -1.8189894035458565e-12
+          0,
+          -6880.449999999999
         ]
       },
       "threshold": "maxBodyError <= 1e-9 N m over 24 yaw attitudes",
@@ -627,10 +583,10 @@
     "B4.4/road-magnitude": {
       "audit": "impulse-frame",
       "group": "contact",
-      "status": "fail",
-      "knownFailure": true,
+      "status": "pass",
+      "knownFailure": false,
       "observed": {
-        "maxMagnitudeError": 990.4499999999998,
+        "maxMagnitudeError": 5.4569682106375694e-12,
         "expectedMagnitude": 6880.45
       },
       "threshold": "abs(|M| - 6880.45) <= 1e-9",
@@ -639,13 +595,13 @@
     "B4.4/yaw90-axis": {
       "audit": "impulse-frame",
       "group": "contact",
-      "status": "fail",
-      "knownFailure": true,
+      "status": "pass",
+      "knownFailure": false,
       "observed": {
         "yaw90Body": [
-          5889.999999999999,
           0,
-          -1.8189894035458565e-12
+          0,
+          -6880.449999999999
         ]
       },
       "threshold": "yaw 90 body moment = (0, 0, -6880.45)",
@@ -654,26 +610,26 @@
     "B4.5/default-sample": {
       "audit": "contact-gap",
       "group": "contact",
-      "status": "fail",
-      "knownFailure": true,
+      "status": "pass",
+      "knownFailure": false,
       "observed": {
-        "gapMm": 8.534883084616181,
+        "gapMm": 6.117243517289594e-8,
         "perCorner": [
           {
             "index": 0,
-            "gapMm": 8.534883084616181
+            "gapMm": 6.117243517289594e-8
           },
           {
             "index": 1,
-            "gapMm": 8.53488308461201
+            "gapMm": 6.117243517289594e-8
           },
           {
             "index": 2,
-            "gapMm": 5.439045193701009
+            "gapMm": 4.541506060107281e-12
           },
           {
             "index": 3,
-            "gapMm": 5.439045193703464
+            "gapMm": 4.541506060107281e-12
           }
         ]
       },
@@ -683,33 +639,33 @@
     "B4.5/attitudes": {
       "audit": "contact-gap",
       "group": "contact",
-      "status": "fail",
-      "knownFailure": true,
+      "status": "pass",
+      "knownFailure": false,
       "observed": {
-        "maxAttitudeGapMm": 178.81062465697664,
+        "maxAttitudeGapMm": 9.601282522591414e-7,
         "cases": [
           {
             "label": "pitch-0",
             "pitchDeg": 0,
             "rollDeg": 0,
-            "gapMm": 7.21791807559047,
-            "maxY": 4.5281576257910144e-14,
+            "gapMm": 9.601282522591414e-7,
+            "maxY": 9.601282522591414e-10,
             "perCorner": [
               {
                 "index": 0,
-                "gapMm": 7.21791807559047
+                "gapMm": 4.995461879287106e-7
               },
               {
                 "index": 1,
-                "gapMm": 7.217918075590357
+                "gapMm": 4.995461879287106e-7
               },
               {
                 "index": 2,
-                "gapMm": 5.022004837975054
+                "gapMm": 9.601282522591414e-7
               },
               {
                 "index": 3,
-                "gapMm": 5.022004837975054
+                "gapMm": 9.601282522591414e-7
               }
             ]
           },
@@ -717,24 +673,24 @@
             "label": "pitch-2",
             "pitchDeg": 2,
             "rollDeg": 0,
-            "gapMm": 23.71352475790949,
-            "maxY": 6.086139214359914e-13,
+            "gapMm": 4.6743539594551464e-8,
+            "maxY": 4.6743539594551464e-11,
             "perCorner": [
               {
                 "index": 0,
-                "gapMm": 4.055658985813314
+                "gapMm": 3.86467767510279e-8
               },
               {
                 "index": 1,
-                "gapMm": 4.055658984421862
+                "gapMm": 3.86467767510279e-8
               },
               {
                 "index": 2,
-                "gapMm": 23.71352475790949
+                "gapMm": 4.6743539594551464e-8
               },
               {
                 "index": 3,
-                "gapMm": 23.71352475789945
+                "gapMm": 4.6743539594551464e-8
               }
             ]
           },
@@ -742,24 +698,24 @@
             "label": "pitch-5",
             "pitchDeg": 5,
             "rollDeg": 0,
-            "gapMm": 63.849482546665435,
-            "maxY": 6.402372375484875e-11,
+            "gapMm": 2.5690226335139954e-7,
+            "maxY": 2.5690226335139954e-10,
             "perCorner": [
               {
                 "index": 0,
-                "gapMm": 23.34939894943727
+                "gapMm": 1.1305330283040149e-7
               },
               {
                 "index": 1,
-                "gapMm": 23.349398949434306
+                "gapMm": 1.1305330283040149e-7
               },
               {
                 "index": 2,
-                "gapMm": 63.84948254260224
+                "gapMm": 2.5690226335139954e-7
               },
               {
                 "index": 3,
-                "gapMm": 63.849482546665435
+                "gapMm": 2.5690226335139954e-7
               }
             ]
           },
@@ -767,24 +723,24 @@
             "label": "pitch-10",
             "pitchDeg": 10,
             "rollDeg": 0,
-            "gapMm": 178.81062465697664,
-            "maxY": 4.5242275375131883e-13,
+            "gapMm": 2.2517598896598656e-8,
+            "maxY": 2.2517598896598656e-11,
             "perCorner": [
               {
                 "index": 0,
-                "gapMm": 74.30758415020374
+                "gapMm": 2.1502355451730182e-8
               },
               {
                 "index": 1,
-                "gapMm": 74.30758415025689
+                "gapMm": 2.1502355451730182e-8
               },
               {
                 "index": 2,
-                "gapMm": 178.8106246563711
+                "gapMm": 2.2517598896598656e-8
               },
               {
                 "index": 3,
-                "gapMm": 178.81062465697664
+                "gapMm": 2.2517598896598656e-8
               }
             ]
           },
@@ -792,24 +748,24 @@
             "label": "roll-0",
             "pitchDeg": 0,
             "rollDeg": 0,
-            "gapMm": 7.21791807559047,
-            "maxY": 4.5281576257910144e-14,
+            "gapMm": 9.601282522591414e-7,
+            "maxY": 9.601282522591414e-10,
             "perCorner": [
               {
                 "index": 0,
-                "gapMm": 7.21791807559047
+                "gapMm": 4.995461879287106e-7
               },
               {
                 "index": 1,
-                "gapMm": 7.217918075590357
+                "gapMm": 4.995461879287106e-7
               },
               {
                 "index": 2,
-                "gapMm": 5.022004837975054
+                "gapMm": 9.601282522591414e-7
               },
               {
                 "index": 3,
-                "gapMm": 5.022004837975054
+                "gapMm": 9.601282522591414e-7
               }
             ]
           },
@@ -817,24 +773,24 @@
             "label": "roll-2",
             "pitchDeg": 0,
             "rollDeg": 2,
-            "gapMm": 10.519478265635508,
-            "maxY": 7.963057528097313e-16,
+            "gapMm": 1.460984978829405e-8,
+            "maxY": 1.460984978829405e-11,
             "perCorner": [
               {
                 "index": 0,
-                "gapMm": 5.859645651078206
+                "gapMm": 7.009890931608531e-9
               },
               {
                 "index": 1,
-                "gapMm": 10.519478265635508
+                "gapMm": 1.460984978829405e-8
               },
               {
                 "index": 2,
-                "gapMm": 3.6698575379628418
+                "gapMm": 8.358940276065319e-9
               },
               {
                 "index": 3,
-                "gapMm": 8.904037434272253
+                "gapMm": 8.743563165158896e-9
               }
             ]
           },
@@ -842,24 +798,24 @@
             "label": "roll-5",
             "pitchDeg": 0,
             "rollDeg": 5,
-            "gapMm": 15.488440802052256,
-            "maxY": 1.0521721705477323e-12,
+            "gapMm": 1.1127774396380019e-7,
+            "maxY": 1.1127774396380019e-10,
             "perCorner": [
               {
                 "index": 0,
-                "gapMm": 11.382757079060706
+                "gapMm": 1.1127774396380019e-7
               },
               {
                 "index": 1,
-                "gapMm": 15.488440802052256
+                "gapMm": 1.7789519857203118e-9
               },
               {
                 "index": 2,
-                "gapMm": 10.091236901396016
+                "gapMm": 4.1348868773383174e-11
               },
               {
                 "index": 3,
-                "gapMm": 14.731943386803334
+                "gapMm": 2.825170652975828e-10
               }
             ]
           },
@@ -867,24 +823,24 @@
             "label": "roll-10",
             "pitchDeg": 0,
             "rollDeg": 10,
-            "gapMm": 28.897353247887285,
-            "maxY": 3.639068281111962e-12,
+            "gapMm": 6.004986785601574e-8,
+            "maxY": 6.004986785601574e-11,
             "perCorner": [
               {
                 "index": 0,
-                "gapMm": 28.897353247887285
+                "gapMm": 4.216071936014032e-11
               },
               {
                 "index": 1,
-                "gapMm": 21.770079413110647
+                "gapMm": 6.004986785601574e-8
               },
               {
                 "index": 2,
-                "gapMm": 25.517232543067554
+                "gapMm": 2.0138196665797636e-9
               },
               {
                 "index": 3,
-                "gapMm": 23.003390500703503
+                "gapMm": 1.0375617032210016e-8
               }
             ]
           },
@@ -892,24 +848,24 @@
             "label": "tilt-8-7",
             "pitchDeg": 0,
             "rollDeg": 0,
-            "gapMm": 7.196853465108834,
-            "maxY": 7.321109511812182e-11,
+            "gapMm": 5.129077353810407e-7,
+            "maxY": 5.129077353810407e-10,
             "perCorner": [
               {
                 "index": 0,
-                "gapMm": 7.124605682582297
+                "gapMm": 5.129077353810407e-7
               },
               {
                 "index": 1,
-                "gapMm": 7.196853465108834
+                "gapMm": 1.8348188094742535e-8
               },
               {
                 "index": 2,
-                "gapMm": 4.984864654513704
+                "gapMm": 1.2325842278261556e-8
               },
               {
                 "index": 3,
-                "gapMm": 5.073622778307413
+                "gapMm": 1.6235681419077275e-8
               }
             ]
           },
@@ -917,24 +873,24 @@
             "label": "tilt-10-10",
             "pitchDeg": 0,
             "rollDeg": 0,
-            "gapMm": 7.18603000240627,
-            "maxY": 9.016483257717409e-11,
+            "gapMm": 8.177415189219647e-7,
+            "maxY": 8.177415189219647e-10,
             "perCorner": [
               {
                 "index": 0,
-                "gapMm": 7.0838463135092455
+                "gapMm": 8.177415189219647e-7
               },
               {
                 "index": 1,
-                "gapMm": 7.18603000240627
+                "gapMm": 3.1457956357026917e-7
               },
               {
                 "index": 2,
-                "gapMm": 4.954632300570324
+                "gapMm": 6.851414876521585e-7
               },
               {
                 "index": 3,
-                "gapMm": 5.080618937471881
+                "gapMm": 1.873230100766024e-7
               }
             ]
           }
@@ -949,7 +905,7 @@
       "status": "pass",
       "knownFailure": false,
       "observed": {
-        "maxY": 9.016483257717409e-11
+        "maxY": 9.601282522591414e-10
       },
       "threshold": "abs(contact.y) <= 1e-6 m",
       "detail": "all contacts stay on the road plane"
@@ -957,36 +913,36 @@
     "B4.5/fallback-full-quaternion": {
       "audit": "contact-gap",
       "group": "contact",
-      "status": "fail",
-      "knownFailure": true,
+      "status": "pass",
+      "knownFailure": false,
       "observed": {
         "rollDeg": 10,
         "maxY": 0,
-        "maxVsYawOnlyMm": 0,
+        "maxVsYawOnlyMm": 12.305720060111437,
         "perCorner": [
           {
             "index": 0,
             "y": 0,
-            "vsYawOnlyMm": 0,
-            "vsSolvedMm": 28.897353247887285
+            "vsYawOnlyMm": 12.305720060111437,
+            "vsSolvedMm": 26.469143114045753
           },
           {
             "index": 1,
             "y": 0,
-            "vsYawOnlyMm": 0,
-            "vsSolvedMm": 21.770079413110647
+            "vsYawOnlyMm": 12.305720060111437,
+            "vsSolvedMm": 32.30661094094468
           },
           {
             "index": 2,
             "y": 0,
-            "vsYawOnlyMm": 0,
-            "vsSolvedMm": 25.517232543067554
+            "vsYawOnlyMm": 12.001875120355665,
+            "vsSolvedMm": 20.70816193691152
           },
           {
             "index": 3,
             "y": 0,
-            "vsYawOnlyMm": 0,
-            "vsSolvedMm": 23.003390500703503
+            "vsYawOnlyMm": 12.001875120355665,
+            "vsSolvedMm": 33.05735070783962
           }
         ]
       },

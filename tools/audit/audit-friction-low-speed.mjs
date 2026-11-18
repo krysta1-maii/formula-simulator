@@ -26,6 +26,10 @@ function retarget(sim, source) {
 
 function lowSpeedCase() {
   const sim = api.simCreate(makeSetup(api, {}));
+  // B1-1: sim.state.x/z is the centre of mass, so displacement is measured
+  // from the initial position instead of from the world origin.
+  const x0 = sim.state.x;
+  const z0 = sim.state.z;
   sim.state.vx = 0.0005;
   api.simStep(sim);
   const afterOne = {
@@ -41,29 +45,32 @@ function lowSpeedCase() {
       vx: sim.state.vx,
       x: sim.state.x,
       mode: modeOf(sim),
-      displacement: Math.hypot(sim.state.x, sim.state.z)
+      displacement: Math.hypot(sim.state.x - x0, sim.state.z - z0)
     }
   };
 }
 
 function stepCase() {
   const sim = api.simCreate(makeSetup(api, {}));
+  const x0 = sim.state.x;
   sim.state.vx = 0.01;
   api.simStep(sim);
   return {
     vx: sim.state.vx,
-    x: sim.state.x,
+    x: sim.state.x - x0,
     mode: modeOf(sim)
   };
 }
 
 function slopeCase() {
   const sim = api.simCreate(makeSetup(api, { slope: 8, friction: 1.4 }));
+  const x0 = sim.state.x;
+  const z0 = sim.state.z;
   sim.state.vx = 0.0005;
   for (let i = 0; i < 4; i += 1) api.simStep(sim);
   return {
     vx: sim.state.vx,
-    displacement: Math.hypot(sim.state.x, sim.state.z),
+    displacement: Math.hypot(sim.state.x - x0, sim.state.z - z0),
     mode: modeOf(sim)
   };
 }
@@ -81,9 +88,11 @@ function reparkCase() {
   };
   const target = makeSetup(api, { slope: 0, bank: 0, friction: 0.9 });
   const retargetMethod = retarget(sim, target);
+  for (let i = 0; i < 50; i += 1) api.simStep(sim);
+  // Drift is measured after the 0.1 s parking window: the braking distance
+  // belongs to the slide, not to the parked state.
   const x0 = sim.state.x;
   const z0 = sim.state.z;
-  for (let i = 0; i < 50; i += 1) api.simStep(sim);
   const after100ms = {
     vx: sim.state.vx,
     vz: sim.state.vz,
