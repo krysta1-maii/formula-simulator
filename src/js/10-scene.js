@@ -18,7 +18,8 @@ const S = {
   labelAnchors: [],
   cgWorld: new THREE.Vector3(),
   projWorld: new THREE.Vector3(),
-  plate: null
+  plate: null,
+  teardownDone: false
 };
 
 const MAT = {};
@@ -651,7 +652,11 @@ function setupEnvironment() {
   S.envRT = pmrem.fromEquirectangular(TEX.env);
   S.scene.environment = S.envRT.texture;
   pmrem.dispose();
-  TEX.env.dispose();
+  if (TEX.env) {
+    TEX.env.userData = TEX.env.userData || {};
+    TEX.env.userData.__disposed = true;
+    TEX.env.dispose();
+  }
 }
 
 function setupLights() {
@@ -1559,6 +1564,7 @@ function projectWorld(world, out = { x: 0, y: 0, visible: false }) {
 
 function initScene() {
   if (S.initialized) return;
+  S.teardownDone = false;
   S.host = document.getElementById('viewport');
 
   S.renderer = new THREE.WebGLRenderer({
@@ -1632,3 +1638,99 @@ function initScene() {
   updateCamera(0.016);
   S.initialized = true;
 }
+
+/* ------------------------------ teardown ------------------------------ */
+
+function teardownScene() {
+  if (S.teardownDone) return CAR.assets.lastTeardown;
+  S.teardownDone = true;
+  CAR.built = false;
+  const rendererMemoryBefore = S.renderer && S.renderer.info
+    ? {
+        geometries: S.renderer.info.memory.geometries,
+        textures: S.renderer.info.memory.textures,
+        programs: S.renderer.info.programs ? S.renderer.info.programs.length : 0
+      }
+    : null;
+  let rendererMemoryAfter = null;
+  const groupStats = disposeGroupChildren(S.scene, { materials: true, textures: true });
+  let sharedMaterialsDisposed = 0;
+  let cachedMaterialsDisposed = 0;
+  let sharedGeometriesDisposed = 0;
+  let texturesDisposed = groupStats.textureDisposed;
+
+  for (const key of Object.keys(CAR.shared)) {
+    const geometry = CAR.shared[key];
+    if (geometry && geometry.isBufferGeometry && disposeResourceOnce(geometry)) sharedGeometriesDisposed += 1;
+  }
+  for (const material of Object.values(MAT)) {
+    if (material && disposeResourceOnce(material)) sharedMaterialsDisposed += 1;
+  }
+  for (const texture of Object.values(TEX)) {
+    if (texture && disposeResourceOnce(texture)) texturesDisposed += 1;
+  }
+  for (const material of CAR.decalCache.values()) {
+    if (!material) continue;
+    texturesDisposed += disposeMaterialMaps(material);
+    if (disposeResourceOnce(material)) cachedMaterialsDisposed += 1;
+  }
+
+  if (S.envRT) {
+    S.envRT.dispose();
+    S.envRT = null;
+  }
+  if (S.keyLight && S.keyLight.shadow && S.keyLight.shadow.map) {
+    S.keyLight.shadow.map.dispose();
+    S.keyLight.shadow.map = null;
+  }
+  if (S.renderer) {
+    S.renderer.dispose();
+    if (S.renderer.info) {
+      rendererMemoryAfter = {
+        geometries: S.renderer.info.memory.geometries,
+        textures: S.renderer.info.memory.textures,
+        programs: S.renderer.info.programs ? S.renderer.info.programs.length : 0
+      };
+    }
+    if (S.renderer.domElement && S.renderer.domElement.parentNode) {
+      S.renderer.domElement.parentNode.removeChild(S.renderer.domElement);
+    }
+  }
+
+  CAR.assets.totals.sharedMaterialDisposed += sharedMaterialsDisposed;
+  CAR.assets.totals.cachedMaterialDisposed += cachedMaterialsDisposed;
+  CAR.assets.totals.geometryDisposed += sharedGeometriesDisposed;
+  CAR.assets.totals.textureDisposed += texturesDisposed;
+  CAR.assets.lastTeardown = {
+    instanceMaterialsDisposed: groupStats.materialDisposed,
+    sceneMaterialsDisposed: groupStats.sceneMaterialsDisposed,
+    sharedMaterialsDisposed,
+    cachedMaterialsDisposed,
+    geometriesDisposed: groupStats.geometryDisposed + sharedGeometriesDisposed,
+    texturesDisposed,
+    rendererMemoryBefore,
+    rendererMemoryAfter,
+    at: typeof performance !== 'undefined' ? performance.now() : Date.now()
+  };
+
+  CAR.shared = {};
+  CAR.decalCache.clear();
+  S.scene = null;
+  S.renderer = null;
+  S.camera = null;
+  S.cameraPersp = null;
+  S.cameraOrtho = null;
+  S.roadGroup = null;
+  S.carRoot = null;
+  S.bodyPivot = null;
+  S.loadOverlay = null;
+  S.cgOverlay = null;
+  S.loadArrows = [];
+  S.labelAnchors = [];
+  S.labels = {};
+  S.keyLight = null;
+  S.host = null;
+  S.initialized = false;
+  return CAR.assets.lastTeardown;
+}
+

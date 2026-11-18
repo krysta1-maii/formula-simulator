@@ -30,6 +30,20 @@ const CAR = {
   },
   decalCache: new Map(),
   shared: {},
+  assets: {
+    instanceMaterials: new Set(),
+    totals: {
+      instanceMaterialCreated: 0,
+      instanceMaterialDisposed: 0,
+      sceneMaterialsDisposed: 0,
+      sharedMaterialDisposed: 0,
+      cachedMaterialDisposed: 0,
+      geometryDisposed: 0,
+      textureDisposed: 0
+    },
+    lastBuild: null,
+    lastTeardown: null
+  },
   diag: {
     linkCount: 0,
     jointCount: 0,
@@ -54,8 +68,11 @@ const CAR = {
     differential: false,
     arbFront: false,
     arbRear: false,
-    mechanicalOk: false
+    mechanicalOk: false,
+    geometryRevision: 0,
+    geometryMismatch: false
   },
+  geometryRevision: 0,
   built: false,
   dims: null
 };
@@ -166,24 +183,112 @@ function markShared(mesh) {
   return mesh;
 }
 
-function createDefaultBodyMaterialSet() {
-  // Present so car.js can be loaded before scene materials are touched; not used.
-}
 
 /* ------------------------------ scene-graph helpers ------------------------------ */
 
-function disposeGroupChildren(group) {
-  if (!group) return;
+function instanceMaterial(material) {
+  if (!material) return material;
+  CAR.assets.instanceMaterials.add(material);
+  CAR.assets.totals.instanceMaterialCreated += 1;
+  if (CAR.assets.lastBuild) CAR.assets.lastBuild.instanceMaterialCreated += 1;
+  return material;
+}
+
+function beginCarBuild() {
+  CAR.assets.lastBuild = {
+    instanceMaterialCreated: 0,
+    instanceMaterialDisposed: 0,
+    geometryDisposed: 0,
+    textureDisposed: 0,
+    at: typeof performance !== 'undefined' ? performance.now() : Date.now()
+  };
+}
+
+function finishCarBuild(model) {
+  CAR.geometryRevision = model.geometryRevision;
+  CAR.diag.geometryRevision = model.geometryRevision;
+  CAR.diag.geometryMismatch = false;
+  if (CAR.assets.lastBuild) {
+    CAR.assets.lastBuild.at = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  }
+}
+
+function disposeResourceOnce(resource) {
+  if (!resource) return false;
+  if (!resource.userData) resource.userData = {};
+  if (resource.userData.__disposed) return false;
+  resource.userData.__disposed = true;
+  if (typeof resource.dispose === 'function') resource.dispose();
+  return true;
+}
+
+function disposeMaterialMaps(material) {
+  if (!material) return 0;
+  let disposed = 0;
+  const keys = ['map', 'alphaMap', 'emissiveMap', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'envMap'];
+  for (const key of keys) {
+    const texture = material[key];
+    if (!texture || !texture.isTexture) continue;
+    if (texture.userData && texture.userData.shared) continue;
+    if (disposeResourceOnce(texture)) disposed += 1;
+  }
+  return disposed;
+}
+
+function disposeGroupChildren(group, options = {}) {
+  const materials = options.materials !== false;
+  const textures = options.textures !== false;
+  if (!group) {
+    return { geometryDisposed: 0, materialDisposed: 0, sceneMaterialsDisposed: 0, textureDisposed: 0, skipped: 0 };
+  }
   const geometries = new Set();
+  const materialSet = new Set();
   group.traverse((object) => {
-    if ((object.isMesh || object.isLine || object.isLineSegments) && object.geometry) {
-      geometries.add(object.geometry);
-    }
+    if (object.geometry) geometries.add(object.geometry);
+    const material = object.material;
+    if (Array.isArray(material)) material.forEach((item) => { if (item) materialSet.add(item); });
+    else if (material) materialSet.add(material);
   });
+  let geometryDisposed = 0;
+  let materialDisposed = 0;
+  let sceneMaterialsDisposed = 0;
+  let textureDisposed = 0;
+  let skipped = 0;
   geometries.forEach((geometry) => {
-    if (!geometry.userData || !geometry.userData.shared) geometry.dispose();
+    if (geometry.userData && geometry.userData.shared) { skipped += 1; return; }
+    if (disposeResourceOnce(geometry)) geometryDisposed += 1;
   });
+  if (materials) {
+    const sharedMaterials = new Set(typeof MAT !== 'undefined' ? Object.values(MAT) : []);
+    const cachedMaterials = new Set(CAR.decalCache.values());
+    materialSet.forEach((material) => {
+      if (!material) return;
+      if ((material.userData && material.userData.shared) || sharedMaterials.has(material) || cachedMaterials.has(material)) {
+        skipped += 1;
+        return;
+      }
+      if (textures) textureDisposed += disposeMaterialMaps(material);
+      const registered = CAR.assets.instanceMaterials.has(material);
+      if (!disposeResourceOnce(material)) return;
+      if (registered) {
+        CAR.assets.instanceMaterials.delete(material);
+        materialDisposed += 1;
+      } else {
+        sceneMaterialsDisposed += 1;
+      }
+    });
+  }
   while (group.children.length) group.remove(group.children[0]);
+  CAR.assets.totals.geometryDisposed += geometryDisposed;
+  CAR.assets.totals.instanceMaterialDisposed += materialDisposed;
+  CAR.assets.totals.sceneMaterialsDisposed += sceneMaterialsDisposed;
+  CAR.assets.totals.textureDisposed += textureDisposed;
+  if (CAR.assets.lastBuild) {
+    CAR.assets.lastBuild.geometryDisposed += geometryDisposed;
+    CAR.assets.lastBuild.textureDisposed += textureDisposed;
+    CAR.assets.lastBuild.instanceMaterialDisposed += materialDisposed;
+  }
+  return { geometryDisposed, materialDisposed, sceneMaterialsDisposed, textureDisposed, skipped };
 }
 
 function registerShellGroup(group) {
@@ -626,7 +731,7 @@ function buildBodywork(model) {
     }
 
     // Central skid block.
-    const skid = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.014, 0.20), new THREE.MeshStandardMaterial({ color: 0x6d5a43, roughness: 0.8, metalness: 0.1 }));
+    const skid = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.014, 0.20), instanceMaterial(new THREE.MeshStandardMaterial({ color: 0x6d5a43, roughness: 0.8, metalness: 0.1 })));
     skid.position.set(0.18, 0.044, 0);
     addBodyMesh(skid);
   }
@@ -682,7 +787,7 @@ function buildBodywork(model) {
   {
     const openingShape = roundedRectShape(0.82, 0.40, 0.18);
     const openingGeo = new THREE.ShapeGeometry(openingShape, 24);
-    const opening = new THREE.Mesh(openingGeo, new THREE.MeshStandardMaterial({ color: 0x06080a, roughness: 0.9, metalness: 0.05 }));
+    const opening = new THREE.Mesh(openingGeo, instanceMaterial(new THREE.MeshStandardMaterial({ color: 0x06080a, roughness: 0.9, metalness: 0.05 })));
     opening.rotation.x = -Math.PI / 2;
     opening.position.set(cockpitCenterX, cockpitY, 0);
     addBodyMesh(opening, { cast: false });
@@ -744,7 +849,7 @@ function buildBodywork(model) {
     steering.add(rimWheel);
     const wheelPlate = new THREE.Mesh(new THREE.BoxGeometry(0.024, 0.10, 0.15), MAT.darkMetal);
     steering.add(wheelPlate);
-    const screen = new THREE.Mesh(new THREE.BoxGeometry(0.004, 0.032, 0.072), new THREE.MeshBasicMaterial({ color: 0x6cffd4, toneMapped: false }));
+    const screen = new THREE.Mesh(new THREE.BoxGeometry(0.004, 0.032, 0.072), instanceMaterial(new THREE.MeshBasicMaterial({ color: 0x6cffd4, toneMapped: false })));
     screen.position.set(-0.018, 0.03, 0);
     steering.add(screen);
     const column = new THREE.Mesh(new THREE.CylinderGeometry(0.017, 0.017, 0.42, 10), MAT.carbonMatte);
@@ -840,7 +945,7 @@ function buildBodywork(model) {
     airbox.rotation.y = Math.PI / 2;
     airbox.position.set(xF - 2.28, 0.795, 0);
     addBodyMesh(airbox);
-    const intake = new THREE.Mesh(new THREE.CircleGeometry(0.135, 32), new THREE.MeshStandardMaterial({ color: 0x030405, roughness: 1, metalness: 0 }));
+    const intake = new THREE.Mesh(new THREE.CircleGeometry(0.135, 32), instanceMaterial(new THREE.MeshStandardMaterial({ color: 0x030405, roughness: 1, metalness: 0 })));
     intake.scale.set(1.0, 1.35, 1);
     intake.rotation.y = Math.PI / 2;
     intake.position.set(xF - 2.105, 0.805, 0);
@@ -906,7 +1011,7 @@ function buildBodywork(model) {
       addBodyMesh(makeLoftMesh(sections, MAT.paintDeep, { segments: 30, exponent: 0.7 }));
 
       // Sidepod intake.
-      const intake = new THREE.Mesh(new THREE.CircleGeometry(0.155, 32), new THREE.MeshStandardMaterial({ color: 0x030506, roughness: 0.95, metalness: 0.05 }));
+      const intake = new THREE.Mesh(new THREE.CircleGeometry(0.155, 32), instanceMaterial(new THREE.MeshStandardMaterial({ color: 0x030506, roughness: 0.95, metalness: 0.05 })));
       intake.scale.set(1.0, 1.28, 1);
       intake.rotation.y = Math.PI / 2;
       intake.position.set(xF - 1.44, 0.31, sign * 0.415);
@@ -1105,7 +1210,7 @@ function buildBodywork(model) {
     exhaust.rotation.z = Math.PI / 2;
     exhaust.position.set(xR - 0.46, 0.49, 0);
     addBodyMesh(exhaust);
-    const exhaustInner = new THREE.Mesh(new THREE.CircleGeometry(0.034, 16), new THREE.MeshBasicMaterial({ color: 0x050505, side: THREE.DoubleSide }));
+    const exhaustInner = new THREE.Mesh(new THREE.CircleGeometry(0.034, 16), instanceMaterial(new THREE.MeshBasicMaterial({ color: 0x050505, side: THREE.DoubleSide })));
     exhaustInner.rotation.y = Math.PI / 2;
     exhaustInner.position.set(xR - 0.525, 0.49, 0);
     addBodyMesh(exhaustInner, { cast: false });

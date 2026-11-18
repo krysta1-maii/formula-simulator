@@ -942,6 +942,10 @@ function solveRockerAngle(corner, bodyMatrix, wheelMatrix, fallback) {
 }
 
 function updateSuspension(model) {
+  if (!model || !Number.isFinite(model.geometryRevision) || model.geometryRevision !== CAR.geometryRevision) {
+    CAR.diag.geometryMismatch = true;
+    return;
+  }
   const bodyMatrix = S.bodyPivot.matrix;
   applyRack(model);
   let maxLinkStretch = 0;
@@ -1094,6 +1098,11 @@ function updateSuspension(model) {
 
 function updateCar(model) {
   if (!CAR.built) return;
+  if (!model || !Number.isFinite(model.geometryRevision) || model.geometryRevision !== CAR.geometryRevision) {
+    CAR.diag.geometryMismatch = true;
+    return;
+  }
+  CAR.diag.geometryMismatch = false;
   const bodyPos = model.bodyPos || { x: 0, y: model.heave || 0, z: 0 };
   const yaw = model.bodyYaw || 0;
   _qYaw.setFromAxisAngle(_axisY, yaw);
@@ -1158,6 +1167,10 @@ function updateCar(model) {
 }
 
 function buildCar(model) {
+  if (!model || !Number.isFinite(model.geometryRevision)) {
+    throw new Error('buildCar: model.geometryRevision is required');
+  }
+  beginCarBuild();
   initCarSceneGroups();
   disposeGroupChildren(S.bodyPivot);
   if (CAR.dynamicGroup) disposeGroupChildren(CAR.dynamicGroup);
@@ -1210,6 +1223,7 @@ function buildCar(model) {
   buildInternalSuspension(CAR.corners);
   buildSuspensionLinks(CAR.corners);
 
+  finishCarBuild(model);
   CAR.built = true;
   applyXray();
   updateCar(model);

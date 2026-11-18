@@ -21,8 +21,9 @@
  */
 
 const SIM_DT = 1 / 500;
-const SIM_MAX_SUBSTEPS = 40;
-const SIM_MAX_FRAME_DT = 0.1;
+const SIM_MAX_SUBSTEPS = 128;
+const SIM_MAX_FRAME_DT = 0.5;
+const SIM_MAX_BACKLOG = 0.5;
 const SIM_REST_SPEED = 1e-4;
 const SIM_ANGULAR_LIMIT = 40;
 const SIM_LINEAR_LIMIT = 80;
@@ -210,6 +211,13 @@ function simCreate(source = state, options = {}) {
     resetCount: 0
   };
   sim.state = simEquilibriumState(sim.reference);
+  setActiveGeometry(source);
+  sim.geometryRevision = sim.reference.geometryRevision;
+  sim.steerApplied = source.steer;
+  sim.droppedTime = 0;
+  sim.lastFrameDt = 0;
+  sim.lastAdvance = 0;
+  sim.timeScale = 1;
   if (settle > 0) simRunFor(sim, settle);
   return sim;
 }
@@ -218,6 +226,13 @@ function simReset(sim, source = state, options = {}) {
   const settle = options.settle || 0;
   sim.reference = computeStatic(source);
   sim.state = simEquilibriumState(sim.reference);
+  setActiveGeometry(source);
+  sim.geometryRevision = sim.reference.geometryRevision;
+  sim.steerApplied = source.steer;
+  sim.droppedTime = 0;
+  sim.lastFrameDt = 0;
+  sim.lastAdvance = 0;
+  sim.timeScale = 1;
   sim.time = 0;
   sim.impulse = null;
   sim.contact = simContactState();
@@ -253,6 +268,9 @@ function simRetargetReference(sim, source = state) {
     throw new Error('simRetargetReference: geometryRevision mismatch (' + previousRevision + ' -> ' + nextRevision + ')');
   }
   sim.reference = next;
+  setActiveGeometry(source);
+  sim.geometryRevision = next.geometryRevision;
+  sim.steerApplied = source.steer;
   sim.cornerSeed = [null, null, null, null];
   sim.cornerRatio = [null, null, null, null];
   return sim;
@@ -847,15 +865,25 @@ function simRunFor(sim, seconds, dt = SIM_DT) {
 
 function simAdvance(sim, frameDt) {
   if (!sim || !sim.running || !sim.state) return 0;
-  sim.accumulator += clamp(frameDt, 0, SIM_MAX_FRAME_DT);
+  const wallDt = Number.isFinite(frameDt) && frameDt > 0 ? frameDt : 0;
+  const accepted = Math.min(wallDt, SIM_MAX_FRAME_DT);
+  sim.accumulator += accepted;
+  let dropped = wallDt - accepted;
+  if (sim.accumulator > SIM_MAX_BACKLOG) {
+    dropped += sim.accumulator - SIM_MAX_BACKLOG;
+    sim.accumulator = SIM_MAX_BACKLOG;
+  }
   let steps = 0;
   while (sim.accumulator >= SIM_DT && steps < SIM_MAX_SUBSTEPS) {
     simStep(sim, SIM_DT);
     sim.accumulator -= SIM_DT;
     steps += 1;
   }
-  if (steps >= SIM_MAX_SUBSTEPS) sim.accumulator = 0;
   sim.lastSubsteps = steps;
+  sim.lastFrameDt = wallDt;
+  sim.lastAdvance = steps * SIM_DT;
+  sim.droppedTime = (sim.droppedTime || 0) + dropped;
+  sim.timeScale = wallDt > 0 ? sim.lastAdvance / wallDt : 1;
   return steps;
 }
 
@@ -863,7 +891,12 @@ function simAdvance(sim, frameDt) {
 
 function simBuildModel(sim, source = state) {
   const reference = sim.reference || computeStatic(source);
+  // Telemetry/model reads must not perturb the solver seed bus (O1).
+  const seedBefore = Array.isArray(sim.cornerSeed) ? sim.cornerSeed.slice() : null;
+  const ratioBefore = Array.isArray(sim.cornerRatio) ? sim.cornerRatio.slice() : null;
   const evaluation = simEvaluate(sim);
+  if (seedBefore) sim.cornerSeed = seedBefore;
+  if (ratioBefore) sim.cornerRatio = ratioBefore;
   const state = sim.state;
   const euler = evaluation.euler;
   const q = [state.qw, state.qx, state.qy, state.qz];
@@ -955,6 +988,13 @@ function simBuildModel(sim, source = state) {
     recovered: sim.flags.recovered,
     substeps: sim.lastSubsteps,
     accumulator: sim.accumulator,
+    backlog: sim.accumulator,
+    droppedTime: sim.droppedTime || 0,
+    timeScale: sim.timeScale == null ? 1 : sim.timeScale,
+    lastFrameDt: sim.lastFrameDt || 0,
+    lastAdvance: sim.lastAdvance || 0,
+    maxFrameDt: SIM_MAX_FRAME_DT,
+    maxSubsteps: SIM_MAX_SUBSTEPS,
     stepHz: Math.round(1 / SIM_DT),
     demand: evaluation.demand,
     capacity: evaluation.capacity,
@@ -974,6 +1014,8 @@ function simBuildModel(sim, source = state) {
 
   return Object.assign({}, reference, {
     dynamic: true,
+    geometryRevision: reference.geometryRevision,
+    physicsRevision: reference.geometryRevision,
     sim: simInfo,
     bodyPos: { x: refPos.x, y: refPos.y, z: refPos.z },
     bodyQuat: q,
@@ -1055,15 +1097,19 @@ function simLoadError(sim) {
   return Math.max(...model.loads.map((value, index) => Math.abs(value - target[index])));
 }
 
-function runDynamicSelfTests(source = state) {
+function* simDynamicSelfTestSteps(source = state) {
   const tests = [];
-  const record = (name, ok, detail) => tests.push({ name, ok, detail });
+  const record = (name, ok, detail) => {
+    const test = { name, ok, detail };
+    tests.push(test);
+    return test;
+  };
 
   const levelSim = simCreate(Object.assign({}, source, { slope: 0, bank: 0 }), { settle: 2.5 });
   const levelModel = simBuildModel(levelSim);
   const levelError = simLoadError(levelSim);
   const levelPose = Math.abs(levelModel.poseDeg.pitch) + Math.abs(levelModel.poseDeg.roll);
-  record(
+  yield record(
     '动态水平稳态',
     levelError < 1 && levelPose < 0.02 && levelModel.sim.finite,
     'ΔN ' + levelError.toFixed(3) + ' · 姿态 ' + levelPose.toFixed(3) + '°'
@@ -1074,7 +1120,7 @@ function runDynamicSelfTests(source = state) {
   const tiltedTarget = computeStatic(tiltedSource);
   const tiltedModel = simBuildModel(tiltedSim);
   const tiltedError = Math.max(...tiltedModel.loads.map((value, index) => Math.abs(value - tiltedTarget.loads[index])));
-  record(
+  yield record(
     '倾斜路面动态收敛',
     tiltedError < 3 && tiltedModel.sim.finite,
     'ΔN ' + tiltedError.toFixed(3)
@@ -1089,7 +1135,7 @@ function runDynamicSelfTests(source = state) {
   }
   simRunFor(heaveSim, 2.0);
   const heaveTail = Math.abs(simBuildModel(heaveSim).heave - heaveSim.reference.heave);
-  record(
+  yield record(
     '垂向脉冲衰减',
     heavePeak > 0.005 && heaveTail < heavePeak * 0.2 && heaveSim.flags.finite,
     (heavePeak * 1000).toFixed(2) + ' → ' + (heaveTail * 1000).toFixed(2) + ' mm'
@@ -1109,7 +1155,7 @@ function runDynamicSelfTests(source = state) {
     softRoll = Math.max(softRoll, Math.abs(simEulerFromQuat(softQ).roll));
     hardRoll = Math.max(hardRoll, Math.abs(simEulerFromQuat(hardQ).roll));
   }
-  record(
+  yield record(
     '防倾杆抑制侧倾',
     hardRoll < softRoll && softRoll > 1e-5,
     (softRoll * RAD).toFixed(3) + '° → ' + (hardRoll * RAD).toFixed(3) + '°'
@@ -1126,7 +1172,7 @@ function runDynamicSelfTests(source = state) {
   const detDelta = Math.abs(detAReference.y - detBReference.y) +
     Math.abs(detA.state.qx - detB.state.qx) +
     Math.abs(detA.state.qz - detB.state.qz);
-  record('固定步长可重复', detDelta < 1e-12, 'Δ ' + detDelta.toExponential(1));
+  yield record('固定步长可重复', detDelta < 1e-12, 'Δ ' + detDelta.toExponential(1));
 
   const frameSim = simCreate(source, { settle: 0.4 });
   simApplyImpulse(frameSim, 'roll');
@@ -1140,7 +1186,7 @@ function runDynamicSelfTests(source = state) {
   const frameDelta = Math.abs(frameReference.y - fixedReference.y) +
     Math.abs(frameSim.state.qx - fixedSim.state.qx) +
     Math.abs(frameSim.state.wx - fixedSim.state.wx);
-  record(
+  yield record(
     '渲染帧率不影响物理',
     frameDelta < 1e-9 && frameSim.lastSubsteps > 0,
     frameSteps + ' 步 · Δ ' + frameDelta.toExponential(1)
@@ -1149,14 +1195,14 @@ function runDynamicSelfTests(source = state) {
   const slideSource = Object.assign({}, source, { slope: 10, bank: 10, friction: 0.2 });
   const slideSim = simCreate(slideSource, { settle: 2.0 });
   const slideDistance = Math.hypot(slideSim.state.x, slideSim.state.z);
-  record(
+  yield record(
     '低附着六自由度滑移',
     slideDistance > 0.05 && slideSim.flags.finite,
     slideDistance.toFixed(2) + ' m · ' + (slideSim.flags.sliding ? '滑移' : '静止')
   );
 
   const contactModel = simBuildModel(levelSim);
-  record(
+  yield record(
     '动态法向载荷非负',
     contactModel.loads.every((value) => value >= 0) && contactModel.loads.every(Number.isFinite),
     'min ' + contactModel.minLoad.toFixed(1) + ' N'
@@ -1165,7 +1211,7 @@ function runDynamicSelfTests(source = state) {
   const holdSim = simCreate(Object.assign({}, source, { slope: 0, bank: 0 }), { settle: 0.5 });
   holdSim.state.vx = 0.0005;
   for (let i = 0; i < 4; i += 1) simStep(holdSim);
-  record(
+  yield record(
     '低速驻车',
     Math.abs(holdSim.state.vx) < 1e-12 && holdSim.contact.mode === 'HOLD',
     'vx ' + holdSim.state.vx.toExponential(1) + ' · ' + holdSim.contact.mode
@@ -1176,11 +1222,47 @@ function runDynamicSelfTests(source = state) {
   stopSim.state.vx = 0.01;
   simStep(stopSim);
   const stopDx = stopSim.state.x - stopX;
-  record(
+  yield record(
     '滑移不反向',
     stopSim.state.vx >= 0 && stopSim.state.vx < 1e-6 && stopDx >= 0 && stopDx < 1e-4,
     'vx ' + stopSim.state.vx.toExponential(2) + ' · dx ' + (stopDx * 1000).toFixed(3) + ' mm'
   );
 
+  return tests;
+}
+
+function runDynamicSelfTests(source = state) {
+  const iterator = simDynamicSelfTestSteps(source);
+  let step = iterator.next();
+  while (!step.done) step = iterator.next();
+  return step.value;
+}
+
+function runDynamicSelfTestsChunked(source = state, options = {}) {
+  const onTest = typeof options.onTest === 'function' ? options.onTest : null;
+  const onDone = typeof options.onDone === 'function' ? options.onDone : null;
+  const sliceMs = Number.isFinite(options.sliceMs) ? options.sliceMs : 50;
+  const clock = typeof performance !== 'undefined' && typeof performance.now === 'function'
+    ? () => performance.now()
+    : () => Date.now();
+  const tests = [];
+  const iterator = simDynamicSelfTestSteps(source);
+  const pump = () => {
+    const start = clock();
+    while (true) {
+      const step = iterator.next();
+      if (step.done) {
+        if (onDone) onDone(step.value || tests);
+        return;
+      }
+      tests.push(step.value);
+      if (onTest) onTest(step.value, tests.length);
+      if (clock() - start >= sliceMs) {
+        setTimeout(pump, 0);
+        return;
+      }
+    }
+  };
+  pump();
   return tests;
 }

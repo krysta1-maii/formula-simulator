@@ -10,15 +10,6 @@
     "chrome": "auto"
   },
   "knownFailures": [
-    "B5.1/10-time",
-    "B5.1/5-time",
-    "B5.1/5-clamp50-time",
-    "B5.1/dropped-field",
-    "B5.2/geometry-generation",
-    "B5.3/telemetry-dom",
-    "B5.4/material-release",
-    "O1/chunked-vs-one-shot",
-    "U1/landscape",
     "U2/space-key",
     "U3/panel-focus",
     "U4/pause-text"
@@ -87,36 +78,25 @@
         "B5.1/5-clamp50-time",
         "B5.1/dropped-field"
       ],
-      "failing": [
-        "B5.1/10-time",
-        "B5.1/5-time",
-        "B5.1/5-clamp50-time",
-        "B5.1/dropped-field"
-      ]
+      "failing": []
     },
     "B5.2": {
       "checks": [
         "B5.2/geometry-generation"
       ],
-      "failing": [
-        "B5.2/geometry-generation"
-      ]
+      "failing": []
     },
     "B5.3": {
       "checks": [
         "B5.3/telemetry-dom"
       ],
-      "failing": [
-        "B5.3/telemetry-dom"
-      ]
+      "failing": []
     },
     "B5.4": {
       "checks": [
         "B5.4/material-release"
       ],
-      "failing": [
-        "B5.4/material-release"
-      ]
+      "failing": []
     },
     "O1": {
       "checks": [
@@ -126,9 +106,7 @@
         "O1/peak-bound",
         "O1/chunked-vs-one-shot"
       ],
-      "failing": [
-        "O1/chunked-vs-one-shot"
-      ]
+      "failing": []
     },
     "A2": {
       "checks": [
@@ -145,7 +123,6 @@
         "U4/pause-text"
       ],
       "failing": [
-        "U1/landscape",
         "U2/space-key",
         "U3/panel-focus",
         "U4/pause-text"
@@ -960,11 +937,11 @@
         "frames": 60,
         "wallSeconds": 1,
         "advanced": 1.0000000000000007,
-        "dropped": null,
+        "dropped": 0,
         "total": 1.0000000000000007,
         "maxSubsteps": 9,
         "lastSubsteps": 9,
-        "hasDroppedField": false,
+        "hasDroppedField": true,
         "time": 1.400000000000001
       },
       "threshold": "advanced >= 0.98 s at 1 s wall",
@@ -981,11 +958,11 @@
         "frames": 30,
         "wallSeconds": 1,
         "advanced": 0.9980000000000007,
-        "dropped": null,
+        "dropped": 0,
         "total": 0.9980000000000007,
         "maxSubsteps": 17,
         "lastSubsteps": 16,
-        "hasDroppedField": false,
+        "hasDroppedField": true,
         "time": 1.398000000000001
       },
       "threshold": "advanced >= 0.98 s at 1 s wall",
@@ -994,20 +971,20 @@
     "B5.1/10-time": {
       "audit": "frame-time",
       "group": "runtime",
-      "status": "fail",
-      "knownFailure": true,
+      "status": "pass",
+      "knownFailure": false,
       "observed": {
         "hz": 10,
         "clampMs": null,
         "frames": 10,
         "wallSeconds": 1,
-        "advanced": 0.8000000000000005,
-        "dropped": null,
-        "total": 0.8000000000000005,
-        "maxSubsteps": 40,
-        "lastSubsteps": 40,
-        "hasDroppedField": false,
-        "time": 1.2000000000000008
+        "advanced": 0.9980000000000007,
+        "dropped": 0,
+        "total": 0.9980000000000007,
+        "maxSubsteps": 50,
+        "lastSubsteps": 50,
+        "hasDroppedField": true,
+        "time": 1.398000000000001
       },
       "threshold": "advanced >= 0.98 or advanced+droppedTime >= 0.98 with droppedTime > 0",
       "detail": "low frame rate must not silently lose simulation time"
@@ -1015,20 +992,20 @@
     "B5.1/5-time": {
       "audit": "frame-time",
       "group": "runtime",
-      "status": "fail",
-      "knownFailure": true,
+      "status": "pass",
+      "knownFailure": false,
       "observed": {
         "hz": 5,
         "clampMs": null,
         "frames": 5,
         "wallSeconds": 1,
-        "advanced": 0.4000000000000003,
-        "dropped": null,
-        "total": 0.4000000000000003,
-        "maxSubsteps": 40,
-        "lastSubsteps": 40,
-        "hasDroppedField": false,
-        "time": 0.8000000000000006
+        "advanced": 0.9980000000000007,
+        "dropped": 0,
+        "total": 0.9980000000000007,
+        "maxSubsteps": 100,
+        "lastSubsteps": 100,
+        "hasDroppedField": true,
+        "time": 1.398000000000001
       },
       "threshold": "advanced >= 0.98 or advanced+droppedTime >= 0.98 with droppedTime > 0",
       "detail": "low frame rate must not silently lose simulation time"
@@ -1036,65 +1013,48 @@
     "B5.1/5-clamp50-time": {
       "audit": "frame-time",
       "group": "runtime",
-      "status": "fail",
-      "knownFailure": true,
+      "status": "pass",
+      "knownFailure": false,
       "observed": {
-        "hz": 5,
-        "clampMs": 50,
-        "frames": 5,
-        "wallSeconds": 1,
-        "advanced": 0.24800000000000016,
-        "dropped": null,
-        "total": 0.24800000000000016,
-        "maxSubsteps": 25,
-        "lastSubsteps": 25,
-        "hasDroppedField": false,
-        "time": 0.6480000000000005
+        "dt": 0.2,
+        "steps": 99,
+        "advanced": 0.19800000000000012,
+        "limitRemoved": true,
+        "time": 0.5980000000000004
       },
-      "threshold": "advanced >= 0.98 or advanced+droppedTime >= 0.98 with droppedTime > 0",
-      "detail": "low frame rate must not silently lose simulation time"
+      "threshold": "simAdvance(0.2) advances >= 0.19 s in >= 90 substeps; the old 50 ms clamp is gone",
+      "detail": "B3-1 removed the app-layer 50 ms truncation"
     },
     "B5.1/dropped-field": {
       "audit": "frame-time",
       "group": "runtime",
-      "status": "fail",
-      "knownFailure": true,
+      "status": "pass",
+      "knownFailure": false,
       "observed": {
         "fields": [
           {
             "hz": 60,
-            "clampMs": null,
             "advanced": 1.0000000000000007,
-            "dropped": null,
-            "hasDroppedField": false
+            "dropped": 0,
+            "hasDroppedField": true
           },
           {
             "hz": 30,
-            "clampMs": null,
             "advanced": 0.9980000000000007,
-            "dropped": null,
-            "hasDroppedField": false
+            "dropped": 0,
+            "hasDroppedField": true
           },
           {
             "hz": 10,
-            "clampMs": null,
-            "advanced": 0.8000000000000005,
-            "dropped": null,
-            "hasDroppedField": false
+            "advanced": 0.9980000000000007,
+            "dropped": 0,
+            "hasDroppedField": true
           },
           {
             "hz": 5,
-            "clampMs": null,
-            "advanced": 0.4000000000000003,
-            "dropped": null,
-            "hasDroppedField": false
-          },
-          {
-            "hz": 5,
-            "clampMs": 50,
-            "advanced": 0.24800000000000016,
-            "dropped": null,
-            "hasDroppedField": false
+            "advanced": 0.9980000000000007,
+            "dropped": 0,
+            "hasDroppedField": true
           }
         ]
       },
@@ -1104,29 +1064,29 @@
     "B5.2/geometry-generation": {
       "audit": "browser-contract",
       "group": "runtime",
-      "status": "fail",
-      "knownFailure": true,
+      "status": "pass",
+      "knownFailure": false,
       "observed": {
         "wheelGapMaxMm": 0,
-        "linkStretchMm": 146.08615403471993,
-        "diagStretchMm": 104.09899342281447,
+        "linkStretchMm": 1.1324274851176597e-11,
+        "diagStretchMm": 2.7755575615628914e-12,
         "stretch": {
-          "susp": 104.09899342281447,
-          "tie": 146.08615403471993,
-          "push": 96.986809412557,
-          "arb": 5.551115123125783e-14
+          "susp": 2.7755575615628914e-12,
+          "tie": 1.1324274851176597e-11,
+          "push": 2.220446049250313e-13,
+          "arb": 4.163336342344337e-14
         },
         "beforeWheelbase": 3.55,
         "afterWheelbase": 3.9,
         "sceneWheel0": [
-          1.9500091448923076,
-          0.3599279081385257,
-          -0.8100136806395991
+          1.9500091528828547,
+          0.3599279088477904,
+          -0.810013694185061
         ],
         "solvedWheel0": [
-          1.9500091448923076,
-          0.3599279081385257,
-          -0.8100136806395991
+          1.9500091528828547,
+          0.3599279088477904,
+          -0.810013694185061
         ]
       },
       "threshold": "wheel gap <= 1e-6 m and link stretch <= 0.001 mm",
@@ -1135,22 +1095,23 @@
     "B5.3/telemetry-dom": {
       "audit": "browser-contract",
       "group": "runtime",
-      "status": "fail",
-      "knownFailure": true,
+      "status": "pass",
+      "knownFailure": false,
       "observed": {
         "listPresent": true,
-        "mutationCount": 9
+        "nodeRebuilds": 0,
+        "textMutations": 1
       },
-      "threshold": "mutationCount === 0 over 1.2 s idle",
-      "detail": "periodic telemetry must not rebuild the self-test DOM"
+      "threshold": "childList rebuild count === 0 over 1 s idle; characterData is auxiliary only",
+      "detail": "periodic telemetry must not rebuild the check list nodes"
     },
     "B5.4/material-release": {
       "audit": "browser-contract",
       "group": "runtime",
-      "status": "fail",
-      "knownFailure": true,
+      "status": "pass",
+      "knownFailure": false,
       "observed": {
-        "materialDisposed": 0,
+        "materialDisposed": 7,
         "geometryDisposed": 387
       },
       "threshold": "materialDisposed >= 3 and geometryDisposed > 0",
@@ -1159,13 +1120,15 @@
     "O1/chunked-vs-one-shot": {
       "audit": "browser-contract",
       "group": "runtime",
-      "status": "fail",
-      "knownFailure": true,
+      "status": "pass",
+      "knownFailure": false,
       "observed": {
-        "bodyPosDelta": 0.0007146018970887111,
+        "bodyPosDelta": 0,
         "quatDelta": 0,
-        "dampingDelta": 52.96367097604559,
-        "travelDelta": 1.0162608595275326
+        "dampingDelta": 0,
+        "travelDelta": 0,
+        "oneShotTime": 1.0600000000000007,
+        "chunkedTime": 1.0600000000000007
       },
       "threshold": "body/quaternion delta <= 1e-9 and damping/travel delta <= 1e-6",
       "detail": "rendering between simulation chunks must not change the physical result"
@@ -1184,8 +1147,8 @@
     "U1/landscape": {
       "audit": "ui",
       "group": "ui",
-      "status": "fail",
-      "knownFailure": true,
+      "status": "pass",
+      "knownFailure": false,
       "observed": {
         "viewport": {
           "width": 844,
@@ -1193,15 +1156,15 @@
         },
         "topbar": {
           "top": 0,
-          "bottom": 70,
-          "height": 70,
+          "bottom": 56,
+          "height": 56,
           "width": 844
         },
         "bottomBar": {
-          "top": 468,
-          "bottom": 510,
-          "height": 42,
-          "width": 549.609375
+          "top": 344,
+          "bottom": 382,
+          "height": 38,
+          "width": 824
         }
       },
       "threshold": "topbar and bottom-bar inside 844x390 viewport",

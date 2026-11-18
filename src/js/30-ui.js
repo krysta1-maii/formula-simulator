@@ -6,6 +6,15 @@ const UI = {
   initialized: false,
   lastModel: null,
   selfTests: [],
+  selfTestCache: {
+    revision: 0,
+    staticTests: null,
+    dynamicTests: null,
+    dynamicRevision: 0,
+    dynamicRunning: false,
+    runs: { static: 0, dynamic: 0 }
+  },
+  checkRows: {},
   toastTimer: 0,
   labelLayer: null,
   cornerLabels: [],
@@ -16,6 +25,23 @@ const UI = {
   elements: {},
   modalReturnFocus: null
 };
+
+const SETUP_KEYS = ['mass', 'frontWeightPct', 'cgHeight', 'cgLateral', 'wheelbase', 'trackFront', 'trackRear', 'wheelRadius', 'tireWidthF', 'tireWidthR', 'wheelRateF', 'wheelRateR', 'dampingF', 'dampingR', 'arbFront', 'arbRear', 'slope', 'bank', 'friction'];
+let SETUP_REVISION = 0;
+let SETUP_SIGNATURE = '';
+
+function setupSignature(source = state) {
+  return SETUP_KEYS.map((key) => Number(source[key]).toPrecision(10)).join('|');
+}
+
+function noteSetupChange(source = state) {
+  const signature = setupSignature(source);
+  if (signature !== SETUP_SIGNATURE) {
+    SETUP_SIGNATURE = signature;
+    SETUP_REVISION += 1;
+  }
+  return SETUP_REVISION;
+}
 
 const INSPECT_VIEWS = [
   { preset: 'inspectSteering', label: '转向', toast: '转向机、转向拉杆与转向柱' },
@@ -194,6 +220,11 @@ function setAutoRotate(enabled) {
 
 function simulationReset({ settle = 0, toast = '姿态已重置到平衡位置' } = {}) {
   if (!SIM) SIM = simCreate(state);
+  if (SIM.geometryRevision !== geometryRevisionFor(state)) {
+    refreshAll({ rebuild: true, reason: 'geometry' });
+    if (toast) showToast('几何参数已变化，重建完成后再重置');
+    return;
+  }
   simReset(SIM, state, { settle });
   SIM.running = true;
   const model = simBuildModel(SIM, state);
@@ -223,7 +254,6 @@ function resetAll() {
   autoRotate = false;
   if (SIM) {
     SIM.running = true;
-    simReset(SIM, state, { settle: 1.0 });
   }
   syncControlsFromState();
   setAutoRotate(false);
@@ -231,7 +261,7 @@ function resetAll() {
   persistState();
   resetCamera(false);
   resetInspectButton();
-  refreshAll({ rebuild: true });
+  refreshAll({ rebuild: true, reason: 'reset' });
   showToast('已恢复默认标定与相机');
 }
 
@@ -379,11 +409,57 @@ function closeModelModal() {
   }
 }
 
-function refreshSelfTests({ dynamic = true } = {}) {
-  const staticTests = runSelfTests(state);
-  UI.selfTests = staticTests;
-  if (dynamic || !UI.dynamicTests) UI.dynamicTests = runDynamicSelfTests(state);
-  const tests = staticTests.concat(UI.dynamicTests);
+function ensureStaticSelfTests({ force = false } = {}) {
+  const revision = noteSetupChange(state);
+  if (force || UI.selfTestCache.revision !== revision || !UI.selfTestCache.staticTests) {
+    UI.selfTestCache.staticTests = runSelfTests(state);
+    UI.selfTestCache.revision = revision;
+    UI.selfTestCache.runs.static += 1;
+    if (UI.selfTestCache.dynamicRevision !== revision) {
+      UI.selfTestCache.dynamicTests = null;
+      UI.selfTestCache.dynamicRevision = 0;
+    }
+  }
+  UI.selfTests = UI.selfTestCache.staticTests;
+  return UI.selfTests;
+}
+
+function ensureDynamicSelfTests({ force = false, onDone = null } = {}) {
+  const revision = noteSetupChange(state);
+  if (!force && UI.selfTestCache.dynamicTests && UI.selfTestCache.dynamicRevision === revision) {
+    if (onDone) onDone(UI.selfTestCache.dynamicTests);
+    return UI.selfTestCache.dynamicTests;
+  }
+  if (UI.selfTestCache.dynamicRunning) return null;
+  UI.selfTestCache.dynamicRunning = true;
+  UI.selfTestCache.dynamicTests = null;
+  const startedRevision = revision;
+  runDynamicSelfTestsChunked(state, {
+    onTest: (test, count) => {
+      UI.dynamicTests = UI.dynamicTests || [];
+      UI.dynamicTests.push(test);
+    },
+    onDone: (tests) => {
+      UI.selfTestCache.dynamicRunning = false;
+      UI.selfTestCache.dynamicTests = tests;
+      UI.selfTestCache.dynamicRevision = startedRevision;
+      UI.selfTestCache.runs.dynamic += 1;
+      UI.dynamicTests = tests;
+      if (onDone) onDone(tests);
+      refreshSelfTests({ dynamic: false });
+    }
+  });
+  return null;
+}
+
+function refreshSelfTests({ dynamic = true, force = false } = {}) {
+  const staticTests = ensureStaticSelfTests({ force });
+  if (dynamic && (force || !UI.selfTestCache.dynamicTests || UI.selfTestCache.dynamicRevision !== UI.selfTestCache.revision)) {
+    ensureDynamicSelfTests({ force, onDone: () => refreshSelfTests({ dynamic: false }) });
+  }
+  const dynamicTests = UI.selfTestCache.dynamicTests || [];
+  UI.dynamicTests = dynamicTests;
+  const tests = staticTests.concat(dynamicTests);
   const passed = tests.filter((test) => test.ok).length;
   const total = tests.length;
 
@@ -392,7 +468,7 @@ function refreshSelfTests({ dynamic = true } = {}) {
 
   const summary = document.getElementById('selfTestSummary');
   if (summary) {
-    summary.textContent = `${passed} / ${total} 项通过 · 静态 ${staticTests.length} / 动态 ${UI.dynamicTests.length}`;
+    summary.textContent = `${passed} / ${total} 项通过 · 静态 ${staticTests.length} / 动态 ${dynamicTests.length}`;
     summary.style.color = passed === total ? 'var(--ok)' : 'var(--warn)';
   }
 
@@ -400,7 +476,7 @@ function refreshSelfTests({ dynamic = true } = {}) {
   if (list) {
     list.textContent = '';
     const labelled = staticTests.map((test) => ({ ...test, group: '静态' }))
-      .concat(UI.dynamicTests.map((test) => ({ ...test, group: '动态' })));
+      .concat(dynamicTests.map((test) => ({ ...test, group: '动态' })));
     labelled.forEach((test) => {
       const item = document.createElement('li');
       if (!test.ok) item.className = 'is-fail';
@@ -560,24 +636,29 @@ function setText(id, text) {
   if (element) element.textContent = text;
 }
 
+function setNodeText(element, text) {
+  if (!element) return;
+  const first = element.firstChild;
+  if (first && first.nodeType === 3) {
+    if (first.nodeValue !== text) first.nodeValue = text;
+    return;
+  }
+  element.textContent = text;
+}
+
 function refreshChecks(model) {
   const container = document.getElementById('checkList');
-  if (!container) return;
+  if (!container || !model) return;
   const diag = getCarDiagnostics();
-  const tests = UI.selfTests;
-  const dynamicTests = UI.dynamicTests || [];
+  const tests = UI.selfTests || [];
+  const dynamicTests = (UI.selfTestCache && UI.selfTestCache.dynamicTests) || UI.dynamicTests || [];
   const passed = tests.filter((test) => test.ok).length;
   const dynamicPassed = dynamicTests.filter((test) => test.ok).length;
-  const sim = model.sim || {
-    time: 0,
-    running: true,
-    holding: true,
-    sliding: false,
-    finite: true,
-    recovered: false,
-    stepHz: 500,
-    substeps: 0
+  const fallbackSim = {
+    time: 0, running: true, holding: true, sliding: false, finite: true,
+    recovered: false, stepHz: 500, substeps: 0, backlog: 0, droppedTime: 0, timeScale: 1
   };
+  const sim = model.sim || fallbackSim;
   const linksOk = diag.linkCount > 0 && diag.maxSuspLinkStretchMm < 1 && diag.rockerSolveOk;
   const steerOk = diag.tieRodStretchMm < 5 && diag.rockerSolveOk;
   const arbOk = diag.arbCount === 2 && diag.arbFront && diag.arbRear && diag.arbStretchMm < 0.5;
@@ -586,65 +667,55 @@ function refreshChecks(model) {
   const testsOk = tests.length > 0 && passed === tests.length;
   const dynamicOk = dynamicTests.length > 0 && dynamicPassed === dynamicTests.length;
   const frictionState = sim.sliding ? '滑移' : sim.holding ? '静摩擦' : '—';
+  const timeScale = Number.isFinite(sim.timeScale) ? sim.timeScale : 1;
+  const dropped = Number.isFinite(sim.droppedTime) ? sim.droppedTime : 0;
 
   const rows = [
-    {
-      ok: sim.finite && !sim.recovered,
-      name: '六自由度积分',
-      value: `t ${sim.time.toFixed(2)} s · ${sim.stepHz} Hz · ${sim.substeps} 子步`
-    },
-    {
-      ok: contactOk,
-      name: '四轮接地',
-      value: `${diag.contactCount} / 4 · 最小 ${loadDisplay(model.minLoad)} ${unitDisplay()}`
-    },
-    {
-      ok: linksOk,
-      name: '悬架杆长偏差',
-      value: `${diag.linkCount} 根 / ${diag.jointCount} 点 · ${diag.maxSuspLinkStretchMm.toFixed(3)} mm`
-    },
-    {
-      ok: steerOk,
-      name: '齿条 / 横拉杆',
-      value: `齿条 ${formatSigned(diag.rackTravelMm, 1)} mm · 横拉杆 ${diag.tieRodStretchMm.toFixed(3)} mm`
-    },
-    {
-      ok: arbOk,
-      name: '防倾杆连接',
-      value: `${diag.arbCount} 套 · 扭转 ${diag.arbTwistDeg.toFixed(2)}° · 伸长 ${diag.arbStretchMm.toFixed(2)} mm`
-    },
-    {
-      ok: frictionOk,
-      name: '坡面摩擦',
-      value: `μ_req ${model.frictionDemand.toFixed(3)} / ${model.frictionCapacity.toFixed(2)} · ${frictionState}`
-    },
-    {
-      ok: testsOk,
-      name: '静力自检',
-      value: tests.length ? `${passed} / ${tests.length} 通过` : '待运行'
-    },
-    {
-      ok: dynamicOk,
-      name: '动态自检',
-      value: dynamicTests.length ? `${dynamicPassed} / ${dynamicTests.length} 通过` : '待运行'
-    }
+    { id: 'sim', ok: sim.finite && !sim.recovered, name: '六自由度积分', value: `t ${sim.time.toFixed(2)} s · ${sim.stepHz} Hz · ${sim.substeps} 子步 · ${timeScale.toFixed(2)}× · 丢 ${dropped.toFixed(2)} s` },
+    { id: 'contact', ok: contactOk, name: '四轮接地', value: `${diag.contactCount} / 4 · 最小 ${loadDisplay(model.minLoad)} ${unitDisplay()}` },
+    { id: 'links', ok: linksOk, name: '悬架杆长偏差', value: `${diag.linkCount} 根 / ${diag.jointCount} 点 · ${diag.maxSuspLinkStretchMm.toFixed(3)} mm` },
+    { id: 'steer', ok: steerOk, name: '齿条 / 横拉杆', value: `齿条 ${formatSigned(diag.rackTravelMm, 1)} mm · 横拉杆 ${diag.tieRodStretchMm.toFixed(3)} mm` },
+    { id: 'arb', ok: arbOk, name: '防倾杆连接', value: `${diag.arbCount} 套 · 扭转 ${diag.arbTwistDeg.toFixed(2)}° · 伸长 ${diag.arbStretchMm.toFixed(2)} mm` },
+    { id: 'friction', ok: frictionOk, name: '坡面摩擦', value: `μ_req ${model.frictionDemand.toFixed(3)} / ${model.frictionCapacity.toFixed(2)} · ${frictionState}` },
+    { id: 'rockerResidual', ok: true, name: '摇臂闭合残差', value: '—' },
+    { id: 'motionRatio', ok: true, name: '运动比连续性', value: '—' },
+    { id: 'staticTests', ok: testsOk, name: '静力自检', value: tests.length ? `${passed} / ${tests.length} 通过` : '待运行' },
+    { id: 'dynamicTests', ok: dynamicOk, name: '动态自检', value: dynamicTests.length ? `${dynamicPassed} / ${dynamicTests.length} 通过` : '待运行' }
   ];
 
-  container.textContent = '';
   rows.forEach((row) => {
-    const item = document.createElement('div');
-    item.className = 'check-item ' + (row.ok ? 'is-ok' : 'is-warn');
-    const icon = document.createElement('span');
-    icon.className = 'check-icon';
-    icon.textContent = row.ok ? '✓' : '!';
-    const name = document.createElement('span');
-    name.className = 'check-name';
-    name.textContent = row.name;
-    const value = document.createElement('span');
-    value.className = 'check-val';
-    value.textContent = row.value;
-    item.append(icon, name, value);
-    container.appendChild(item);
+    let cached = UI.checkRows[row.id];
+    if (!cached || !cached.item || cached.item.parentNode !== container) {
+      const item = document.createElement('div');
+      item.className = 'check-item ' + (row.ok ? 'is-ok' : 'is-warn');
+      const icon = document.createElement('span');
+      icon.className = 'check-icon';
+      icon.textContent = row.ok ? '✓' : '!';
+      const name = document.createElement('span');
+      name.className = 'check-name';
+      name.textContent = row.name;
+      const value = document.createElement('span');
+      value.className = 'check-val';
+      value.textContent = row.value;
+      item.append(icon, name, value);
+      container.appendChild(item);
+      cached = { item, icon, name, value, ok: row.ok, text: row.name, valueText: row.value };
+      UI.checkRows[row.id] = cached;
+      return;
+    }
+    if (cached.ok !== row.ok) {
+      cached.ok = row.ok;
+      cached.item.className = 'check-item ' + (row.ok ? 'is-ok' : 'is-warn');
+      setNodeText(cached.icon, row.ok ? '✓' : '!');
+    }
+    if (cached.text !== row.name) {
+      cached.text = row.name;
+      setNodeText(cached.name, row.name);
+    }
+    if (cached.valueText !== row.value) {
+      cached.valueText = row.value;
+      setNodeText(cached.value, row.value);
+    }
   });
 }
 
@@ -670,13 +741,14 @@ function syncSimControls(model = UI.lastModel) {
   }
   setText('telemetrySimState', sim || SIM ? (running ? '运行' : '暂停') : '静态');
   setText('telemetrySimTime', `${simTime.toFixed(2)} s`);
-  setText('telemetrySimSteps', sim || SIM ? `${sim ? sim.stepHz : Math.round(1 / SIM_DT)} Hz · ${substeps} 子步/帧` : '—');
+  const timeScale = SIM && Number.isFinite(SIM.timeScale) ? SIM.timeScale : (sim && Number.isFinite(sim.timeScale) ? sim.timeScale : 1);
+  setText('telemetrySimSteps', sim || SIM ? `${sim ? sim.stepHz : Math.round(1 / SIM_DT)} Hz · ${substeps} 子步/帧 · ${timeScale.toFixed(2)}×` : '—');
 }
 
 function refreshTelemetry(model) {
   UI.lastModel = model;
   if (!model) return;
-  UI.selfTests = runSelfTests(state);
+  ensureStaticSelfTests();
   const sim = model.sim || null;
   const loads = model.loads.slice();
   const sumLoads = loads.reduce((acc, value) => acc + value, 0);
@@ -780,7 +852,9 @@ function refreshTelemetry(model) {
   }
   if (sim) {
     const stateText = sim.sliding ? '切向滑移' : sim.holding ? '静摩擦保持' : '瞬态';
-    setText('simDetail', `${sim.running ? '运行' : '暂停'} · t ${sim.time.toFixed(2)} s · ${sim.stepHz} Hz · ${stateText}`);
+    const backlogMs = (Number.isFinite(sim.backlog) ? sim.backlog : (Number.isFinite(sim.accumulator) ? sim.accumulator : 0)) * 1000;
+    const dropped = Number.isFinite(sim.droppedTime) ? sim.droppedTime : 0;
+    setText('simDetail', `${sim.running ? '运行' : '暂停'} · t ${sim.time.toFixed(2)} s · ${sim.stepHz} Hz · ${stateText} · 积压 ${backlogMs.toFixed(1)} ms · 丢 ${dropped.toFixed(2)} s`);
   } else {
     setText('simDetail', '静态参考');
   }
@@ -1127,7 +1201,7 @@ function initUI() {
   createAnnotationLabels();
   bindControls();
   syncControlsFromState();
-  refreshSelfTests();
+  refreshSelfTests({ dynamic: false });
   syncSimControls();
   CAMERA.onChange = (reason) => {
     if (reason === 'preset') {

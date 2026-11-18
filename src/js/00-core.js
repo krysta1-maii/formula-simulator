@@ -75,6 +75,46 @@ const DEFAULTS = Object.freeze({
 const state = Object.assign({}, DEFAULTS);
 let autoRotate = false;
 
+
+// B3-2: geometry generations. Six dimension keys define one immutable
+// hard-point set; the revision is allocated monotonically and the active
+// revision (the one the running sim owns) is never evicted.
+const GEOMETRY_KEYS = ['wheelbase', 'trackFront', 'trackRear', 'wheelRadius', 'tireWidthF', 'tireWidthR'];
+let GEOMETRY_SERIAL = 0;
+let ACTIVE_GEOMETRY_KEY = '';
+const GEOMETRY_REVISIONS = new Map();
+
+function geometrySignature(source = state) {
+  return GEOMETRY_KEYS.map((key) => Number(source[key]).toFixed(6)).join('|');
+}
+
+function setActiveGeometry(source = state) {
+  ACTIVE_GEOMETRY_KEY = geometrySignature(source);
+  return geometryRevisionFor(source);
+}
+
+function geometryRevisionFor(source = state) {
+  const key = geometrySignature(source);
+  let revision = GEOMETRY_REVISIONS.get(key);
+  if (!revision) {
+    GEOMETRY_SERIAL += 1;
+    revision = GEOMETRY_SERIAL;
+    GEOMETRY_REVISIONS.set(key, revision);
+    while (GEOMETRY_REVISIONS.size > 64) {
+      let evict = null;
+      for (const candidate of GEOMETRY_REVISIONS.keys()) {
+        if (candidate !== ACTIVE_GEOMETRY_KEY) {
+          evict = candidate;
+          break;
+        }
+      }
+      if (!evict) break;
+      GEOMETRY_REVISIONS.delete(evict);
+    }
+  }
+  return revision;
+}
+
 function cloneState(source = state) {
   return Object.assign({}, source);
 }
@@ -470,6 +510,8 @@ function computeStatic(source = state) {
 
   return {
     source,
+    geometryRevision: geometryRevisionFor(source),
+    geometrySignature: geometrySignature(source),
     dims,
     frame,
     mass,

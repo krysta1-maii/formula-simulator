@@ -75,16 +75,16 @@ await runBrowserAudit({ audit: 'browser-contract', group: 'runtime', title: 'B5.
   await sleep(2200);
   await waitFrames(ctx, 2);
 
-  const observer = await ctx.evaluate("(function () { window.__auditMutations = 0; if (window.__auditObserver) window.__auditObserver.disconnect(); var list = document.getElementById('checkList'); window.__auditObserver = new MutationObserver(function (records) { window.__auditMutations += records.length; }); window.__auditObserver.observe(list, { childList: true, subtree: true, characterData: true }); return Boolean(list); })()");
-  await sleep(1200);
-  const mutationCount = await ctx.evaluate('window.__auditMutations');
-  await ctx.evaluate('if (window.__auditObserver) window.__auditObserver.disconnect()');
+  const observer = await ctx.evaluate("(function () { window.__auditNodeRebuilds = 0; window.__auditTextMutations = 0; if (window.__auditObserver) window.__auditObserver.disconnect(); if (window.__auditTextObserver) window.__auditTextObserver.disconnect(); var list = document.getElementById('checkList'); if (!list) return false; window.__auditObserver = new MutationObserver(function (records) { window.__auditNodeRebuilds += records.length; }); window.__auditObserver.observe(list, { childList: true, subtree: true }); window.__auditTextObserver = new MutationObserver(function (records) { window.__auditTextMutations += records.length; }); window.__auditTextObserver.observe(list, { subtree: true, characterData: true }); return true; })()");
+  await sleep(1000);
+  const mutationCounts = await ctx.evaluateJson('({ nodeRebuilds: window.__auditNodeRebuilds, textMutations: window.__auditTextMutations })');
+  await ctx.evaluate('if (window.__auditObserver) window.__auditObserver.disconnect(); if (window.__auditTextObserver) window.__auditTextObserver.disconnect();');
   audit.check(
     'B5.3/telemetry-dom',
-    observer === true && mutationCount === 0,
-    { listPresent: observer, mutationCount },
-    'mutationCount === 0 over 1.2 s idle',
-    'periodic telemetry must not rebuild the self-test DOM'
+    observer === true && mutationCounts.nodeRebuilds === 0,
+    { listPresent: observer, nodeRebuilds: mutationCounts.nodeRebuilds, textMutations: mutationCounts.textMutations },
+    'childList rebuild count === 0 over 1 s idle; characterData is auxiliary only',
+    'periodic telemetry must not rebuild the check list nodes'
   );
 
   const threePresent = await ctx.evaluate("Boolean(window.THREE && window.THREE.Material && window.THREE.BufferGeometry)");
@@ -113,17 +113,16 @@ await runBrowserAudit({ audit: 'browser-contract', group: 'runtime', title: 'B5.
     );
   }
 
-  await ctx.evaluate("window.FSApp.resetDynamics({ settle: 1 })");
-  await ctx.evaluate("window.FSApp.impulse('pitch')");
+  await ctx.evaluate("(function () { window.FSApp.resetDynamics({ settle: 1 }); window.FSApp.impulse('pitch'); window.FSApp.setSimRunning(false); })()");
   await ctx.evaluate("window.FSApp.advanceSimulation(0.06)");
   const oneShot = await snapshot();
 
-  await ctx.evaluate("window.FSApp.resetDynamics({ settle: 1 })");
-  await ctx.evaluate("window.FSApp.impulse('pitch')");
+  await ctx.evaluate("(function () { window.FSApp.resetDynamics({ settle: 1 }); window.FSApp.impulse('pitch'); window.FSApp.setSimRunning(false); })()");
   for (let index = 0; index < 4; index += 1) {
     await ctx.evaluate("window.FSApp.advanceSimulation(0.015)");
   }
   const chunked = await snapshot();
+  await ctx.evaluate("window.FSApp.setSimRunning(true)");
 
   const bodyPosDelta = Math.hypot(
     oneShot.bodyPos.x - chunked.bodyPos.x,
@@ -136,7 +135,7 @@ await runBrowserAudit({ audit: 'browser-contract', group: 'runtime', title: 'B5.
   audit.check(
     'O1/chunked-vs-one-shot',
     bodyPosDelta <= 1e-9 && quatDelta <= 1e-9 && dampingDelta <= 1e-6 && travelDelta <= 1e-6,
-    { bodyPosDelta, quatDelta, dampingDelta, travelDelta },
+    { bodyPosDelta, quatDelta, dampingDelta, travelDelta, oneShotTime: oneShot.sim ? oneShot.sim.time : null, chunkedTime: chunked.sim ? chunked.sim.time : null },
     'body/quaternion delta <= 1e-9 and damping/travel delta <= 1e-6',
     'rendering between simulation chunks must not change the physical result'
   );

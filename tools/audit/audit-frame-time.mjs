@@ -51,8 +51,7 @@ await runAudit({ audit: 'frame-time', group: 'runtime', title: 'B5.1 低帧率�
     runCase(60),
     runCase(30),
     runCase(10),
-    runCase(5),
-    runCase(5, 50)
+    runCase(5)
   ];
   const byLabel = {};
   for (const item of cases) byLabel[item.hz + (item.clampMs ? '-clamp' + item.clampMs : '')] = item;
@@ -75,7 +74,7 @@ await runAudit({ audit: 'frame-time', group: 'runtime', title: 'B5.1 低帧率�
     '30 Hz baseline'
   );
 
-  for (const key of ['10', '5', '5-clamp50']) {
+  for (const key of ['10', '5']) {
     const item = byLabel[key];
     const conserved = item.total >= 0.98;
     const explicitDrop = item.hasDroppedField && item.dropped > 0;
@@ -89,13 +88,30 @@ await runAudit({ audit: 'frame-time', group: 'runtime', title: 'B5.1 低帧率�
     );
   }
 
+  const clampSim = api.simCreate(api.DEFAULTS, { settle: 0.4 });
+  const clampStart = clampSim.time;
+  const clampSteps = api.simAdvance(clampSim, 0.2);
+  const clampRemoved = {
+    dt: 0.2,
+    steps: clampSteps,
+    advanced: clampSim.time - clampStart,
+    limitRemoved: true,
+    time: clampSim.time
+  };
+  audit.check(
+    'B5.1/5-clamp50-time',
+    clampRemoved.advanced >= 0.19 && clampRemoved.steps >= 90,
+    clampRemoved,
+    'simAdvance(0.2) advances >= 0.19 s in >= 90 substeps; the old 50 ms clamp is gone',
+    'B3-1 removed the app-layer 50 ms truncation'
+  );
+
   audit.check(
     'B5.1/dropped-field',
     cases.every((item) => item.advanced >= 0.98 || item.hasDroppedField),
     {
       fields: cases.map((item) => ({
         hz: item.hz,
-        clampMs: item.clampMs,
         advanced: item.advanced,
         dropped: item.dropped,
         hasDroppedField: item.hasDroppedField

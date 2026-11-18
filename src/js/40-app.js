@@ -3,11 +3,27 @@
    ========================================================================= */
 
 const REBUILD_KEYS = new Set(['wheelbase', 'trackFront', 'trackRear', 'wheelRadius', 'tireWidthF', 'tireWidthR']);
+const PHYSICS_KEYS = ['mass', 'frontWeightPct', 'cgHeight', 'cgLateral', 'wheelRateF', 'wheelRateR', 'dampingF', 'dampingR', 'arbFront', 'arbRear', 'slope', 'bank', 'friction'];
 const PENDING = {
   rebuild: false,
-  model: null,
-  lastBuildAt: 0
+  reason: '',
+  requestedAt: 0,
+  lastBuildAt: 0,
+  commits: 0,
+  failures: 0,
+  lastPolicy: 'none'
 };
+
+function physicsSignature(source = state) {
+  return PHYSICS_KEYS.map((key) => Number(source[key]).toPrecision(10)).join('|');
+}
+
+function stampReference(sim, source = state) {
+  if (!sim || !sim.reference) return;
+  sim.geometryRevision = sim.reference.geometryRevision;
+  sim.reference.physicsSignature = physicsSignature(source);
+  sim.steerApplied = source.steer;
+}
 
 let booted = false;
 let firstFrameRendered = false;
@@ -45,57 +61,87 @@ function updateSceneFromModel(model) {
   if (UI.initialized) UI.updateLabelPositions();
 }
 
-function requestRebuild(model) {
+function requestRebuild(reason = 'explicit') {
+  if (!PENDING.rebuild) PENDING.requestedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
   PENDING.rebuild = true;
-  PENDING.model = model;
+  PENDING.reason = reason;
+  PENDING.lastPolicy = reason === 'geometry' ? 'geometry-forced' : (reason || 'explicit');
 }
 
 function processPendingRebuild(now) {
-  if (!PENDING.rebuild || !PENDING.model) return;
+  if (!PENDING.rebuild) return;
   if (now - PENDING.lastBuildAt < 85) return;
-  PENDING.rebuild = false;
   PENDING.lastBuildAt = now;
-  if (!SIM) SIM = simCreate(state);
-  simReset(SIM, state, { settle: 0.5 });
-  SIM.rackShift = calibrateRack(SIM, state.steer);
-  const model = simBuildModel(SIM, state);
-  buildCar(model);
-  applyXray();
-  S.roadGroup.quaternion.copy(model.frame.q);
-  S.roadGroup.updateMatrixWorld(true);
-  updateCar(model);
-  S.scene.updateMatrixWorld(true);
-  updateOverlays(model);
-  S.scene.updateMatrixWorld(true);
-  UI.refreshSelfTests({ dynamic: false });
-  UI.refreshTelemetry(model);
-  UI.updateLabelPositions();
+  try {
+    if (!SIM) SIM = simCreate(state);
+    simReset(SIM, state, { settle: 0.5 });
+    SIM.advanceCarry = 0;
+    stampReference(SIM, state);
+    SIM.rackShift = calibrateRack(SIM, state.steer);
+    const model = simBuildModel(SIM, state);
+    buildCar(model);
+    applyXray();
+    S.roadGroup.quaternion.copy(model.frame.q);
+    S.roadGroup.updateMatrixWorld(true);
+    updateCar(model);
+    S.scene.updateMatrixWorld(true);
+    updateOverlays(model);
+    S.scene.updateMatrixWorld(true);
+    UI.refreshSelfTests({ dynamic: false });
+    UI.refreshTelemetry(model);
+    UI.updateLabelPositions();
+    PENDING.rebuild = false;
+    PENDING.commits += 1;
+    PENDING.failures = 0;
+  } catch (error) {
+    PENDING.failures += 1;
+    if (PENDING.failures >= 3) {
+      PENDING.rebuild = false;
+      showFatalError(error);
+    } else {
+      PENDING.rebuild = true;
+    }
+  }
 }
 
-function refreshAll({ rebuild = false } = {}) {
+function refreshAll({ rebuild = false, reason = 'params' } = {}) {
   if (!booted) return;
-  const reference = computeStatic(state);
-  if (!SIM) SIM = simCreate(state);
-  SIM.reference = reference;
-  SIM.rackShift = calibrateRack(SIM, state.steer);
-  const model = simBuildModel(SIM, state);
-  if (rebuild) {
-    requestRebuild(model);
-    UI.refreshTelemetry(model);
-    UI.refreshLabelContent(model);
+  if (PENDING.rebuild) { PENDING.lastPolicy = 'pending'; return; }
+  const staleGeometry = !SIM || geometryRevisionFor(state) !== SIM.geometryRevision;
+  if (rebuild || staleGeometry) {
+    requestRebuild(staleGeometry ? 'geometry' : reason);
     return;
   }
-  if (PENDING.rebuild) {
-    PENDING.model = model;
+  const stalePhysics = !SIM.reference || SIM.reference.physicsSignature !== physicsSignature(state);
+  if (stalePhysics) {
+    simRetargetReference(SIM, state);
+    stampReference(SIM, state);
+    SIM.rackShift = calibrateRack(SIM, state.steer);
+    const model = simBuildModel(SIM, state);
+    updateSceneFromModel(model);
     UI.refreshTelemetry(model);
     UI.refreshLabelContent(model);
+    PENDING.lastPolicy = 'params';
     return;
   }
-  // Update the mechanism before reading its diagnostics; telemetry reports the
-  // ARB twist and link closure for the pose that is actually on screen.
-  updateSceneFromModel(model);
-  UI.refreshTelemetry(model);
-  UI.refreshLabelContent(model);
+  const staleSteer = !nearly(SIM.steerApplied, state.steer, 1e-12);
+  if (staleSteer) {
+    SIM.rackShift = calibrateRack(SIM, state.steer);
+    SIM.steerApplied = state.steer;
+    const model = simBuildModel(SIM, state);
+    updateSceneFromModel(model);
+    UI.refreshTelemetry(model);
+    UI.refreshLabelContent(model);
+    PENDING.lastPolicy = 'display';
+    return;
+  }
+  PENDING.lastPolicy = 'display';
+  UI.refreshTelemetry(UI.lastModel);
+  UI.refreshLabelContent(UI.lastModel);
+  if (UI.lastModel) {
+    updateOverlays(UI.lastModel);
+    S.scene.updateMatrixWorld(false);
+  }
 }
 
 function formatStamp(date = new Date()) {
@@ -121,7 +167,7 @@ function formatLocalDate(date = new Date()) {
 
 function exportScreenshot() {
   if (!S.renderer) return false;
-  const model = liveModel();
+  const model = PENDING.rebuild && UI.lastModel ? UI.lastModel : liveModel();
   updateSceneFromModel(model);
   S.renderer.render(S.scene, S.camera);
 
@@ -262,7 +308,7 @@ function bindGlobalAPI() {
     getState: () => cloneState(state),
     getSnapshot: () => {
       const model = liveModel();
-      const tests = UI.selfTests.length ? UI.selfTests : runSelfTests(state);
+      const tests = (UI.selfTestCache && UI.selfTestCache.staticTests) || (UI.selfTests.length ? UI.selfTests : runSelfTests(state));
       const diag = getCarDiagnostics();
       return {
         version: APP_VERSION,
@@ -333,6 +379,29 @@ function bindGlobalAPI() {
           transition: Boolean(CAMERA.transition)
         },
         pendingRebuild: PENDING.rebuild,
+        setupRevision: typeof SETUP_REVISION === 'number' ? SETUP_REVISION : 0,
+        selfTestRuns: UI.selfTestCache && UI.selfTestCache.runs ? Object.assign({}, UI.selfTestCache.runs) : { static: 0, dynamic: 0 },
+        geometry: {
+          sceneRevision: CAR.geometryRevision || null,
+          physicsRevision: SIM && SIM.reference ? SIM.reference.geometryRevision : null,
+          pending: PENDING.rebuild,
+          policy: PENDING.lastPolicy,
+          commitCount: PENDING.commits,
+          mismatch: Boolean(CAR.diag.geometryMismatch),
+          dims: {
+            wheelbase: state.wheelbase,
+            trackFront: state.trackFront,
+            trackRear: state.trackRear,
+            wheelRadius: state.wheelRadius,
+            tireWidthF: state.tireWidthF,
+            tireWidthR: state.tireWidthR
+          }
+        },
+        assets: CAR.assets ? {
+          totals: Object.assign({}, CAR.assets.totals),
+          lastBuild: CAR.assets.lastBuild ? Object.assign({}, CAR.assets.lastBuild) : null,
+          lastTeardown: CAR.assets.lastTeardown ? Object.assign({}, CAR.assets.lastTeardown) : null
+        } : null,
         frameCount: UI.frameCount || 0
       };
     },
@@ -340,12 +409,16 @@ function bindGlobalAPI() {
       if (!patch || typeof patch !== 'object') return window.FSApp.getSnapshot();
       const previous = cloneState(state);
       const merged = sanitizeState(Object.assign({}, state, patch));
-      const dimensionsChanged = Array.from(REBUILD_KEYS).some((key) => !nearly(previous[key], merged[key], 1e-9));
-      const rebuild = typeof options.rebuild === 'boolean' ? options.rebuild : dimensionsChanged;
+      const dimensionsChanged = geometrySignature(merged) !== geometrySignature(previous);
+      const forced = options.rebuild === true;
+      const rebuild = dimensionsChanged || forced;
+      if (options.rebuild === false && dimensionsChanged) {
+        console.warn('[FS-01] geometry dimensions changed; rebuild:false is ignored');
+      }
       Object.assign(state, merged);
       syncControlsFromState();
       persistState();
-      refreshAll({ rebuild });
+      refreshAll({ rebuild, reason: dimensionsChanged ? 'geometry' : (forced ? 'explicit' : 'params') });
       return window.FSApp.getSnapshot();
     },
     reset: () => {
@@ -364,8 +437,14 @@ function bindGlobalAPI() {
     },
     resetDynamics: (options = {}) => {
       if (!SIM) SIM = simCreate(state);
+      if (SIM.geometryRevision !== geometryRevisionFor(state)) {
+        requestRebuild('geometry');
+        return window.FSApp.getSnapshot();
+      }
       const settle = Number.isFinite(options.settle) ? options.settle : 0;
       simReset(SIM, state, { settle });
+      SIM.advanceCarry = 0;
+      stampReference(SIM, state);
       const model = simBuildModel(SIM, state);
       updateSceneFromModel(model);
       UI.refreshTelemetry(model);
@@ -381,7 +460,11 @@ function bindGlobalAPI() {
     advanceSimulation: (seconds = 0.5) => {
       if (!SIM) SIM = simCreate(state);
       const duration = clamp(Number(seconds) || 0, 0, 10);
-      simRunFor(SIM, duration);
+      const carry = Number.isFinite(SIM.advanceCarry) ? SIM.advanceCarry : 0;
+      const total = carry + duration;
+      const steps = Math.floor((total + 1e-12) / SIM_DT);
+      SIM.advanceCarry = total - steps * SIM_DT;
+      for (let i = 0; i < steps; i += 1) simStep(SIM, SIM_DT);
       const model = simBuildModel(SIM, state);
       updateSceneFromModel(model);
       UI.refreshTelemetry(model);
@@ -404,10 +487,20 @@ function bindGlobalAPI() {
         push: CAR.diag.pushRodStretchMm,
         arb: CAR.diag.arbStretchMm
       },
-      solverOk: CAR.diag.rockerSolveOk
+      solverOk: CAR.diag.rockerSolveOk,
+      geometryRevision: CAR.geometryRevision || null,
+      physicsRevision: SIM && SIM.reference ? SIM.reference.geometryRevision : null,
+      geometryMismatch: Boolean(CAR.diag.geometryMismatch)
     }),
     runSelfTests: () => runSelfTests(state),
     runDynamicSelfTests: () => runDynamicSelfTests(state),
+    dispose: teardownScene,
+    getAssetStats: () => ({
+      totals: CAR.assets ? Object.assign({}, CAR.assets.totals) : null,
+      lastBuild: CAR.assets && CAR.assets.lastBuild ? Object.assign({}, CAR.assets.lastBuild) : null,
+      lastTeardown: CAR.assets && CAR.assets.lastTeardown ? Object.assign({}, CAR.assets.lastTeardown) : null,
+      renderer: S.renderer ? { geometries: S.renderer.info.memory.geometries, textures: S.renderer.info.memory.textures, programs: S.renderer.info.programs ? S.renderer.info.programs.length : 0 } : null
+    }),
     exportScreenshot,
     setCameraPreset,
     setCameraProjection
@@ -418,15 +511,15 @@ function animate(now) {
   // requestAnimationFrame timestamps are monotonic frame-clock values, but the
   // first callback may carry a timestamp from before the expensive boot. Never
   // seed the frame clock with performance.now(), and clamp anomalous deltas.
-  const dt = lastFrameTime ? clamp((now - lastFrameTime) / 1000, 0, 0.05) : 0;
+  const frameDt = lastFrameTime ? Math.max(0, (now - lastFrameTime) / 1000) : 0;
   lastFrameTime = now;
 
   UI.frameCount = (UI.frameCount || 0) + 1;
-  updateCamera(dt);
+  updateCamera(Math.min(frameDt, 0.05));
   processPendingRebuild(now);
 
   if (booted && SIM) {
-    const steps = simAdvance(SIM, dt);
+    const steps = simAdvance(SIM, frameDt);
     if (steps > 0 || !UI.lastDynamicUpdate) {
       const model = simBuildModel(SIM, state);
       updateSceneFromModel(model);
@@ -467,6 +560,7 @@ function boot() {
 
     initScene();
     SIM = simCreate(state, { settle: 1.8 });
+    stampReference(SIM, state);
     SIM.rackShift = calibrateRack(SIM, state.steer);
     const initialModel = simBuildModel(SIM, state);
     S.roadGroup.quaternion.copy(initialModel.frame.q);
@@ -480,6 +574,9 @@ function boot() {
     syncControlsFromState();
     persistState();
     bindGlobalAPI();
+    window.addEventListener('pagehide', () => {
+      if (typeof teardownScene === 'function') teardownScene();
+    }, { once: true });
 
     booted = true;
     lastFrameTime = 0;

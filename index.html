@@ -52,7 +52,7 @@ button { cursor: pointer; }
 ::selection { background: rgba(255, 103, 56, 0.35); color: #fff; }
 [hidden] { display: none !important; }
 
-#app { position: relative; width: 100%; height: 100dvh; min-height: 520px; overflow: hidden; }
+#app { position: relative; width: 100%; height: 100vh; height: 100dvh; min-height: 0; overflow: hidden; }
 #viewport {
   position: absolute;
   inset: 0;
@@ -1079,7 +1079,23 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 6px 
 @media (max-height: 700px) {
   .panel { top: 76px; bottom: 72px; }
   .panel-head { padding-top: 13px; padding-bottom: 10px; }
-  .bottom-bar { bottom: 10px; }
+}
+@media (max-height: 560px) {
+  .topbar { height: 56px; }
+  .brand-mark { width: 30px; height: 30px; }
+  .brand-kicker { display: none; }
+  .topbar-center { display: none; }
+  .panel { top: 62px; bottom: 58px; }
+  .panel-head { padding: 11px 13px 9px 16px; }
+  .panel-foot { padding: 8px 12px 10px; }
+  .bottom-bar { height: 38px; bottom: 8px; }
+  .tool-btn { height: 27px; font-size: 8.5px; padding: 0 6px; }
+  .tool-glyph { display: none; }
+  .toast { bottom: 52px; }
+  .viewport-hint { display: none; }
+}
+@media (max-height: 560px) and (max-width: 980px) {
+  .bottom-bar { left: 10px; right: 10px; transform: none; max-width: none; bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; scroll-behavior: auto !important; }
@@ -1241,7 +1257,7 @@ button:focus-visible, summary:focus-visible, .chip:focus-visible, .tool-btn:focu
         </summary>
         <div class="details-body">
           <label class="switch-row">
-            <span><b>轮载矢量</b><small>箭头长度正比于四轮法向力</small></span>
+            <span><b>轮载矢量</b><small>箭头长度与法向力成正比（平均轮载 0.30 m，4.5 倍封顶）</small></span>
             <span class="switch"><input type="checkbox" id="showLoads" data-param="showLoads" checked><i></i></span>
           </label>
           <label class="switch-row">
@@ -1723,6 +1739,46 @@ const DEFAULTS = Object.freeze({
 const state = Object.assign({}, DEFAULTS);
 let autoRotate = false;
 
+
+// B3-2: geometry generations. Six dimension keys define one immutable
+// hard-point set; the revision is allocated monotonically and the active
+// revision (the one the running sim owns) is never evicted.
+const GEOMETRY_KEYS = ['wheelbase', 'trackFront', 'trackRear', 'wheelRadius', 'tireWidthF', 'tireWidthR'];
+let GEOMETRY_SERIAL = 0;
+let ACTIVE_GEOMETRY_KEY = '';
+const GEOMETRY_REVISIONS = new Map();
+
+function geometrySignature(source = state) {
+  return GEOMETRY_KEYS.map((key) => Number(source[key]).toFixed(6)).join('|');
+}
+
+function setActiveGeometry(source = state) {
+  ACTIVE_GEOMETRY_KEY = geometrySignature(source);
+  return geometryRevisionFor(source);
+}
+
+function geometryRevisionFor(source = state) {
+  const key = geometrySignature(source);
+  let revision = GEOMETRY_REVISIONS.get(key);
+  if (!revision) {
+    GEOMETRY_SERIAL += 1;
+    revision = GEOMETRY_SERIAL;
+    GEOMETRY_REVISIONS.set(key, revision);
+    while (GEOMETRY_REVISIONS.size > 64) {
+      let evict = null;
+      for (const candidate of GEOMETRY_REVISIONS.keys()) {
+        if (candidate !== ACTIVE_GEOMETRY_KEY) {
+          evict = candidate;
+          break;
+        }
+      }
+      if (!evict) break;
+      GEOMETRY_REVISIONS.delete(evict);
+    }
+  }
+  return revision;
+}
+
 function cloneState(source = state) {
   return Object.assign({}, source);
 }
@@ -2118,6 +2174,8 @@ function computeStatic(source = state) {
 
   return {
     source,
+    geometryRevision: geometryRevisionFor(source),
+    geometrySignature: geometrySignature(source),
     dims,
     frame,
     mass,
@@ -2172,6 +2230,7 @@ function computeStatic(source = state) {
     heave,
     pitch,
     roll,
+    referencePoint: { x: 0, y: heave, z: 0 },
     poseDeg: {
       pitch: pitch * RAD,
       roll: roll * RAD
@@ -2509,7 +2568,18 @@ function suspSolve3(J, b) {
   return out.every(Number.isFinite) ? out : null;
 }
 
+let SUSP_EVAL_COUNT = 0;
+
+function suspEvalReset() {
+  SUSP_EVAL_COUNT = 0;
+}
+
+function suspEvalCount() {
+  return SUSP_EVAL_COUNT;
+}
+
 function suspEval(corner, bodyPos, bodyQuat, rackShift, thL, thU, spin) {
+  SUSP_EVAL_COUNT += 1;
   const d = suspDesign(corner);
   const inlet = d.innerTrack0.clone();
   if (corner.front) inlet.z += rackShift;
@@ -2536,6 +2606,82 @@ function suspEval(corner, bodyPos, bodyQuat, rackShift, thL, thU, spin) {
   return { f, BL, BU, C, T, P, qU, axle, nb, cb, downProjection, wheelQuat: qU.clone().multiply(d.restQuat) };
 }
 
+function suspJacobianAt(corner, bodyPos, bodyQuat, rackShift, e, thL, thU, spin) {
+  const J = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+  const eps = 1e-6;
+  const eL = suspEval(corner, bodyPos, bodyQuat, rackShift, thL + eps, thU, spin);
+  const eU = suspEval(corner, bodyPos, bodyQuat, rackShift, thL, thU + eps, spin);
+  const eS = suspEval(corner, bodyPos, bodyQuat, rackShift, thL, thU, spin + eps);
+  for (let i = 0; i < 3; i += 1) {
+    J[i][0] = (eL.f[i] - e.f[i]) / eps;
+    J[i][1] = (eU.f[i] - e.f[i]) / eps;
+    J[i][2] = (eS.f[i] - e.f[i]) / eps;
+  }
+  return J;
+}
+
+function suspJacobianAnalytic(corner, state, rackShift, thL, thU, spin) {
+  const d = suspDesign(corner);
+  const line = state.BU.clone().sub(state.BL).normalize();
+  const segLen = state.BU.distanceTo(state.BL);
+  if (!(segLen > 1e-12)) return null;
+  const q0 = new THREE.Quaternion().setFromUnitVectors(d.line0, line);
+  const qSpin = new THREE.Quaternion().setFromAxisAngle(line, spin);
+  const qU = state.qU;
+  if (!qU) return null;
+  const project = (v) => v.clone().sub(line.clone().multiplyScalar(line.dot(v)));
+  const omegaOf = (dqU) => {
+    const conj = new THREE.Quaternion(-qU.x, -qU.y, -qU.z, qU.w);
+    const prod = new THREE.Quaternion().multiplyQuaternions(dqU, conj);
+    return new THREE.Vector3(2 * prod.x, 2 * prod.y, 2 * prod.z);
+  };
+  const q0Derivative = (dLine) => {
+    const axd = new THREE.Vector3().crossVectors(d.line0, dLine);
+    const ad = d.line0.dot(dLine);
+    const nrm = (1 + d.line0.dot(line)) / q0.w;
+    return new THREE.Quaternion(
+      (axd.x - (ad * q0.x) / nrm) / nrm,
+      (axd.y - (ad * q0.y) / nrm) / nrm,
+      (axd.z - (ad * q0.z) / nrm) / nrm,
+      (ad - (ad * q0.w) / nrm) / nrm
+    );
+  };
+  const dBL = new THREE.Vector3().crossVectors(d.axisL, state.BL.clone().sub(d.axisLPoint));
+  const dBU = new THREE.Vector3().crossVectors(d.axisU, state.BU.clone().sub(d.axisUPoint));
+  const dLineL = project(dBL.clone().negate()).divideScalar(segLen);
+  const dLineU = project(dBU).divideScalar(segLen);
+  const omegaL = omegaOf(qSpin.clone().multiply(q0Derivative(dLineL)));
+  const omegaU = omegaOf(qSpin.clone().multiply(q0Derivative(dLineU)));
+  const omegaS = omegaOf(new THREE.Quaternion(0.5 * line.x, 0.5 * line.y, 0.5 * line.z, 0).multiply(qU));
+  const inlet = d.innerTrack0.clone();
+  if (corner.front) inlet.z += rackShift || 0;
+  const tVec = state.T.clone().sub(inlet);
+  const tLen = tVec.length();
+  const f1Dir = tLen > 1e-12 ? tVec.clone().divideScalar(tLen) : new THREE.Vector3();
+  const nb = state.nb;
+  const down = state.downProjection;
+  const J = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+  const cols = [
+    { bl: dBL, bu: null, omega: omegaL },
+    { bl: null, bu: dBU, omega: omegaU },
+    { bl: null, bu: null, omega: omegaS }
+  ];
+  for (let c = 0; c < 3; c += 1) {
+    const col = cols[c];
+    const bl = col.bl || new THREE.Vector3();
+    const bu = col.bu || new THREE.Vector3();
+    J[0][c] = line.dot(bu.clone().sub(bl));
+    const dT = new THREE.Vector3().crossVectors(col.omega, state.T.clone().sub(state.BL)).add(bl);
+    J[1][c] = f1Dir.dot(dT);
+    const dC = new THREE.Vector3().crossVectors(col.omega, state.C.clone().sub(state.BL)).add(bl);
+    const dAxle = new THREE.Vector3().crossVectors(col.omega, state.axle.clone());
+    const nbDotAxle = nb.dot(state.axle);
+    const dDown = down > 1e-9 ? -(nbDotAxle * nb.dot(dAxle)) / down : 0;
+    J[2][c] = nb.dot(dC) - d.tireRadius * dDown;
+  }
+  return J;
+}
+
 function suspSolveRaw(corner, bodyPos, bodyQuat, rackShift, seed, cold) {
   const start = seed && !cold ? seed : { thL: 0, thU: 0, spin: 0 };
   let thL = start.thL || 0;
@@ -2543,6 +2689,8 @@ function suspSolveRaw(corner, bodyPos, bodyQuat, rackShift, seed, cold) {
   let spin = start.spin || 0;
   let best = null;
   let bestNorm = Infinity;
+  let lastJ = null;
+  let final = null;
   for (let iter = 0; iter < 12; iter += 1) {
     const e = suspEval(corner, bodyPos, bodyQuat, rackShift, thL, thU, spin);
     const norm = Math.max(Math.abs(e.f[0]), Math.abs(e.f[1]), Math.abs(e.f[2]));
@@ -2550,17 +2698,15 @@ function suspSolveRaw(corner, bodyPos, bodyQuat, rackShift, seed, cold) {
       bestNorm = norm;
       best = e;
     }
-    if (norm < 1e-10) break;
-    const J = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
-    const eps = 1e-6;
-    const eL = suspEval(corner, bodyPos, bodyQuat, rackShift, thL + eps, thU, spin);
-    const eU = suspEval(corner, bodyPos, bodyQuat, rackShift, thL, thU + eps, spin);
-    const eS = suspEval(corner, bodyPos, bodyQuat, rackShift, thL, thU, spin + eps);
-    for (let i = 0; i < 3; i += 1) {
-      J[i][0] = (eL.f[i] - e.f[i]) / eps;
-      J[i][1] = (eU.f[i] - e.f[i]) / eps;
-      J[i][2] = (eS.f[i] - e.f[i]) / eps;
+    if (norm < 1e-9) {
+      final = e;
+      break;
     }
+    const analyticJ = suspJacobianAnalytic(corner, e, rackShift, thL, thU, spin);
+    const J = (analyticJ && analyticJ.every((row) => row.every(Number.isFinite)))
+      ? analyticJ
+      : suspJacobianAt(corner, bodyPos, bodyQuat, rackShift, e, thL, thU, spin);
+    lastJ = J;
     const delta = suspSolve3(J, [-e.f[0], -e.f[1], -e.f[2]]);
     if (!delta) break;
     const scale = Math.max(Math.abs(delta[0]), Math.abs(delta[1]), Math.abs(delta[2]));
@@ -2570,20 +2716,33 @@ function suspSolveRaw(corner, bodyPos, bodyQuat, rackShift, seed, cold) {
     spin += delta[2] * limiter;
     if (!Number.isFinite(thL) || !Number.isFinite(thU) || !Number.isFinite(spin)) break;
   }
-  const final = suspEval(corner, bodyPos, bodyQuat, rackShift, thL, thU, spin);
-  const norm = Math.max(Math.abs(final.f[0]), Math.abs(final.f[1]), Math.abs(final.f[2]));
+  const finalEval = final || suspEval(corner, bodyPos, bodyQuat, rackShift, thL, thU, spin);
+  const norm = Math.max(Math.abs(finalEval.f[0]), Math.abs(finalEval.f[1]), Math.abs(finalEval.f[2]));
   const converged = norm < 1e-6;
+  const analyticFinal = suspJacobianAnalytic(corner, finalEval, rackShift, thL, thU, spin);
+  const jacobian = lastJ ||
+    ((analyticFinal && analyticFinal.every((row) => row.every(Number.isFinite))) ? analyticFinal : null) ||
+    suspJacobianAt(corner, bodyPos, bodyQuat, rackShift, finalEval, thL, thU, spin);
   return {
     thL,
     thU,
     spin,
     converged,
     error: norm,
-    evalState: final
+    evalState: finalEval,
+    jacobian
   };
 }
 
-function suspRockerAngle(corner, pushPoint, seed) {
+function suspRockerResidual(corner, pushPoint, angle) {
+  return Math.abs(suspRockerPoint(corner, corner.rocker.pushArm, angle).distanceTo(pushPoint) - suspDesign(corner).pushLen0);
+}
+
+/**
+ * Legacy Newton solver, kept only as a numerical reference for tests.
+ * Production code uses the closed-form suspRockerAngle below.
+ */
+function suspRockerAngleNewton(corner, pushPoint, seed) {
   const d = suspDesign(corner);
   const target = d.pushLen0;
   let angle = Number.isFinite(seed) ? seed : corner.rocker.baseAngle;
@@ -2603,8 +2762,142 @@ function suspRockerAngle(corner, pushPoint, seed) {
   return angle;
 }
 
+/**
+ * Closed-form pushrod-rocker closure. The rocker tip travels on a circle of
+ * radius rho about the pivot; the pushrod length fixes its distance to the
+ * push point, so the two circle intersections give at most two branches.
+ */
+function suspRockerAngle(corner, pushPoint, seed) {
+  const d = suspDesign(corner);
+  const target = d.pushLen0;
+  const pivot = corner.rocker.pivot;
+  const arm = corner.rocker.pushArm;
+  const rho = Math.hypot(arm.x, arm.y);
+  const phi = Math.atan2(arm.y, arm.x);
+  const ux = pushPoint.x - pivot.x;
+  const uy = pushPoint.y - pivot.y;
+  const uz = pushPoint.z - (pivot.z + arm.z);
+  const a = Math.hypot(ux, uy);
+  const seedAngle = Number.isFinite(seed) ? seed : corner.rocker.baseAngle;
+  const residualAt = (angle) => suspRockerResidual(corner, pushPoint, angle);
+  const alpha = Math.atan2(uy, ux);
+  const base = alpha - phi;
+  const pickNearest = (candidates) => {
+    let best = seedAngle;
+    let bestResidual = Infinity;
+    for (const angle of candidates) {
+      const residual = residualAt(angle);
+      if (residual < bestResidual) {
+        bestResidual = residual;
+        best = angle;
+      }
+    }
+    return { angle: best, residual: bestResidual };
+  };
+  const D2 = target * target - uz * uz;
+  if (a < 1e-12 || D2 < 0) {
+    // Unreachable: hold the seeded angle instead of jumping to a tangent
+    // point, so the seed chain stays on the assembly branch and recovers
+    // smoothly when the geometry becomes reachable again.
+    const held = Number.isFinite(seedAngle) ? seedAngle : base;
+    return { angle: held, residual: residualAt(held), feasible: false, branch: 0 };
+  }
+  const c = (rho * rho + a * a - D2) / (2 * rho * a);
+  if (!Number.isFinite(c) || Math.abs(c) > 1 + 1e-12) {
+    const held = Number.isFinite(seedAngle) ? seedAngle : base;
+    return { angle: held, residual: residualAt(held), feasible: false, branch: 0 };
+  }
+  const psi = Math.acos(Math.max(-1, Math.min(1, c)));
+  const candidates = [base + psi, base - psi];
+  const useFirst = Math.abs(candidates[0] - seedAngle) <= Math.abs(candidates[1] - seedAngle);
+  const angle = useFirst ? candidates[0] : candidates[1];
+  const residual = residualAt(angle);
+  const degenerate = psi < 1e-9 || Math.PI - psi < 1e-9;
+  return {
+    angle,
+    residual,
+    feasible: residual <= 1e-9,
+    branch: degenerate ? 0 : (useFirst ? 1 : -1)
+  };
+}
+
 function suspCoilLength(corner, angle) {
   return suspRockerPoint(corner, corner.rocker.damperArm, angle).distanceTo(corner.body.damper);
+}
+
+/**
+ * Analytic motion ratio. The linkage constraints depend on the reference-point
+ * height y through f(q; y) = 0 with df/dy = [0, 0, 1]; the implicit derivative
+ * dq/dy then propagates through the push point P and the pushrod closure.
+ */
+function suspMotionRatioAnalytic(corner, state, raw, rockerAngle) {
+  const d = suspDesign(corner);
+  if (!raw.jacobian) return null;
+  const dqdy = suspSolve3(raw.jacobian, [0, 0, -1]);
+  if (!dqdy || !dqdy.every(Number.isFinite)) return null;
+  const dthL = dqdy[0];
+  const dthU = dqdy[1];
+  const dspin = dqdy[2];
+  const line = state.BU.clone().sub(state.BL).normalize();
+  const segLen = state.BU.distanceTo(state.BL);
+  if (segLen < 1e-12) return null;
+  const q0 = new THREE.Quaternion().setFromUnitVectors(d.line0, line);
+  const qSpin = new THREE.Quaternion().setFromAxisAngle(line, raw.spin);
+  const qU = state.qU;
+  if (!qU) return null;
+  const project = (v) => v.clone().sub(line.clone().multiplyScalar(line.dot(v)));
+  const omegaOf = (dqU) => {
+    const conj = new THREE.Quaternion(-qU.x, -qU.y, -qU.z, qU.w);
+    const prod = new THREE.Quaternion().multiplyQuaternions(dqU, conj);
+    return new THREE.Vector3(2 * prod.x, 2 * prod.y, 2 * prod.z);
+  };
+  const q0Derivative = (dLine) => {
+    const axd = new THREE.Vector3().crossVectors(d.line0, dLine);
+    const ad = d.line0.dot(dLine);
+    const nrm = (1 + d.line0.dot(line)) / q0.w;
+    return new THREE.Quaternion(
+      (axd.x - (ad * q0.x) / nrm) / nrm,
+      (axd.y - (ad * q0.y) / nrm) / nrm,
+      (axd.z - (ad * q0.z) / nrm) / nrm,
+      (ad - (ad * q0.w) / nrm) / nrm
+    );
+  };
+  const dBL = new THREE.Vector3().crossVectors(d.axisL, state.BL.clone().sub(d.axisLPoint));
+  const dLineL = project(dBL.clone().negate()).divideScalar(segLen);
+  const dP_L = dBL.clone().add(new THREE.Vector3().crossVectors(
+    omegaOf(qSpin.clone().multiply(q0Derivative(dLineL))),
+    state.P.clone().sub(state.BL)
+  ));
+  const dBU = new THREE.Vector3().crossVectors(d.axisU, state.BU.clone().sub(d.axisUPoint));
+  const dLineU = project(dBU).divideScalar(segLen);
+  const dP_U = new THREE.Vector3().crossVectors(
+    omegaOf(qSpin.clone().multiply(q0Derivative(dLineU))),
+    state.P.clone().sub(state.BL)
+  );
+  const dP_S = new THREE.Vector3().crossVectors(line, state.P.clone().sub(state.BL));
+  const dPdy = dP_L.multiplyScalar(dthL).add(dP_U.multiplyScalar(dthU)).add(dP_S.multiplyScalar(dspin));
+  const cos = Math.cos(rockerAngle);
+  const sin = Math.sin(rockerAngle);
+  const pushArm = corner.rocker.pushArm;
+  const tip = suspRockerPoint(corner, pushArm, rockerAngle);
+  const dTip = new THREE.Vector3(-pushArm.x * sin - pushArm.y * cos, pushArm.x * cos - pushArm.y * sin, 0);
+  const w = tip.clone().sub(state.P);
+  const denom = w.dot(dTip);
+  if (!Number.isFinite(denom) || Math.abs(denom) < 1e-12) return null;
+  const dTheta = w.dot(dPdy) / denom;
+  const damperArm = corner.rocker.damperArm;
+  const damperTip = suspRockerPoint(corner, damperArm, rockerAngle);
+  const dDamperTip = new THREE.Vector3(
+    -damperArm.x * sin - damperArm.y * cos,
+    damperArm.x * cos - damperArm.y * sin,
+    0
+  );
+  const v = damperTip.clone().sub(corner.body.damper);
+  const vLen = v.length();
+  if (vLen < 1e-12) return null;
+  const dLdTheta = v.dot(dDamperTip) / vLen;
+  const ratio = dLdTheta * dTheta;
+  return Number.isFinite(ratio) ? ratio : null;
 }
 
 /**
@@ -2618,38 +2911,55 @@ function suspSolveCorner(corner, bodyPos, bodyQuat, rackShift, seed, withRatio) 
     if (cold.error < raw.error) raw = cold;
   }
   const state = raw.evalState;
-  const angle = suspRockerAngle(corner, state.P, corner.angle);
-  const coilLength = suspCoilLength(corner, angle);
+  const seedAngle = seed && Number.isFinite(seed.rockerAngle) ? seed.rockerAngle : corner.rocker.baseAngle;
+  const rocker = suspRockerAngle(corner, state.P, seedAngle);
+  const coilLength = suspCoilLength(corner, rocker.angle);
   let motionRatio = null;
-  const epsilon = 1e-3;
+  let motionRatioState = 'unavailable';
   if (withRatio) {
-    const high = suspSolveRaw(corner, { x: bodyPos.x, y: bodyPos.y + epsilon, z: bodyPos.z }, bodyQuat, rackShift, raw, false);
-    const low = suspSolveRaw(corner, { x: bodyPos.x, y: bodyPos.y - epsilon, z: bodyPos.z }, bodyQuat, rackShift, raw, false);
-    if (high.converged && low.converged) {
-      const lHigh = suspCoilLength(corner, suspRockerAngle(corner, high.evalState.P, angle));
-      const lLow = suspCoilLength(corner, suspRockerAngle(corner, low.evalState.P, angle));
-      motionRatio = (lHigh - lLow) / (2 * epsilon);
+    const ratio = suspMotionRatioAnalytic(corner, state, raw, rocker.angle);
+    if (ratio != null && Number.isFinite(ratio)) {
+      motionRatio = ratio;
+      motionRatioState = (ratio > 0.2 && ratio < 0.8) ? 'ok' : 'unavailable';
     }
   }
+  const frame = { converged: raw.converged, error: raw.error };
+  const ok = frame.converged && rocker.feasible && motionRatioState === 'ok';
   const d = suspDesign(corner);
   const down = state.nb.clone().multiplyScalar(-1);
   down.addScaledVector(state.axle, -down.dot(state.axle));
   if (down.lengthSq() > 1e-12) down.normalize(); else down.set(0, -1, 0);
   const contact = state.C.clone().addScaledVector(down, d.tireRadius);
+  // B2-3: one road-frame contact point and one road-frame wheel centre per
+  // corner; this is the single source consumed by forces, telemetry and the
+  // renderer. contactBody/wheelPosBody stay available for the mechanism.
+  const wheelPosBody = state.C.clone();
+  const contactBody = contact.clone();
+  const bodyOrigin = new THREE.Vector3(bodyPos.x, bodyPos.y, bodyPos.z);
+  const wheelPosRoad = wheelPosBody.clone().applyQuaternion(bodyQuat).add(bodyOrigin);
+  const contactRoad = contactBody.clone().applyQuaternion(bodyQuat).add(bodyOrigin);
   return {
     thL: raw.thL,
     thU: raw.thU,
     spin: raw.spin,
+    frame,
+    rocker,
+    coilLength,
+    motionRatio,
+    motionRatioState,
+    ok,
+    seed: { thL: raw.thL, thU: raw.thU, spin: raw.spin, rockerAngle: rocker.angle },
     converged: raw.converged,
     error: raw.error,
     wheelPos: state.C.clone(),
     wheelQuat: state.wheelQuat.clone(),
     contact,
+    contactBody,
+    wheelPosBody,
+    contactRoad,
+    wheelPosRoad,
     pushPoint: state.P.clone(),
-    rockerAngle: angle,
-    coilLength,
-    motionRatio,
-    seed: { thL: raw.thL, thU: raw.thU, spin: raw.spin }
+    rockerAngle: rocker.angle
   };
 }
 
@@ -2726,16 +3036,35 @@ function suspensionBuild(model) {
  */
 
 const SIM_DT = 1 / 500;
-const SIM_MAX_SUBSTEPS = 40;
-const SIM_MAX_FRAME_DT = 0.1;
+const SIM_MAX_SUBSTEPS = 128;
+const SIM_MAX_FRAME_DT = 0.5;
+const SIM_MAX_BACKLOG = 0.5;
 const SIM_REST_SPEED = 1e-4;
 const SIM_ANGULAR_LIMIT = 40;
 const SIM_LINEAR_LIMIT = 80;
 const SIM_BOUND_X = 4.2;
 const SIM_BOUND_Z = 2.6;
 const SIM_IMPULSE_SECONDS = 0.12;
+// B2-1: latched contact state machine.
+const SIM_ARREST_SPEED = 2e-3;
+const SIM_ARREST_RATE = 2e-3;
+const SIM_ARREST_DWELL = 3;
+const SIM_HOLD_HYSTERESIS = 0.02;
 
 let SIM = null;
+
+function simContactState() {
+  return {
+    mode: 'HOLD',
+    dwell: 0,
+    since: 0,
+    changes: 0,
+    lastChangeStep: 0,
+    reason: null,
+    slipSpeed: 0,
+    usage: 0
+  };
+}
 
 /* ------------------------------ quaternion helpers ------------------------------ */
 
@@ -2810,12 +3139,53 @@ function simCross(a, b) {
 
 /* ------------------------------ simulation state ------------------------------ */
 
+function simBodyPointFromCg(cg, q, cgBody) {
+  const arm = simQuatRotate(q, cgBody);
+  return [cg[0] - arm[0], cg[1] - arm[1], cg[2] - arm[2]];
+}
+
+function simCgFromBodyPoint(bodyPoint, q, cgBody) {
+  const arm = simQuatRotate(q, cgBody);
+  return [bodyPoint[0] + arm[0], bodyPoint[1] + arm[1], bodyPoint[2] + arm[2]];
+}
+
+function simReferencePoint(sim) {
+  const state = sim.state;
+  const reference = sim.reference;
+  if (!state) return { x: 0, y: 0, z: 0 };
+  const cgBody = reference && reference.cgBody ? reference.cgBody : { x: 0, y: 0, z: 0 };
+  const point = simBodyPointFromCg(
+    [state.x, state.y, state.z],
+    [state.qw, state.qx, state.qy, state.qz],
+    [cgBody.x, cgBody.y, cgBody.z]
+  );
+  return { x: point[0], y: point[1], z: point[2] };
+}
+
+function simRatioState(sim, index, row, instantRatio) {
+  const design = Math.abs(row && row.dLdDelta) > 1e-6 ? Math.abs(row.dLdDelta) : 0.5;
+  const previous = sim.cornerRatio[index];
+  const finite = Number.isFinite(instantRatio);
+  const inRange = finite && instantRatio > 0.05 && instantRatio < 2.0;
+  const nearDesign = inRange && instantRatio / design > 0.3 && instantRatio / design < 3.0;
+  const continuous = previous == null ||
+    (finite && Math.abs(instantRatio - previous) / Math.max(Math.abs(previous), 1e-6) < 0.2);
+  if (finite && nearDesign && continuous) {
+    sim.cornerRatio[index] = instantRatio;
+    return { ok: true, ratio: instantRatio };
+  }
+  if (previous != null) return { ok: false, ratio: previous };
+  return { ok: false, ratio: design };
+}
+
 function simEquilibriumState(reference) {
   const q = simQuatFromEuler(0, reference.pitch, reference.roll);
+  const cgBody = [reference.cgBody.x, reference.cgBody.y, reference.cgBody.z];
+  const cg = simCgFromBodyPoint([0, reference.heave, 0], q, cgBody);
   return {
-    x: 0,
-    y: reference.heave,
-    z: 0,
+    x: cg[0],
+    y: cg[1],
+    z: cg[2],
     vx: 0,
     vy: 0,
     vz: 0,
@@ -2836,10 +3206,15 @@ function simCreate(source = state, options = {}) {
     state: null,
     time: 0,
     impulse: null,
+    contact: simContactState(),
     running: true,
     accumulator: 0,
     lastSubsteps: 0,
     cornerSeed: [null, null, null, null],
+    cornerRatio: [null, null, null, null],
+    solverDegraded: false,
+    solverFailed: false,
+    solverFailureSteps: 0,
     rackShift: 0,
     flags: {
       holding: true,
@@ -2851,6 +3226,13 @@ function simCreate(source = state, options = {}) {
     resetCount: 0
   };
   sim.state = simEquilibriumState(sim.reference);
+  setActiveGeometry(source);
+  sim.geometryRevision = sim.reference.geometryRevision;
+  sim.steerApplied = source.steer;
+  sim.droppedTime = 0;
+  sim.lastFrameDt = 0;
+  sim.lastAdvance = 0;
+  sim.timeScale = 1;
   if (settle > 0) simRunFor(sim, settle);
   return sim;
 }
@@ -2859,11 +3241,23 @@ function simReset(sim, source = state, options = {}) {
   const settle = options.settle || 0;
   sim.reference = computeStatic(source);
   sim.state = simEquilibriumState(sim.reference);
+  setActiveGeometry(source);
+  sim.geometryRevision = sim.reference.geometryRevision;
+  sim.steerApplied = source.steer;
+  sim.droppedTime = 0;
+  sim.lastFrameDt = 0;
+  sim.lastAdvance = 0;
+  sim.timeScale = 1;
   sim.time = 0;
   sim.impulse = null;
+  sim.contact = simContactState();
   sim.accumulator = 0;
   sim.lastSubsteps = 0;
   sim.cornerSeed = [null, null, null, null];
+  sim.cornerRatio = [null, null, null, null];
+  sim.solverDegraded = false;
+  sim.solverFailed = false;
+  sim.solverFailureSteps = 0;
   sim.flags = {
     holding: true,
     sliding: false,
@@ -2876,22 +3270,45 @@ function simReset(sim, source = state, options = {}) {
   return sim;
 }
 
+/**
+ * Swap the reference model of a running simulation without resetting the body
+ * state or the contact latch (B2-1 / A-06). Seeds belong to the old geometry
+ * and are cleared; the body state and sim.contact are preserved.
+ */
+function simRetargetReference(sim, source = state) {
+  const next = computeStatic(source);
+  const previousRevision = sim.reference ? sim.reference.geometryRevision : undefined;
+  const nextRevision = next.geometryRevision;
+  if (previousRevision !== undefined && nextRevision !== undefined && previousRevision !== nextRevision) {
+    throw new Error('simRetargetReference: geometryRevision mismatch (' + previousRevision + ' -> ' + nextRevision + ')');
+  }
+  sim.reference = next;
+  setActiveGeometry(source);
+  sim.geometryRevision = next.geometryRevision;
+  sim.steerApplied = source.steer;
+  sim.cornerSeed = [null, null, null, null];
+  sim.cornerRatio = [null, null, null, null];
+  return sim;
+}
+
 function simActiveImpulse(sim) {
   return sim.impulse && sim.time < sim.impulse.until ? sim.impulse : null;
 }
 
 function simApplyImpulse(sim, kind = 'heave') {
+  // B2-2: offset is a body-frame point relative to the reference point;
+  // forceRoad is the road-frame impulse force, applied unchanged.
   const specs = {
-    heave: { label: '垂向脉冲', force: [0, -6800, 0], offset: [0, 0, 0] },
-    roll: { label: '侧倾脉冲', force: [0, -4200, 0], offset: [0, 0, 0.90] },
-    pitch: { label: '俯仰脉冲', force: [0, -6200, 0], offset: [0.95, 0, 0] }
+    heave: { label: '垂向脉冲', forceRoad: [0, -6800, 0], offset: [0, 0, 0] },
+    roll: { label: '侧倾脉冲', forceRoad: [0, -4200, 0], offset: [0, 0, 0.90] },
+    pitch: { label: '俯仰脉冲', forceRoad: [0, -6200, 0], offset: [0.95, 0, 0] }
   };
   const spec = specs[kind];
   if (!spec) return false;
   sim.impulse = {
     kind,
     label: spec.label,
-    force: spec.force.slice(),
+    forceRoad: spec.forceRoad.slice(),
     offset: spec.offset.slice(),
     until: sim.time + SIM_IMPULSE_SECONDS
   };
@@ -2901,41 +3318,83 @@ function simApplyImpulse(sim, kind = 'heave') {
 
 /* ------------------------------ force evaluation ------------------------------ */
 
-function simEvaluate(sim) {
-  const state = sim.state;
+/**
+ * B2-4: single force-assembly entry. It reads and writes the transient
+ * sim._evalAccum created by simEvaluate; bucket selects the moment part.
+ * roadPoint and forceRoad are road-frame; the arm is measured from the CG.
+ */
+function simApplyForceAt(sim, roadPoint, forceRoad, bucket) {
+  const accum = sim._evalAccum;
+  if (!accum) {
+    throw new Error('simApplyForceAt: sim._evalAccum is missing (call inside simEvaluate)');
+  }
+  const part = accum.momentParts[bucket];
+  if (!part) {
+    throw new Error('simApplyForceAt: unknown bucket ' + bucket);
+  }
+  const arm = [
+    roadPoint[0] - accum.cg[0],
+    roadPoint[1] - accum.cg[1],
+    roadPoint[2] - accum.cg[2]
+  ];
+  const localMoment = simCross(arm, forceRoad);
+  accum.force[0] += forceRoad[0];
+  accum.force[1] += forceRoad[1];
+  accum.force[2] += forceRoad[2];
+  part[0] += localMoment[0];
+  part[1] += localMoment[1];
+  part[2] += localMoment[2];
+}
+
+function simEvaluate(sim, dt = SIM_DT) {
+  const bodyState = sim.state;
   const reference = sim.reference;
-  const source = reference.source || state;
+  if (!reference || !reference.source) {
+    throw new Error('simEvaluate: reference.source is required');
+  }
+  const source = reference.source;
   const mass = reference.mass;
-  const q = [state.qw, state.qx, state.qy, state.qz];
+  const q = [bodyState.qw, bodyState.qx, bodyState.qy, bodyState.qz];
   const euler = simEulerFromQuat(q);
   const cgBody = [reference.cgBody.x, reference.cgBody.y, reference.cgBody.z];
-  const cgArm = simQuatRotate(q, cgBody);
-  const cg = [state.x + cgArm[0], state.y + cgArm[1], state.z + cgArm[2]];
-  const omegaBody = [state.wx, state.wy, state.wz];
+  const cg = [bodyState.x, bodyState.y, bodyState.z];
+  const bodyPoint = simBodyPointFromCg(cg, q, cgBody);
+  const refPos = { x: bodyPoint[0], y: bodyPoint[1], z: bodyPoint[2] };
+  const omegaBody = [bodyState.wx, bodyState.wy, bodyState.wz];
   const omegaRoad = simQuatRotate(q, omegaBody);
-  const velocity = [state.vx, state.vy, state.vz];
+  const velocity = [bodyState.vx, bodyState.vy, bodyState.vz];
   const gravity = [
     reference.frame.gravityLocal.x,
     reference.frame.gravityLocal.y,
     reference.frame.gravityLocal.z
   ];
-  const force = [mass * gravity[0], mass * gravity[1], mass * gravity[2]];
-  const moment = [0, 0, 0];
-  const cy = Math.cos(euler.yaw);
-  const sy = Math.sin(euler.yaw);
+  // Transient accumulator for simApplyForceAt; created and deleted by this
+  // function, never part of the model snapshot.
+  const accum = {
+    cg: [cg[0], cg[1], cg[2]],
+    force: [mass * gravity[0], mass * gravity[1], mass * gravity[2]],
+    momentParts: {
+      normal: [0, 0, 0],
+      friction: [0, 0, 0],
+      impulse: [0, 0, 0]
+    }
+  };
+  sim._evalAccum = accum;
+  const force = accum.force;
   const corners = [];
 
   const geometry = reference.suspension ? reference.suspension.corners : null;
   const design = reference.suspension ? reference.suspension.design : null;
-  const bodyPos = { x: state.x, y: state.y, z: state.z };
-  const bodyQuat = new THREE.Quaternion(state.qx, state.qy, state.qz, state.qw);
+  const bodyPos = refPos;
+  const bodyQuat = new THREE.Quaternion(bodyState.qx, bodyState.qy, bodyState.qz, bodyState.qw);
   const rackShift = sim.rackShift || 0;
+  let degraded = false;
 
   for (let i = 0; i < reference.wheels.length; i += 1) {
     const wheel = reference.wheels[i];
-    const arm = [wheel.x, 0, wheel.z];
+    const arm = [wheel.x - cgBody[0], -cgBody[1], wheel.z - cgBody[2]];
     const armRoad = simQuatRotate(q, arm);
-    const cornerY = state.y + armRoad[1];
+    const cornerY = cg[1] + armRoad[1];
     const cornerVelocityY = velocity[1] + (omegaRoad[2] * armRoad[0] - omegaRoad[0] * armRoad[2]);
     let solved = null;
     let springForce = 0;
@@ -2947,10 +3406,11 @@ function simEvaluate(sim) {
       const row = design[i];
       solved = suspSolveCorner(geometry[i], bodyPos, bodyQuat, rackShift, sim.cornerSeed[i], true);
       sim.cornerSeed[i] = solved.seed;
-      const instantRatio = solved.motionRatio != null ? solved.motionRatio : row.motionRatio;
+      const ratioCheck = simRatioState(sim, i, row, solved.motionRatio);
+      if (!ratioCheck.ok) degraded = true;
       const deltaDot = -cornerVelocityY;
-      if (solved.converged) {
-        const dLdDelta = -instantRatio;
+      if (solved.frame.converged) {
+        const dLdDelta = -ratioCheck.ratio;
         lengthDot = dLdDelta * deltaDot;
         coilLength = solved.coilLength;
         springForce = row.coilRate * (coilLength - row.refLength) * dLdDelta;
@@ -2964,13 +3424,40 @@ function simEvaluate(sim) {
         springForce = row.coilRate * (coilLength - row.refLength) * dLdDelta;
         dampingForce = row.coilDamping * dLdDelta * dLdDelta * deltaDot;
       }
-      ratio = instantRatio;
+      ratio = ratioCheck.ratio;
     } else {
       springForce = reference.baseLoads[i] - reference.springRates[i] * cornerY;
       dampingForce = -reference.damperRateWheel[i] * cornerVelocityY;
     }
-    const contactX = state.x + cy * wheel.x + sy * wheel.z;
-    const contactZ = state.z - sy * wheel.x + cy * wheel.z;
+    // B2-3: one road-frame contact point per corner. The solved mechanism
+    // provides it; the fallback (no suspension model) projects the design
+    // wheel centre onto the road plane with the full quaternion and the road
+    // normal [0,1,0], never the gravity direction.
+    let contactRoad;
+    let wheelPosRoad;
+    if (solved && solved.contactRoad) {
+      contactRoad = [solved.contactRoad.x, solved.contactRoad.y, solved.contactRoad.z];
+      wheelPosRoad = [solved.wheelPosRoad.x, solved.wheelPosRoad.y, solved.wheelPosRoad.z];
+    } else {
+      const rest = simQuatRotate(q, [wheel.x, 0, wheel.z]);
+      const px = refPos.x + rest[0];
+      const pz = refPos.z + rest[2];
+      contactRoad = [px, 0, pz];
+      wheelPosRoad = [px, reference.dims.R, pz];
+    }
+    const contactArm = [contactRoad[0] - cg[0], contactRoad[1] - cg[1], contactRoad[2] - cg[2]];
+    const contactVelocity = [
+      velocity[0] + (omegaRoad[1] * contactArm[2] - omegaRoad[2] * contactArm[1]),
+      velocity[1] + (omegaRoad[2] * contactArm[0] - omegaRoad[0] * contactArm[2]),
+      velocity[2] + (omegaRoad[0] * contactArm[1] - omegaRoad[1] * contactArm[0])
+    ];
+    // Parking friction only sees the planar degrees of freedom (translation +
+    // yaw); roll/pitch rates are absorbed by the suspension in this model, so
+    // they must not inject tangential slip at the contact patch.
+    const slipVelocity = [
+      velocity[0] + omegaRoad[1] * contactArm[2],
+      velocity[2] - omegaRoad[1] * contactArm[0]
+    ];
     corners.push({
       key: wheel.key,
       index: i,
@@ -2982,7 +3469,10 @@ function simEvaluate(sim) {
       arbForce: 0,
       rawForce: springForce + dampingForce,
       force: 0,
-      contact: [contactX, 0, contactZ],
+      contact: contactRoad,
+      contactVelocity,
+      slipVelocity,
+      wheelPos: wheelPosRoad,
       solved,
       coilLength,
       lengthDot,
@@ -3007,119 +3497,222 @@ function simEvaluate(sim) {
   let sumNormal = 0;
   for (const corner of corners) {
     corner.force = Math.max(0, corner.rawForce);
+    corner.normal = corner.force;
     sumNormal += corner.force;
-    const arm = [corner.contact[0] - cg[0], -cg[1], corner.contact[2] - cg[2]];
-    const vertical = [0, corner.force, 0];
-    const localMoment = simCross(arm, vertical);
-    moment[0] += localMoment[0];
-    moment[1] += localMoment[1];
-    moment[2] += localMoment[2];
-    force[1] += corner.force;
+    simApplyForceAt(sim, corner.contact, [0, corner.force, 0], 'normal');
   }
+  const normalMomentY = accum.momentParts.normal[1];
 
   const impulse = simActiveImpulse(sim);
+  const impulseLeverRoad = impulse
+    ? simQuatRotate(q, [
+      impulse.offset[0] - cgBody[0],
+      impulse.offset[1] - cgBody[1],
+      impulse.offset[2] - cgBody[2]
+    ])
+    : null;
   const externalTangent = [
-    mass * gravity[0] + (impulse ? impulse.force[0] : 0),
+    mass * gravity[0] + (impulse ? impulse.forceRoad[0] : 0),
     0,
-    mass * gravity[2] + (impulse ? impulse.force[2] : 0)
+    mass * gravity[2] + (impulse ? impulse.forceRoad[2] : 0)
   ];
   const demand = Math.hypot(externalTangent[0], externalTangent[2]);
   const frictionCoefficient = Number.isFinite(source.friction) ? source.friction : DEFAULTS.friction;
   const capacity = frictionCoefficient * sumNormal;
-  const atRest = Math.abs(state.vx) < SIM_REST_SPEED &&
-    Math.abs(state.vz) < SIM_REST_SPEED &&
-    Math.abs(state.wy) < SIM_REST_SPEED;
-  const holding = atRest && sumNormal > 1e-6 && demand <= capacity + 1e-9;
-  let sliding = false;
+  const atRest = Math.abs(bodyState.vx) < SIM_REST_SPEED &&
+    Math.abs(bodyState.vz) < SIM_REST_SPEED &&
+    Math.abs(bodyState.wy) < SIM_REST_SPEED;
+
+  // B2-1: latched HOLD/SLIP contact state. simEvaluate only proposes
+  // contactNext; simStep commits it after the integration step.
+  const previousContact = sim.contact || simContactState();
+  let maxSlipSpeed = 0;
+  for (const corner of corners) {
+    maxSlipSpeed = Math.max(maxSlipSpeed, Math.hypot(corner.slipVelocity[0], corner.slipVelocity[1]));
+  }
+  const planarSpeed = Math.hypot(bodyState.vx, bodyState.vz);
+  const lifted = corners.some((corner) => corner.force <= 1e-6);
+  let mode = previousContact.mode === 'SLIP' ? 'SLIP' : 'HOLD';
+  let reason = previousContact.reason;
+  let modeChanged = false;
+  if (mode === 'HOLD') {
+    if (planarSpeed > SIM_ARREST_SPEED) { mode = 'SLIP'; reason = 'speed'; }
+    else if (Math.abs(bodyState.wy) > SIM_ARREST_RATE) { mode = 'SLIP'; reason = 'yaw'; }
+    else if (maxSlipSpeed > SIM_ARREST_SPEED) { mode = 'SLIP'; reason = 'slip'; }
+    else if (sumNormal <= 1e-6 || lifted) { mode = 'SLIP'; reason = 'lift'; }
+    else if (demand > capacity) { mode = 'SLIP'; reason = 'demand'; }
+    modeChanged = mode === 'SLIP';
+  }
+
   const frictionForces = [];
+  let usage = 0;
+  const arrest = { planar: false, yaw: false };
+  const recordFriction = (corner, friction) => {
+    frictionForces.push(friction);
+    corner.friction = friction;
+    simApplyForceAt(sim, corner.contact, friction, 'friction');
+    if (frictionCoefficient > 1e-9 && corner.force > 1e-9) {
+      usage = Math.max(usage, Math.hypot(friction[0], friction[2]) / (frictionCoefficient * corner.force));
+    }
+  };
 
   if (sumNormal > 1e-6) {
-    if (holding) {
+    if (mode === 'HOLD') {
       for (const corner of corners) {
         const share = corner.force / sumNormal;
-        const friction = [-externalTangent[0] * share, 0, -externalTangent[2] * share];
-        frictionForces.push(friction);
-        const arm = [corner.contact[0] - cg[0], -cg[1], corner.contact[2] - cg[2]];
-        const localMoment = simCross(arm, friction);
-        moment[0] += localMoment[0];
-        moment[1] += localMoment[1];
-        moment[2] += localMoment[2];
-        force[0] += friction[0];
-        force[2] += friction[2];
+        recordFriction(corner, [-externalTangent[0] * share, 0, -externalTangent[2] * share]);
       }
     } else {
-      sliding = true;
-      const globalDirection = demand > 1e-9
-        ? [-externalTangent[0] / demand, 0, -externalTangent[2] / demand]
-        : [0, 0, 0];
+      // Near the arrest threshold the per-corner contact velocities are
+      // dominated by the yaw term and point in different directions; using
+      // them would let the friction impulse accelerate the body again. Below
+      // SIM_ARREST_SPEED every corner uses the body-level slip direction so
+      // the stopping-impulse budget is well defined.
+      let globalDirection = [0, 0, 0];
+      if (planarSpeed > 1e-9) {
+        globalDirection = [-bodyState.vx / planarSpeed, 0, -bodyState.vz / planarSpeed];
+      } else if (demand > 1e-9) {
+        globalDirection = [-externalTangent[0] / demand, 0, -externalTangent[2] / demand];
+      }
+      const raw = [];
+      const inertiaY = reference.inertia.Iyy;
+      const clampToStop = planarSpeed > 1e-9 || Math.abs(bodyState.wy) > SIM_ARREST_RATE;
       for (const corner of corners) {
-        const arm = [corner.contact[0] - state.x, -state.y, corner.contact[2] - state.z];
-        const contactVelocity = [
-          velocity[0] + (omegaRoad[1] * arm[2] - omegaRoad[2] * arm[1]),
-          0,
-          velocity[2] + (omegaRoad[0] * arm[1] - omegaRoad[1] * arm[0])
-        ];
-        const contactSpeed = Math.hypot(contactVelocity[0], contactVelocity[2]);
-        const direction = contactSpeed > 1e-3
-          ? [-contactVelocity[0] / contactSpeed, 0, -contactVelocity[2] / contactSpeed]
+        const slipVelocity = corner.slipVelocity;
+        const contactSpeed = Math.hypot(slipVelocity[0], slipVelocity[1]);
+        const direction = contactSpeed > SIM_ARREST_SPEED
+          ? [-slipVelocity[0] / contactSpeed, 0, -slipVelocity[1] / contactSpeed]
           : globalDirection;
-        const magnitude = frictionCoefficient * corner.force;
-        const friction = [magnitude * direction[0], 0, magnitude * direction[2]];
-        frictionForces.push(friction);
-        const momentArm = [corner.contact[0] - cg[0], -cg[1], corner.contact[2] - cg[2]];
-        const localMoment = simCross(momentArm, friction);
-        moment[0] += localMoment[0];
-        moment[1] += localMoment[1];
-        moment[2] += localMoment[2];
-        force[0] += friction[0];
-        force[2] += friction[2];
+        let magnitude = frictionCoefficient * corner.force;
+        if (clampToStop && contactSpeed > 1e-12) {
+          // Impulse needed to stop this contact patch; the effective mass
+          // includes the yaw coupling (r x t)_y^2 / Iyy.
+          const rxT = (corner.contact[2] - cg[2]) * direction[0] - (corner.contact[0] - cg[0]) * direction[2];
+          const effectiveMass = 1 / (1 / mass + (rxT * rxT) / inertiaY);
+          magnitude = Math.min(magnitude, contactSpeed * effectiveMass / dt);
+        }
+        raw.push([magnitude * direction[0], 0, magnitude * direction[2]]);
+      }
+      // Stopping-impulse budget: the friction impulse may not exceed the
+      // momentum it has to remove, otherwise one 2 ms step reverses the
+      // velocity. L_ext only contains non-friction moments (normal + impulse).
+      let jX = 0;
+      let jZ = 0;
+      let jY = 0;
+      for (let index = 0; index < corners.length; index += 1) {
+        const corner = corners[index];
+        const armX = corner.contact[0] - cg[0];
+        const armZ = corner.contact[2] - cg[2];
+        jX += raw[index][0] * dt;
+        jZ += raw[index][2] * dt;
+        jY += (armZ * raw[index][0] - armX * raw[index][2]) * dt;
+      }
+      const pNowX = mass * bodyState.vx + externalTangent[0] * dt;
+      const pNowZ = mass * bodyState.vz + externalTangent[2] * dt;
+      const needPlanar = Math.hypot(pNowX, pNowZ);
+      const havePlanar = Math.hypot(jX, jZ);
+      const extYawMoment = normalMomentY + (impulseLeverRoad
+        ? impulseLeverRoad[2] * impulse.forceRoad[0] - impulseLeverRoad[0] * impulse.forceRoad[2]
+        : 0);
+      const yawNow = reference.inertia.Iyy * bodyState.wy + extYawMoment * dt;
+      // Only clamp when the friction impulse opposes the momentum it would
+      // remove; otherwise it would scale a pure spin or a pure translation to
+      // zero and stop the contact entirely.
+      let kPlanar = 1;
+      if (jX * pNowX + jZ * pNowZ < -1e-12 && havePlanar > 1e-12 && needPlanar < havePlanar) {
+        kPlanar = needPlanar / havePlanar;
+      }
+      let kYaw = 1;
+      // Only a real spin can reverse its sign within one step; a yaw impulse
+      // acting on a body that is not spinning must not scale the friction to
+      // zero (that would cancel the linear slide arrest).
+      if (Math.abs(bodyState.wy) > SIM_ARREST_RATE && jY * yawNow < -1e-12 &&
+          Math.abs(jY) > 1e-12 && Math.abs(yawNow) < Math.abs(jY)) {
+        kYaw = Math.abs(yawNow) / Math.abs(jY);
+      }
+      const k = Math.min(kPlanar, kYaw);
+      arrest.planar = kPlanar < 1;
+      arrest.yaw = kYaw < 1;
+      arrest.kPlanar = kPlanar;
+      arrest.kYaw = kYaw;
+      arrest.k = k;
+      arrest.planarMoment = [pNowX, pNowZ];
+      arrest.planarImpulse = [jX, jZ];
+      arrest.yawMoment = yawNow;
+      arrest.yawImpulse = jY;
+      for (let index = 0; index < corners.length; index += 1) {
+        recordFriction(corners[index], [raw[index][0] * k, 0, raw[index][2] * k]);
       }
     }
   }
 
   if (impulse) {
-    force[0] += impulse.force[0];
-    force[1] += impulse.force[1];
-    force[2] += impulse.force[2];
-    const localMoment = simCross(impulse.offset, impulse.force);
-    moment[0] += localMoment[0];
-    moment[1] += localMoment[1];
-    moment[2] += localMoment[2];
+    const impulsePoint = [cg[0] + impulseLeverRoad[0], cg[1] + impulseLeverRoad[1], cg[2] + impulseLeverRoad[2]];
+    simApplyForceAt(sim, impulsePoint, impulse.forceRoad, 'impulse');
   }
+  const moment = [
+    accum.momentParts.normal[0] + accum.momentParts.friction[0] + accum.momentParts.impulse[0],
+    accum.momentParts.normal[1] + accum.momentParts.friction[1] + accum.momentParts.impulse[1],
+    accum.momentParts.normal[2] + accum.momentParts.friction[2] + accum.momentParts.impulse[2]
+  ];
+  const momentParts = accum.momentParts;
+  delete sim._evalAccum;
+
+  const stepIndex = Math.round(sim.time / dt);
+  const contactNext = {
+    mode,
+    dwell: modeChanged ? 0 : previousContact.dwell,
+    since: modeChanged ? sim.time : previousContact.since,
+    changes: modeChanged ? previousContact.changes + 1 : previousContact.changes,
+    lastChangeStep: modeChanged ? stepIndex : previousContact.lastChangeStep,
+    reason: mode === 'SLIP' ? reason : null,
+    slipSpeed: maxSlipSpeed,
+    usage
+  };
 
   return {
     force,
     moment,
+    momentParts,
     corners,
     frictionForces,
     cg,
+    bodyPoint: bodyPoint.slice(),
+    refPos,
     euler,
     omegaRoad,
     velocity,
     sumNormal,
+    normalMomentY,
     externalTangent,
     demand,
     capacity,
-    holding,
-    sliding,
+    holding: mode === 'HOLD',
+    sliding: mode === 'SLIP',
+    contactNext,
+    arrest,
     impulse,
-    atRest
+    atRest,
+    degraded,
+    solverOk: corners.every((corner) => !corner.solved || corner.solved.ok)
   };
 }
 
 /* ------------------------------ integration ------------------------------ */
 
 function simIntegrate(sim, dt) {
-  const state = sim.state;
+  const bodyState = sim.state;
   const reference = sim.reference;
-  const evaluation = simEvaluate(sim);
+  const evaluation = simEvaluate(sim, dt);
   const mass = reference.mass;
   const inertia = reference.inertia;
-  const q = [state.qw, state.qx, state.qy, state.qz];
+  const q = [bodyState.qw, bodyState.qx, bodyState.qy, bodyState.qz];
 
+  // B1-1: bodyState.x/y/z is the centre of mass, so F/m is already the CG
+  // acceleration and the moment about the CG drives the rotation directly.
   const accel = [evaluation.force[0] / mass, evaluation.force[1] / mass, evaluation.force[2] / mass];
   const momentBody = simQuatRotateInverse(q, evaluation.moment);
-  const omega = [state.wx, state.wy, state.wz];
+  const omega = [bodyState.wx, bodyState.wy, bodyState.wz];
   const inertiaMoment = [inertia.Ixx * omega[0], inertia.Iyy * omega[1], inertia.Izz * omega[2]];
   const gyroscopic = simCross(omega, inertiaMoment);
   const alpha = [
@@ -3134,39 +3727,47 @@ function simIntegrate(sim, dt) {
     alpha[1] = 0;
   }
 
-  state.vx += accel[0] * dt;
-  state.vy += accel[1] * dt;
-  state.vz += accel[2] * dt;
-  state.wx += alpha[0] * dt;
-  state.wy += alpha[1] * dt;
-  state.wz += alpha[2] * dt;
+  bodyState.vx += accel[0] * dt;
+  bodyState.vy += accel[1] * dt;
+  bodyState.vz += accel[2] * dt;
+  bodyState.wx += alpha[0] * dt;
+  bodyState.wy += alpha[1] * dt;
+  bodyState.wz += alpha[2] * dt;
 
   if (evaluation.holding) {
-    state.vx = 0;
-    state.vz = 0;
-    state.wy = 0;
+    bodyState.vx = 0;
+    bodyState.vz = 0;
+    bodyState.wy = 0;
+  } else if (evaluation.arrest) {
+    // B2-1: the clamped friction impulse is enough to stop the planar or yaw
+    // motion this step; project the component to zero instead of overshooting.
+    if (evaluation.arrest.planar) {
+      bodyState.vx = 0;
+      bodyState.vz = 0;
+    }
+    if (evaluation.arrest.yaw) bodyState.wy = 0;
   }
 
-  const linearSpeed = Math.hypot(state.vx, state.vy, state.vz);
+  const linearSpeed = Math.hypot(bodyState.vx, bodyState.vy, bodyState.vz);
   if (linearSpeed > SIM_LINEAR_LIMIT) {
     const scale = SIM_LINEAR_LIMIT / linearSpeed;
-    state.vx *= scale;
-    state.vy *= scale;
-    state.vz *= scale;
+    bodyState.vx *= scale;
+    bodyState.vy *= scale;
+    bodyState.vz *= scale;
   }
-  const angularSpeed = Math.hypot(state.wx, state.wy, state.wz);
+  const angularSpeed = Math.hypot(bodyState.wx, bodyState.wy, bodyState.wz);
   if (angularSpeed > SIM_ANGULAR_LIMIT) {
     const scale = SIM_ANGULAR_LIMIT / angularSpeed;
-    state.wx *= scale;
-    state.wy *= scale;
-    state.wz *= scale;
+    bodyState.wx *= scale;
+    bodyState.wy *= scale;
+    bodyState.wz *= scale;
   }
 
-  state.x += state.vx * dt;
-  state.y += state.vy * dt;
-  state.z += state.vz * dt;
+  bodyState.x += bodyState.vx * dt;
+  bodyState.y += bodyState.vy * dt;
+  bodyState.z += bodyState.vz * dt;
 
-  const derivative = simQuatDerivative(q, [state.wx, state.wy, state.wz]);
+  const derivative = simQuatDerivative(q, [bodyState.wx, bodyState.wy, bodyState.wz]);
   let nextQ = simQuatNormalize([
     q[0] + derivative[0] * dt,
     q[1] + derivative[1] * dt,
@@ -3177,40 +3778,88 @@ function simIntegrate(sim, dt) {
     const nextEuler = simEulerFromQuat(nextQ);
     nextQ = simQuatFromEuler(evaluation.euler.yaw, nextEuler.pitch, nextEuler.roll);
   }
-  state.qw = nextQ[0];
-  state.qx = nextQ[1];
-  state.qy = nextQ[2];
-  state.qz = nextQ[3];
+  bodyState.qw = nextQ[0];
+  bodyState.qx = nextQ[1];
+  bodyState.qy = nextQ[2];
+  bodyState.qz = nextQ[3];
 
-  if (Math.abs(state.x) > SIM_BOUND_X) {
-    state.x = Math.sign(state.x) * SIM_BOUND_X;
-    state.vx = 0;
-    state.vz = 0;
+  // Centre-of-mass bounds of the test rig.
+  if (Math.abs(bodyState.x) > SIM_BOUND_X) {
+    bodyState.x = Math.sign(bodyState.x) * SIM_BOUND_X;
+    bodyState.vx = 0;
+    bodyState.vz = 0;
     sim.flags.boundary = true;
   }
-  if (Math.abs(state.z) > SIM_BOUND_Z) {
-    state.z = Math.sign(state.z) * SIM_BOUND_Z;
-    state.vx = 0;
-    state.vz = 0;
+  if (Math.abs(bodyState.z) > SIM_BOUND_Z) {
+    bodyState.z = Math.sign(bodyState.z) * SIM_BOUND_Z;
+    bodyState.vx = 0;
+    bodyState.vz = 0;
     sim.flags.boundary = true;
   }
 
   const finite = [
-    state.x, state.y, state.z,
-    state.vx, state.vy, state.vz,
-    state.qw, state.qx, state.qy, state.qz,
-    state.wx, state.wy, state.wz
+    bodyState.x, bodyState.y, bodyState.z,
+    bodyState.vx, bodyState.vy, bodyState.vz,
+    bodyState.qw, bodyState.qx, bodyState.qy, bodyState.qz,
+    bodyState.wx, bodyState.wy, bodyState.wz
   ].every(Number.isFinite);
   if (!finite) {
     sim.flags.finite = false;
     sim.flags.recovered = true;
     sim.state = simEquilibriumState(reference);
+    sim.cornerSeed = [null, null, null, null];
+    sim.cornerRatio = [null, null, null, null];
+    sim.contact = simContactState();
+    sim.solverDegraded = false;
+    sim.solverFailed = false;
+    sim.solverFailureSteps = 0;
     sim.impulse = null;
     sim.accumulator = 0;
   }
 
-  sim.flags.holding = evaluation.holding;
-  sim.flags.sliding = evaluation.sliding;
+  if (evaluation.degraded) {
+    sim.solverDegraded = true;
+    sim.solverFailureSteps += 1;
+    if (sim.solverFailureSteps >= 10) sim.solverFailed = true;
+  } else {
+    sim.solverDegraded = false;
+    sim.solverFailureSteps = 0;
+  }
+
+  // B2-1: SLIP -> HOLD after SIM_ARREST_DWELL consecutive arrested substeps.
+  const contactNext = evaluation.contactNext;
+  if (contactNext.mode === 'SLIP') {
+    const speed = Math.hypot(bodyState.vx, bodyState.vz);
+    const qPost = [bodyState.qw, bodyState.qx, bodyState.qy, bodyState.qz];
+    const omegaPost = simQuatRotate(qPost, [bodyState.wx, bodyState.wy, bodyState.wz]);
+    let slip = 0;
+    for (const corner of evaluation.corners) {
+      const arm = [corner.contact[0] - bodyState.x, corner.contact[1] - bodyState.y, corner.contact[2] - bodyState.z];
+      const vx = bodyState.vx + omegaPost[1] * arm[2];
+      const vz = bodyState.vz - omegaPost[1] * arm[0];
+      slip = Math.max(slip, Math.hypot(vx, vz));
+    }
+    contactNext.slipSpeed = slip;
+    const canPark = evaluation.demand <= evaluation.capacity * (1 - SIM_HOLD_HYSTERESIS);
+    if (speed <= SIM_ARREST_SPEED && Math.abs(bodyState.wy) <= SIM_ARREST_RATE &&
+        slip <= SIM_ARREST_SPEED && canPark) {
+      contactNext.dwell += 1;
+    } else {
+      contactNext.dwell = 0;
+    }
+    if (contactNext.dwell >= SIM_ARREST_DWELL) {
+      contactNext.mode = 'HOLD';
+      contactNext.since = sim.time + dt;
+      contactNext.changes += 1;
+      contactNext.lastChangeStep = Math.round((sim.time + dt) / dt);
+      contactNext.reason = null;
+      bodyState.vx = 0;
+      bodyState.vz = 0;
+      bodyState.wy = 0;
+    }
+  }
+  sim.flags.holding = contactNext.mode === 'HOLD';
+  sim.flags.sliding = contactNext.mode === 'SLIP';
   sim.time += dt;
   if (sim.impulse && sim.time >= sim.impulse.until) sim.impulse = null;
   return evaluation;
@@ -3218,7 +3867,9 @@ function simIntegrate(sim, dt) {
 
 function simStep(sim, dt = SIM_DT) {
   if (!sim || !sim.state) return null;
-  return simIntegrate(sim, dt);
+  const evaluation = simIntegrate(sim, dt);
+  if (evaluation && evaluation.contactNext) sim.contact = evaluation.contactNext;
+  return evaluation;
 }
 
 function simRunFor(sim, seconds, dt = SIM_DT) {
@@ -3229,15 +3880,25 @@ function simRunFor(sim, seconds, dt = SIM_DT) {
 
 function simAdvance(sim, frameDt) {
   if (!sim || !sim.running || !sim.state) return 0;
-  sim.accumulator += clamp(frameDt, 0, SIM_MAX_FRAME_DT);
+  const wallDt = Number.isFinite(frameDt) && frameDt > 0 ? frameDt : 0;
+  const accepted = Math.min(wallDt, SIM_MAX_FRAME_DT);
+  sim.accumulator += accepted;
+  let dropped = wallDt - accepted;
+  if (sim.accumulator > SIM_MAX_BACKLOG) {
+    dropped += sim.accumulator - SIM_MAX_BACKLOG;
+    sim.accumulator = SIM_MAX_BACKLOG;
+  }
   let steps = 0;
   while (sim.accumulator >= SIM_DT && steps < SIM_MAX_SUBSTEPS) {
     simStep(sim, SIM_DT);
     sim.accumulator -= SIM_DT;
     steps += 1;
   }
-  if (steps >= SIM_MAX_SUBSTEPS) sim.accumulator = 0;
   sim.lastSubsteps = steps;
+  sim.lastFrameDt = wallDt;
+  sim.lastAdvance = steps * SIM_DT;
+  sim.droppedTime = (sim.droppedTime || 0) + dropped;
+  sim.timeScale = wallDt > 0 ? sim.lastAdvance / wallDt : 1;
   return steps;
 }
 
@@ -3245,7 +3906,12 @@ function simAdvance(sim, frameDt) {
 
 function simBuildModel(sim, source = state) {
   const reference = sim.reference || computeStatic(source);
+  // Telemetry/model reads must not perturb the solver seed bus (O1).
+  const seedBefore = Array.isArray(sim.cornerSeed) ? sim.cornerSeed.slice() : null;
+  const ratioBefore = Array.isArray(sim.cornerRatio) ? sim.cornerRatio.slice() : null;
   const evaluation = simEvaluate(sim);
+  if (seedBefore) sim.cornerSeed = seedBefore;
+  if (ratioBefore) sim.cornerRatio = ratioBefore;
   const state = sim.state;
   const euler = evaluation.euler;
   const q = [state.qw, state.qx, state.qy, state.qz];
@@ -3269,9 +3935,9 @@ function simBuildModel(sim, source = state) {
     z: corner.contact[2]
   }));
   const wheelCenters = corners.map((corner) => ({
-    x: corner.contact[0],
-    y: reference.dims.R,
-    z: corner.contact[2]
+    x: corner.wheelPos[0],
+    y: corner.wheelPos[1],
+    z: corner.wheelPos[2]
   }));
   const normalMomentX = loads.reduce((acc, value, i) => acc + value * contactPoints[i].x, 0);
   const normalMomentZ = loads.reduce((acc, value, i) => acc + value * contactPoints[i].z, 0);
@@ -3288,23 +3954,29 @@ function simBuildModel(sim, source = state) {
   const pz = cg[2] + projectionT * down[2];
   const motionRatio = reference.motionRatio;
   const designRow = reference.suspension ? reference.suspension.design : null;
-  const bodyVec = new THREE.Vector3(state.x, state.y, state.z);
+  const refPos = evaluation.refPos;
   const bodyQuat = new THREE.Quaternion(state.qx, state.qy, state.qz, state.qw);
   const solved = corners.map((corner) => {
     if (!corner.solved) return null;
     const solvedCorner = corner.solved;
-    const position = solvedCorner.wheelPos.clone().applyQuaternion(bodyQuat).add(bodyVec);
     const quaternion = bodyQuat.clone().multiply(solvedCorner.wheelQuat);
-    const contact = solvedCorner.contact.clone().applyQuaternion(bodyQuat).add(bodyVec);
     return {
       key: corner.key,
-      wheelPos: [position.x, position.y, position.z],
+      wheelPos: [corner.wheelPos[0], corner.wheelPos[1], corner.wheelPos[2]],
       wheelQuat: [quaternion.x, quaternion.y, quaternion.z, quaternion.w],
-      contact: [contact.x, contact.y, contact.z],
+      contact: [corner.contact[0], corner.contact[1], corner.contact[2]],
       rockerAngle: solvedCorner.rockerAngle,
+      rocker: {
+        angle: solvedCorner.rocker.angle,
+        residual: solvedCorner.rocker.residual,
+        feasible: solvedCorner.rocker.feasible,
+        branch: solvedCorner.rocker.branch
+      },
       coilLength: solvedCorner.coilLength,
       motionRatio: solvedCorner.motionRatio,
-      converged: solvedCorner.converged
+      motionRatioState: solvedCorner.motionRatioState,
+      converged: solvedCorner.frame.converged,
+      ok: solvedCorner.ok
     };
   });
   const springCompressionMm = corners.map((corner, index) => {
@@ -3331,22 +4003,41 @@ function simBuildModel(sim, source = state) {
     recovered: sim.flags.recovered,
     substeps: sim.lastSubsteps,
     accumulator: sim.accumulator,
+    backlog: sim.accumulator,
+    droppedTime: sim.droppedTime || 0,
+    timeScale: sim.timeScale == null ? 1 : sim.timeScale,
+    lastFrameDt: sim.lastFrameDt || 0,
+    lastAdvance: sim.lastAdvance || 0,
+    maxFrameDt: SIM_MAX_FRAME_DT,
+    maxSubsteps: SIM_MAX_SUBSTEPS,
     stepHz: Math.round(1 / SIM_DT),
     demand: evaluation.demand,
     capacity: evaluation.capacity,
     impulse: evaluation.impulse ? evaluation.impulse.label : null,
-    resetCount: sim.resetCount
+    resetCount: sim.resetCount,
+    solverDegraded: Boolean(sim.solverDegraded),
+    solverFailed: Boolean(sim.solverFailed),
+    mode: sim.contact ? sim.contact.mode : 'HOLD',
+    dwell: sim.contact ? sim.contact.dwell : 0,
+    since: sim.contact ? sim.contact.since : 0,
+    changes: sim.contact ? sim.contact.changes : 0,
+    lastChangeStep: sim.contact ? sim.contact.lastChangeStep : 0,
+    reason: sim.contact ? sim.contact.reason : null,
+    slipSpeed: sim.contact ? sim.contact.slipSpeed : 0,
+    usage: sim.contact ? sim.contact.usage : 0
   };
 
   return Object.assign({}, reference, {
     dynamic: true,
+    geometryRevision: reference.geometryRevision,
+    physicsRevision: reference.geometryRevision,
     sim: simInfo,
-    bodyPos: { x: state.x, y: state.y, z: state.z },
+    bodyPos: { x: refPos.x, y: refPos.y, z: refPos.z },
     bodyQuat: q,
     bodyYaw: euler.yaw,
     bodyPitch: euler.pitch,
     bodyRoll: euler.roll,
-    heave: state.y,
+    heave: refPos.y,
     pitch: euler.pitch,
     roll: euler.roll,
     yaw: euler.yaw,
@@ -3367,13 +4058,21 @@ function simBuildModel(sim, source = state) {
     solved,
     rackShift: sim.rackShift || 0,
     motionRatioInstant: corners.map((corner) => corner.motionRatio),
-    solverOk: corners.every((corner) => !corner.solved || corner.solved.converged),
+    motionRatioState: solved.map((row) => (row ? row.motionRatioState : 'unavailable')),
+    rockerResidualMm: solved.map((row) => (row ? row.rocker.residual * 1000 : NaN)),
+    rockerFeasible: solved.map((row) => (row ? row.rocker.feasible : false)),
+    solverOk: corners.every((corner) => !corner.solved || corner.solved.ok),
     springCompressionMm,
     damperCompressionRate,
     springForce: corners.map((corner) => corner.springForce),
     dampingForce: corners.map((corner) => corner.dampingForce),
     arbForce: corners.map((corner) => corner.arbForce),
     frictionForce: evaluation.frictionForces.map((friction) => ({ x: friction[0], z: friction[2] })),
+    momentParts: {
+      normal: evaluation.momentParts.normal.slice(),
+      friction: evaluation.momentParts.friction.slice(),
+      impulse: evaluation.momentParts.impulse.slice()
+    },
     loads,
     rawLoads,
     liftedCount,
@@ -3413,15 +4112,19 @@ function simLoadError(sim) {
   return Math.max(...model.loads.map((value, index) => Math.abs(value - target[index])));
 }
 
-function runDynamicSelfTests(source = state) {
+function* simDynamicSelfTestSteps(source = state) {
   const tests = [];
-  const record = (name, ok, detail) => tests.push({ name, ok, detail });
+  const record = (name, ok, detail) => {
+    const test = { name, ok, detail };
+    tests.push(test);
+    return test;
+  };
 
   const levelSim = simCreate(Object.assign({}, source, { slope: 0, bank: 0 }), { settle: 2.5 });
   const levelModel = simBuildModel(levelSim);
   const levelError = simLoadError(levelSim);
   const levelPose = Math.abs(levelModel.poseDeg.pitch) + Math.abs(levelModel.poseDeg.roll);
-  record(
+  yield record(
     '动态水平稳态',
     levelError < 1 && levelPose < 0.02 && levelModel.sim.finite,
     'ΔN ' + levelError.toFixed(3) + ' · 姿态 ' + levelPose.toFixed(3) + '°'
@@ -3432,7 +4135,7 @@ function runDynamicSelfTests(source = state) {
   const tiltedTarget = computeStatic(tiltedSource);
   const tiltedModel = simBuildModel(tiltedSim);
   const tiltedError = Math.max(...tiltedModel.loads.map((value, index) => Math.abs(value - tiltedTarget.loads[index])));
-  record(
+  yield record(
     '倾斜路面动态收敛',
     tiltedError < 3 && tiltedModel.sim.finite,
     'ΔN ' + tiltedError.toFixed(3)
@@ -3443,11 +4146,11 @@ function runDynamicSelfTests(source = state) {
   let heavePeak = 0;
   for (let i = 0; i < 600; i += 1) {
     simStep(heaveSim);
-    heavePeak = Math.max(heavePeak, Math.abs(heaveSim.state.y - heaveSim.reference.heave));
+    heavePeak = Math.max(heavePeak, Math.abs(simReferencePoint(heaveSim).y - heaveSim.reference.heave));
   }
   simRunFor(heaveSim, 2.0);
   const heaveTail = Math.abs(simBuildModel(heaveSim).heave - heaveSim.reference.heave);
-  record(
+  yield record(
     '垂向脉冲衰减',
     heavePeak > 0.005 && heaveTail < heavePeak * 0.2 && heaveSim.flags.finite,
     (heavePeak * 1000).toFixed(2) + ' → ' + (heaveTail * 1000).toFixed(2) + ' mm'
@@ -3467,7 +4170,7 @@ function runDynamicSelfTests(source = state) {
     softRoll = Math.max(softRoll, Math.abs(simEulerFromQuat(softQ).roll));
     hardRoll = Math.max(hardRoll, Math.abs(simEulerFromQuat(hardQ).roll));
   }
-  record(
+  yield record(
     '防倾杆抑制侧倾',
     hardRoll < softRoll && softRoll > 1e-5,
     (softRoll * RAD).toFixed(3) + '° → ' + (hardRoll * RAD).toFixed(3) + '°'
@@ -3479,10 +4182,12 @@ function runDynamicSelfTests(source = state) {
   simApplyImpulse(detB, 'pitch');
   simRunFor(detA, 0.5);
   simRunFor(detB, 0.5);
-  const detDelta = Math.abs(detA.state.y - detB.state.y) +
+  const detAReference = simReferencePoint(detA);
+  const detBReference = simReferencePoint(detB);
+  const detDelta = Math.abs(detAReference.y - detBReference.y) +
     Math.abs(detA.state.qx - detB.state.qx) +
     Math.abs(detA.state.qz - detB.state.qz);
-  record('固定步长可重复', detDelta < 1e-12, 'Δ ' + detDelta.toExponential(1));
+  yield record('固定步长可重复', detDelta < 1e-12, 'Δ ' + detDelta.toExponential(1));
 
   const frameSim = simCreate(source, { settle: 0.4 });
   simApplyImpulse(frameSim, 'roll');
@@ -3491,10 +4196,12 @@ function runDynamicSelfTests(source = state) {
   const fixedSim = simCreate(source, { settle: 0.4 });
   simApplyImpulse(fixedSim, 'roll');
   simRunFor(fixedSim, frameSteps * SIM_DT);
-  const frameDelta = Math.abs(frameSim.state.y - fixedSim.state.y) +
+  const frameReference = simReferencePoint(frameSim);
+  const fixedReference = simReferencePoint(fixedSim);
+  const frameDelta = Math.abs(frameReference.y - fixedReference.y) +
     Math.abs(frameSim.state.qx - fixedSim.state.qx) +
     Math.abs(frameSim.state.wx - fixedSim.state.wx);
-  record(
+  yield record(
     '渲染帧率不影响物理',
     frameDelta < 1e-9 && frameSim.lastSubsteps > 0,
     frameSteps + ' 步 · Δ ' + frameDelta.toExponential(1)
@@ -3503,19 +4210,75 @@ function runDynamicSelfTests(source = state) {
   const slideSource = Object.assign({}, source, { slope: 10, bank: 10, friction: 0.2 });
   const slideSim = simCreate(slideSource, { settle: 2.0 });
   const slideDistance = Math.hypot(slideSim.state.x, slideSim.state.z);
-  record(
+  yield record(
     '低附着六自由度滑移',
     slideDistance > 0.05 && slideSim.flags.finite,
     slideDistance.toFixed(2) + ' m · ' + (slideSim.flags.sliding ? '滑移' : '静止')
   );
 
   const contactModel = simBuildModel(levelSim);
-  record(
+  yield record(
     '动态法向载荷非负',
     contactModel.loads.every((value) => value >= 0) && contactModel.loads.every(Number.isFinite),
     'min ' + contactModel.minLoad.toFixed(1) + ' N'
   );
 
+  const holdSim = simCreate(Object.assign({}, source, { slope: 0, bank: 0 }), { settle: 0.5 });
+  holdSim.state.vx = 0.0005;
+  for (let i = 0; i < 4; i += 1) simStep(holdSim);
+  yield record(
+    '低速驻车',
+    Math.abs(holdSim.state.vx) < 1e-12 && holdSim.contact.mode === 'HOLD',
+    'vx ' + holdSim.state.vx.toExponential(1) + ' · ' + holdSim.contact.mode
+  );
+
+  const stopSim = simCreate(Object.assign({}, source, { slope: 0, bank: 0 }), { settle: 0.5 });
+  const stopX = stopSim.state.x;
+  stopSim.state.vx = 0.01;
+  simStep(stopSim);
+  const stopDx = stopSim.state.x - stopX;
+  yield record(
+    '滑移不反向',
+    stopSim.state.vx >= 0 && stopSim.state.vx < 1e-6 && stopDx >= 0 && stopDx < 1e-4,
+    'vx ' + stopSim.state.vx.toExponential(2) + ' · dx ' + (stopDx * 1000).toFixed(3) + ' mm'
+  );
+
+  return tests;
+}
+
+function runDynamicSelfTests(source = state) {
+  const iterator = simDynamicSelfTestSteps(source);
+  let step = iterator.next();
+  while (!step.done) step = iterator.next();
+  return step.value;
+}
+
+function runDynamicSelfTestsChunked(source = state, options = {}) {
+  const onTest = typeof options.onTest === 'function' ? options.onTest : null;
+  const onDone = typeof options.onDone === 'function' ? options.onDone : null;
+  const sliceMs = Number.isFinite(options.sliceMs) ? options.sliceMs : 50;
+  const clock = typeof performance !== 'undefined' && typeof performance.now === 'function'
+    ? () => performance.now()
+    : () => Date.now();
+  const tests = [];
+  const iterator = simDynamicSelfTestSteps(source);
+  const pump = () => {
+    const start = clock();
+    while (true) {
+      const step = iterator.next();
+      if (step.done) {
+        if (onDone) onDone(step.value || tests);
+        return;
+      }
+      tests.push(step.value);
+      if (onTest) onTest(step.value, tests.length);
+      if (clock() - start >= sliceMs) {
+        setTimeout(pump, 0);
+        return;
+      }
+    }
+  };
+  pump();
   return tests;
 }
 
@@ -3540,7 +4303,8 @@ const S = {
   labelAnchors: [],
   cgWorld: new THREE.Vector3(),
   projWorld: new THREE.Vector3(),
-  plate: null
+  plate: null,
+  teardownDone: false
 };
 
 const MAT = {};
@@ -4173,7 +4937,11 @@ function setupEnvironment() {
   S.envRT = pmrem.fromEquirectangular(TEX.env);
   S.scene.environment = S.envRT.texture;
   pmrem.dispose();
-  TEX.env.dispose();
+  if (TEX.env) {
+    TEX.env.userData = TEX.env.userData || {};
+    TEX.env.userData.__disposed = true;
+    TEX.env.dispose();
+  }
 }
 
 function setupLights() {
@@ -5081,6 +5849,7 @@ function projectWorld(world, out = { x: 0, y: 0, visible: false }) {
 
 function initScene() {
   if (S.initialized) return;
+  S.teardownDone = false;
   S.host = document.getElementById('viewport');
 
   S.renderer = new THREE.WebGLRenderer({
@@ -5155,6 +5924,102 @@ function initScene() {
   S.initialized = true;
 }
 
+/* ------------------------------ teardown ------------------------------ */
+
+function teardownScene() {
+  if (S.teardownDone) return CAR.assets.lastTeardown;
+  S.teardownDone = true;
+  CAR.built = false;
+  const rendererMemoryBefore = S.renderer && S.renderer.info
+    ? {
+        geometries: S.renderer.info.memory.geometries,
+        textures: S.renderer.info.memory.textures,
+        programs: S.renderer.info.programs ? S.renderer.info.programs.length : 0
+      }
+    : null;
+  let rendererMemoryAfter = null;
+  const groupStats = disposeGroupChildren(S.scene, { materials: true, textures: true });
+  let sharedMaterialsDisposed = 0;
+  let cachedMaterialsDisposed = 0;
+  let sharedGeometriesDisposed = 0;
+  let texturesDisposed = groupStats.textureDisposed;
+
+  for (const key of Object.keys(CAR.shared)) {
+    const geometry = CAR.shared[key];
+    if (geometry && geometry.isBufferGeometry && disposeResourceOnce(geometry)) sharedGeometriesDisposed += 1;
+  }
+  for (const material of Object.values(MAT)) {
+    if (material && disposeResourceOnce(material)) sharedMaterialsDisposed += 1;
+  }
+  for (const texture of Object.values(TEX)) {
+    if (texture && disposeResourceOnce(texture)) texturesDisposed += 1;
+  }
+  for (const material of CAR.decalCache.values()) {
+    if (!material) continue;
+    texturesDisposed += disposeMaterialMaps(material);
+    if (disposeResourceOnce(material)) cachedMaterialsDisposed += 1;
+  }
+
+  if (S.envRT) {
+    S.envRT.dispose();
+    S.envRT = null;
+  }
+  if (S.keyLight && S.keyLight.shadow && S.keyLight.shadow.map) {
+    S.keyLight.shadow.map.dispose();
+    S.keyLight.shadow.map = null;
+  }
+  if (S.renderer) {
+    S.renderer.dispose();
+    if (S.renderer.info) {
+      rendererMemoryAfter = {
+        geometries: S.renderer.info.memory.geometries,
+        textures: S.renderer.info.memory.textures,
+        programs: S.renderer.info.programs ? S.renderer.info.programs.length : 0
+      };
+    }
+    if (S.renderer.domElement && S.renderer.domElement.parentNode) {
+      S.renderer.domElement.parentNode.removeChild(S.renderer.domElement);
+    }
+  }
+
+  CAR.assets.totals.sharedMaterialDisposed += sharedMaterialsDisposed;
+  CAR.assets.totals.cachedMaterialDisposed += cachedMaterialsDisposed;
+  CAR.assets.totals.geometryDisposed += sharedGeometriesDisposed;
+  CAR.assets.totals.textureDisposed += texturesDisposed;
+  CAR.assets.lastTeardown = {
+    instanceMaterialsDisposed: groupStats.materialDisposed,
+    sceneMaterialsDisposed: groupStats.sceneMaterialsDisposed,
+    sharedMaterialsDisposed,
+    cachedMaterialsDisposed,
+    geometriesDisposed: groupStats.geometryDisposed + sharedGeometriesDisposed,
+    texturesDisposed,
+    rendererMemoryBefore,
+    rendererMemoryAfter,
+    at: typeof performance !== 'undefined' ? performance.now() : Date.now()
+  };
+
+  CAR.shared = {};
+  CAR.decalCache.clear();
+  S.scene = null;
+  S.renderer = null;
+  S.camera = null;
+  S.cameraPersp = null;
+  S.cameraOrtho = null;
+  S.roadGroup = null;
+  S.carRoot = null;
+  S.bodyPivot = null;
+  S.loadOverlay = null;
+  S.cgOverlay = null;
+  S.loadArrows = [];
+  S.labelAnchors = [];
+  S.labels = {};
+  S.keyLight = null;
+  S.host = null;
+  S.initialized = false;
+  return CAR.assets.lastTeardown;
+}
+
+
 
 /* =========================================================================
    20-car.js — bodywork, livery and shared vehicle geometry helpers
@@ -5188,6 +6053,20 @@ const CAR = {
   },
   decalCache: new Map(),
   shared: {},
+  assets: {
+    instanceMaterials: new Set(),
+    totals: {
+      instanceMaterialCreated: 0,
+      instanceMaterialDisposed: 0,
+      sceneMaterialsDisposed: 0,
+      sharedMaterialDisposed: 0,
+      cachedMaterialDisposed: 0,
+      geometryDisposed: 0,
+      textureDisposed: 0
+    },
+    lastBuild: null,
+    lastTeardown: null
+  },
   diag: {
     linkCount: 0,
     jointCount: 0,
@@ -5212,8 +6091,11 @@ const CAR = {
     differential: false,
     arbFront: false,
     arbRear: false,
-    mechanicalOk: false
+    mechanicalOk: false,
+    geometryRevision: 0,
+    geometryMismatch: false
   },
+  geometryRevision: 0,
   built: false,
   dims: null
 };
@@ -5324,24 +6206,112 @@ function markShared(mesh) {
   return mesh;
 }
 
-function createDefaultBodyMaterialSet() {
-  // Present so car.js can be loaded before scene materials are touched; not used.
-}
 
 /* ------------------------------ scene-graph helpers ------------------------------ */
 
-function disposeGroupChildren(group) {
-  if (!group) return;
+function instanceMaterial(material) {
+  if (!material) return material;
+  CAR.assets.instanceMaterials.add(material);
+  CAR.assets.totals.instanceMaterialCreated += 1;
+  if (CAR.assets.lastBuild) CAR.assets.lastBuild.instanceMaterialCreated += 1;
+  return material;
+}
+
+function beginCarBuild() {
+  CAR.assets.lastBuild = {
+    instanceMaterialCreated: 0,
+    instanceMaterialDisposed: 0,
+    geometryDisposed: 0,
+    textureDisposed: 0,
+    at: typeof performance !== 'undefined' ? performance.now() : Date.now()
+  };
+}
+
+function finishCarBuild(model) {
+  CAR.geometryRevision = model.geometryRevision;
+  CAR.diag.geometryRevision = model.geometryRevision;
+  CAR.diag.geometryMismatch = false;
+  if (CAR.assets.lastBuild) {
+    CAR.assets.lastBuild.at = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  }
+}
+
+function disposeResourceOnce(resource) {
+  if (!resource) return false;
+  if (!resource.userData) resource.userData = {};
+  if (resource.userData.__disposed) return false;
+  resource.userData.__disposed = true;
+  if (typeof resource.dispose === 'function') resource.dispose();
+  return true;
+}
+
+function disposeMaterialMaps(material) {
+  if (!material) return 0;
+  let disposed = 0;
+  const keys = ['map', 'alphaMap', 'emissiveMap', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'envMap'];
+  for (const key of keys) {
+    const texture = material[key];
+    if (!texture || !texture.isTexture) continue;
+    if (texture.userData && texture.userData.shared) continue;
+    if (disposeResourceOnce(texture)) disposed += 1;
+  }
+  return disposed;
+}
+
+function disposeGroupChildren(group, options = {}) {
+  const materials = options.materials !== false;
+  const textures = options.textures !== false;
+  if (!group) {
+    return { geometryDisposed: 0, materialDisposed: 0, sceneMaterialsDisposed: 0, textureDisposed: 0, skipped: 0 };
+  }
   const geometries = new Set();
+  const materialSet = new Set();
   group.traverse((object) => {
-    if ((object.isMesh || object.isLine || object.isLineSegments) && object.geometry) {
-      geometries.add(object.geometry);
-    }
+    if (object.geometry) geometries.add(object.geometry);
+    const material = object.material;
+    if (Array.isArray(material)) material.forEach((item) => { if (item) materialSet.add(item); });
+    else if (material) materialSet.add(material);
   });
+  let geometryDisposed = 0;
+  let materialDisposed = 0;
+  let sceneMaterialsDisposed = 0;
+  let textureDisposed = 0;
+  let skipped = 0;
   geometries.forEach((geometry) => {
-    if (!geometry.userData || !geometry.userData.shared) geometry.dispose();
+    if (geometry.userData && geometry.userData.shared) { skipped += 1; return; }
+    if (disposeResourceOnce(geometry)) geometryDisposed += 1;
   });
+  if (materials) {
+    const sharedMaterials = new Set(typeof MAT !== 'undefined' ? Object.values(MAT) : []);
+    const cachedMaterials = new Set(CAR.decalCache.values());
+    materialSet.forEach((material) => {
+      if (!material) return;
+      if ((material.userData && material.userData.shared) || sharedMaterials.has(material) || cachedMaterials.has(material)) {
+        skipped += 1;
+        return;
+      }
+      if (textures) textureDisposed += disposeMaterialMaps(material);
+      const registered = CAR.assets.instanceMaterials.has(material);
+      if (!disposeResourceOnce(material)) return;
+      if (registered) {
+        CAR.assets.instanceMaterials.delete(material);
+        materialDisposed += 1;
+      } else {
+        sceneMaterialsDisposed += 1;
+      }
+    });
+  }
   while (group.children.length) group.remove(group.children[0]);
+  CAR.assets.totals.geometryDisposed += geometryDisposed;
+  CAR.assets.totals.instanceMaterialDisposed += materialDisposed;
+  CAR.assets.totals.sceneMaterialsDisposed += sceneMaterialsDisposed;
+  CAR.assets.totals.textureDisposed += textureDisposed;
+  if (CAR.assets.lastBuild) {
+    CAR.assets.lastBuild.geometryDisposed += geometryDisposed;
+    CAR.assets.lastBuild.textureDisposed += textureDisposed;
+    CAR.assets.lastBuild.instanceMaterialDisposed += materialDisposed;
+  }
+  return { geometryDisposed, materialDisposed, sceneMaterialsDisposed, textureDisposed, skipped };
 }
 
 function registerShellGroup(group) {
@@ -5784,7 +6754,7 @@ function buildBodywork(model) {
     }
 
     // Central skid block.
-    const skid = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.014, 0.20), new THREE.MeshStandardMaterial({ color: 0x6d5a43, roughness: 0.8, metalness: 0.1 }));
+    const skid = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.014, 0.20), instanceMaterial(new THREE.MeshStandardMaterial({ color: 0x6d5a43, roughness: 0.8, metalness: 0.1 })));
     skid.position.set(0.18, 0.044, 0);
     addBodyMesh(skid);
   }
@@ -5840,7 +6810,7 @@ function buildBodywork(model) {
   {
     const openingShape = roundedRectShape(0.82, 0.40, 0.18);
     const openingGeo = new THREE.ShapeGeometry(openingShape, 24);
-    const opening = new THREE.Mesh(openingGeo, new THREE.MeshStandardMaterial({ color: 0x06080a, roughness: 0.9, metalness: 0.05 }));
+    const opening = new THREE.Mesh(openingGeo, instanceMaterial(new THREE.MeshStandardMaterial({ color: 0x06080a, roughness: 0.9, metalness: 0.05 })));
     opening.rotation.x = -Math.PI / 2;
     opening.position.set(cockpitCenterX, cockpitY, 0);
     addBodyMesh(opening, { cast: false });
@@ -5902,7 +6872,7 @@ function buildBodywork(model) {
     steering.add(rimWheel);
     const wheelPlate = new THREE.Mesh(new THREE.BoxGeometry(0.024, 0.10, 0.15), MAT.darkMetal);
     steering.add(wheelPlate);
-    const screen = new THREE.Mesh(new THREE.BoxGeometry(0.004, 0.032, 0.072), new THREE.MeshBasicMaterial({ color: 0x6cffd4, toneMapped: false }));
+    const screen = new THREE.Mesh(new THREE.BoxGeometry(0.004, 0.032, 0.072), instanceMaterial(new THREE.MeshBasicMaterial({ color: 0x6cffd4, toneMapped: false })));
     screen.position.set(-0.018, 0.03, 0);
     steering.add(screen);
     const column = new THREE.Mesh(new THREE.CylinderGeometry(0.017, 0.017, 0.42, 10), MAT.carbonMatte);
@@ -5998,7 +6968,7 @@ function buildBodywork(model) {
     airbox.rotation.y = Math.PI / 2;
     airbox.position.set(xF - 2.28, 0.795, 0);
     addBodyMesh(airbox);
-    const intake = new THREE.Mesh(new THREE.CircleGeometry(0.135, 32), new THREE.MeshStandardMaterial({ color: 0x030405, roughness: 1, metalness: 0 }));
+    const intake = new THREE.Mesh(new THREE.CircleGeometry(0.135, 32), instanceMaterial(new THREE.MeshStandardMaterial({ color: 0x030405, roughness: 1, metalness: 0 })));
     intake.scale.set(1.0, 1.35, 1);
     intake.rotation.y = Math.PI / 2;
     intake.position.set(xF - 2.105, 0.805, 0);
@@ -6064,7 +7034,7 @@ function buildBodywork(model) {
       addBodyMesh(makeLoftMesh(sections, MAT.paintDeep, { segments: 30, exponent: 0.7 }));
 
       // Sidepod intake.
-      const intake = new THREE.Mesh(new THREE.CircleGeometry(0.155, 32), new THREE.MeshStandardMaterial({ color: 0x030506, roughness: 0.95, metalness: 0.05 }));
+      const intake = new THREE.Mesh(new THREE.CircleGeometry(0.155, 32), instanceMaterial(new THREE.MeshStandardMaterial({ color: 0x030506, roughness: 0.95, metalness: 0.05 })));
       intake.scale.set(1.0, 1.28, 1);
       intake.rotation.y = Math.PI / 2;
       intake.position.set(xF - 1.44, 0.31, sign * 0.415);
@@ -6263,7 +7233,7 @@ function buildBodywork(model) {
     exhaust.rotation.z = Math.PI / 2;
     exhaust.position.set(xR - 0.46, 0.49, 0);
     addBodyMesh(exhaust);
-    const exhaustInner = new THREE.Mesh(new THREE.CircleGeometry(0.034, 16), new THREE.MeshBasicMaterial({ color: 0x050505, side: THREE.DoubleSide }));
+    const exhaustInner = new THREE.Mesh(new THREE.CircleGeometry(0.034, 16), instanceMaterial(new THREE.MeshBasicMaterial({ color: 0x050505, side: THREE.DoubleSide })));
     exhaustInner.rotation.y = Math.PI / 2;
     exhaustInner.position.set(xR - 0.525, 0.49, 0);
     addBodyMesh(exhaustInner, { cast: false });
@@ -7275,6 +8245,10 @@ function solveRockerAngle(corner, bodyMatrix, wheelMatrix, fallback) {
 }
 
 function updateSuspension(model) {
+  if (!model || !Number.isFinite(model.geometryRevision) || model.geometryRevision !== CAR.geometryRevision) {
+    CAR.diag.geometryMismatch = true;
+    return;
+  }
   const bodyMatrix = S.bodyPivot.matrix;
   applyRack(model);
   let maxLinkStretch = 0;
@@ -7289,10 +8263,14 @@ function updateSuspension(model) {
     const travel = -model.cornerY[i];
     const fallbackAngle = corner.rocker.baseAngle + travel * corner.rocker.gain;
     const solvedCorner = model.solved && model.solved[i] ? model.solved[i] : null;
-    if (solvedCorner && Number.isFinite(solvedCorner.rockerAngle)) {
-      corner.angle = solvedCorner.rockerAngle;
-      corner.rockerSolveFailed = false;
+    if (solvedCorner && solvedCorner.rocker && Number.isFinite(solvedCorner.rocker.angle)) {
+      // Render-only display copy: the physics layer owns the seed and never
+      // reads corner.angle back (B1-4).
+      corner.angle = solvedCorner.rocker.angle;
+      corner.rockerSolveFailed = !solvedCorner.rocker.feasible;
     } else {
+      // Static rebuild before the first physics model exists: a display-only
+      // fallback. Its result is never fed back into the solver.
       corner.angle = solveRockerAngle(corner, bodyMatrix, wheelMatrix, fallbackAngle);
     }
     corner.rocker.mesh.rotation.z = corner.angle;
@@ -7423,6 +8401,11 @@ function updateSuspension(model) {
 
 function updateCar(model) {
   if (!CAR.built) return;
+  if (!model || !Number.isFinite(model.geometryRevision) || model.geometryRevision !== CAR.geometryRevision) {
+    CAR.diag.geometryMismatch = true;
+    return;
+  }
+  CAR.diag.geometryMismatch = false;
   const bodyPos = model.bodyPos || { x: 0, y: model.heave || 0, z: 0 };
   const yaw = model.bodyYaw || 0;
   _qYaw.setFromAxisAngle(_axisY, yaw);
@@ -7487,6 +8470,10 @@ function updateCar(model) {
 }
 
 function buildCar(model) {
+  if (!model || !Number.isFinite(model.geometryRevision)) {
+    throw new Error('buildCar: model.geometryRevision is required');
+  }
+  beginCarBuild();
   initCarSceneGroups();
   disposeGroupChildren(S.bodyPivot);
   if (CAR.dynamicGroup) disposeGroupChildren(CAR.dynamicGroup);
@@ -7539,6 +8526,7 @@ function buildCar(model) {
   buildInternalSuspension(CAR.corners);
   buildSuspensionLinks(CAR.corners);
 
+  finishCarBuild(model);
   CAR.built = true;
   applyXray();
   updateCar(model);
@@ -7558,6 +8546,15 @@ const UI = {
   initialized: false,
   lastModel: null,
   selfTests: [],
+  selfTestCache: {
+    revision: 0,
+    staticTests: null,
+    dynamicTests: null,
+    dynamicRevision: 0,
+    dynamicRunning: false,
+    runs: { static: 0, dynamic: 0 }
+  },
+  checkRows: {},
   toastTimer: 0,
   labelLayer: null,
   cornerLabels: [],
@@ -7568,6 +8565,23 @@ const UI = {
   elements: {},
   modalReturnFocus: null
 };
+
+const SETUP_KEYS = ['mass', 'frontWeightPct', 'cgHeight', 'cgLateral', 'wheelbase', 'trackFront', 'trackRear', 'wheelRadius', 'tireWidthF', 'tireWidthR', 'wheelRateF', 'wheelRateR', 'dampingF', 'dampingR', 'arbFront', 'arbRear', 'slope', 'bank', 'friction'];
+let SETUP_REVISION = 0;
+let SETUP_SIGNATURE = '';
+
+function setupSignature(source = state) {
+  return SETUP_KEYS.map((key) => Number(source[key]).toPrecision(10)).join('|');
+}
+
+function noteSetupChange(source = state) {
+  const signature = setupSignature(source);
+  if (signature !== SETUP_SIGNATURE) {
+    SETUP_SIGNATURE = signature;
+    SETUP_REVISION += 1;
+  }
+  return SETUP_REVISION;
+}
 
 const INSPECT_VIEWS = [
   { preset: 'inspectSteering', label: '转向', toast: '转向机、转向拉杆与转向柱' },
@@ -7746,6 +8760,11 @@ function setAutoRotate(enabled) {
 
 function simulationReset({ settle = 0, toast = '姿态已重置到平衡位置' } = {}) {
   if (!SIM) SIM = simCreate(state);
+  if (SIM.geometryRevision !== geometryRevisionFor(state)) {
+    refreshAll({ rebuild: true, reason: 'geometry' });
+    if (toast) showToast('几何参数已变化，重建完成后再重置');
+    return;
+  }
   simReset(SIM, state, { settle });
   SIM.running = true;
   const model = simBuildModel(SIM, state);
@@ -7775,7 +8794,6 @@ function resetAll() {
   autoRotate = false;
   if (SIM) {
     SIM.running = true;
-    simReset(SIM, state, { settle: 1.0 });
   }
   syncControlsFromState();
   setAutoRotate(false);
@@ -7783,7 +8801,7 @@ function resetAll() {
   persistState();
   resetCamera(false);
   resetInspectButton();
-  refreshAll({ rebuild: true });
+  refreshAll({ rebuild: true, reason: 'reset' });
   showToast('已恢复默认标定与相机');
 }
 
@@ -7931,11 +8949,57 @@ function closeModelModal() {
   }
 }
 
-function refreshSelfTests({ dynamic = true } = {}) {
-  const staticTests = runSelfTests(state);
-  UI.selfTests = staticTests;
-  if (dynamic || !UI.dynamicTests) UI.dynamicTests = runDynamicSelfTests(state);
-  const tests = staticTests.concat(UI.dynamicTests);
+function ensureStaticSelfTests({ force = false } = {}) {
+  const revision = noteSetupChange(state);
+  if (force || UI.selfTestCache.revision !== revision || !UI.selfTestCache.staticTests) {
+    UI.selfTestCache.staticTests = runSelfTests(state);
+    UI.selfTestCache.revision = revision;
+    UI.selfTestCache.runs.static += 1;
+    if (UI.selfTestCache.dynamicRevision !== revision) {
+      UI.selfTestCache.dynamicTests = null;
+      UI.selfTestCache.dynamicRevision = 0;
+    }
+  }
+  UI.selfTests = UI.selfTestCache.staticTests;
+  return UI.selfTests;
+}
+
+function ensureDynamicSelfTests({ force = false, onDone = null } = {}) {
+  const revision = noteSetupChange(state);
+  if (!force && UI.selfTestCache.dynamicTests && UI.selfTestCache.dynamicRevision === revision) {
+    if (onDone) onDone(UI.selfTestCache.dynamicTests);
+    return UI.selfTestCache.dynamicTests;
+  }
+  if (UI.selfTestCache.dynamicRunning) return null;
+  UI.selfTestCache.dynamicRunning = true;
+  UI.selfTestCache.dynamicTests = null;
+  const startedRevision = revision;
+  runDynamicSelfTestsChunked(state, {
+    onTest: (test, count) => {
+      UI.dynamicTests = UI.dynamicTests || [];
+      UI.dynamicTests.push(test);
+    },
+    onDone: (tests) => {
+      UI.selfTestCache.dynamicRunning = false;
+      UI.selfTestCache.dynamicTests = tests;
+      UI.selfTestCache.dynamicRevision = startedRevision;
+      UI.selfTestCache.runs.dynamic += 1;
+      UI.dynamicTests = tests;
+      if (onDone) onDone(tests);
+      refreshSelfTests({ dynamic: false });
+    }
+  });
+  return null;
+}
+
+function refreshSelfTests({ dynamic = true, force = false } = {}) {
+  const staticTests = ensureStaticSelfTests({ force });
+  if (dynamic && (force || !UI.selfTestCache.dynamicTests || UI.selfTestCache.dynamicRevision !== UI.selfTestCache.revision)) {
+    ensureDynamicSelfTests({ force, onDone: () => refreshSelfTests({ dynamic: false }) });
+  }
+  const dynamicTests = UI.selfTestCache.dynamicTests || [];
+  UI.dynamicTests = dynamicTests;
+  const tests = staticTests.concat(dynamicTests);
   const passed = tests.filter((test) => test.ok).length;
   const total = tests.length;
 
@@ -7944,7 +9008,7 @@ function refreshSelfTests({ dynamic = true } = {}) {
 
   const summary = document.getElementById('selfTestSummary');
   if (summary) {
-    summary.textContent = `${passed} / ${total} 项通过 · 静态 ${staticTests.length} / 动态 ${UI.dynamicTests.length}`;
+    summary.textContent = `${passed} / ${total} 项通过 · 静态 ${staticTests.length} / 动态 ${dynamicTests.length}`;
     summary.style.color = passed === total ? 'var(--ok)' : 'var(--warn)';
   }
 
@@ -7952,7 +9016,7 @@ function refreshSelfTests({ dynamic = true } = {}) {
   if (list) {
     list.textContent = '';
     const labelled = staticTests.map((test) => ({ ...test, group: '静态' }))
-      .concat(UI.dynamicTests.map((test) => ({ ...test, group: '动态' })));
+      .concat(dynamicTests.map((test) => ({ ...test, group: '动态' })));
     labelled.forEach((test) => {
       const item = document.createElement('li');
       if (!test.ok) item.className = 'is-fail';
@@ -8112,24 +9176,29 @@ function setText(id, text) {
   if (element) element.textContent = text;
 }
 
+function setNodeText(element, text) {
+  if (!element) return;
+  const first = element.firstChild;
+  if (first && first.nodeType === 3) {
+    if (first.nodeValue !== text) first.nodeValue = text;
+    return;
+  }
+  element.textContent = text;
+}
+
 function refreshChecks(model) {
   const container = document.getElementById('checkList');
-  if (!container) return;
+  if (!container || !model) return;
   const diag = getCarDiagnostics();
-  const tests = UI.selfTests;
-  const dynamicTests = UI.dynamicTests || [];
+  const tests = UI.selfTests || [];
+  const dynamicTests = (UI.selfTestCache && UI.selfTestCache.dynamicTests) || UI.dynamicTests || [];
   const passed = tests.filter((test) => test.ok).length;
   const dynamicPassed = dynamicTests.filter((test) => test.ok).length;
-  const sim = model.sim || {
-    time: 0,
-    running: true,
-    holding: true,
-    sliding: false,
-    finite: true,
-    recovered: false,
-    stepHz: 500,
-    substeps: 0
+  const fallbackSim = {
+    time: 0, running: true, holding: true, sliding: false, finite: true,
+    recovered: false, stepHz: 500, substeps: 0, backlog: 0, droppedTime: 0, timeScale: 1
   };
+  const sim = model.sim || fallbackSim;
   const linksOk = diag.linkCount > 0 && diag.maxSuspLinkStretchMm < 1 && diag.rockerSolveOk;
   const steerOk = diag.tieRodStretchMm < 5 && diag.rockerSolveOk;
   const arbOk = diag.arbCount === 2 && diag.arbFront && diag.arbRear && diag.arbStretchMm < 0.5;
@@ -8138,65 +9207,55 @@ function refreshChecks(model) {
   const testsOk = tests.length > 0 && passed === tests.length;
   const dynamicOk = dynamicTests.length > 0 && dynamicPassed === dynamicTests.length;
   const frictionState = sim.sliding ? '滑移' : sim.holding ? '静摩擦' : '—';
+  const timeScale = Number.isFinite(sim.timeScale) ? sim.timeScale : 1;
+  const dropped = Number.isFinite(sim.droppedTime) ? sim.droppedTime : 0;
 
   const rows = [
-    {
-      ok: sim.finite && !sim.recovered,
-      name: '六自由度积分',
-      value: `t ${sim.time.toFixed(2)} s · ${sim.stepHz} Hz · ${sim.substeps} 子步`
-    },
-    {
-      ok: contactOk,
-      name: '四轮接地',
-      value: `${diag.contactCount} / 4 · 最小 ${loadDisplay(model.minLoad)} ${unitDisplay()}`
-    },
-    {
-      ok: linksOk,
-      name: '悬架杆长偏差',
-      value: `${diag.linkCount} 根 / ${diag.jointCount} 点 · ${diag.maxSuspLinkStretchMm.toFixed(3)} mm`
-    },
-    {
-      ok: steerOk,
-      name: '齿条 / 横拉杆',
-      value: `齿条 ${formatSigned(diag.rackTravelMm, 1)} mm · 横拉杆 ${diag.tieRodStretchMm.toFixed(3)} mm`
-    },
-    {
-      ok: arbOk,
-      name: '防倾杆连接',
-      value: `${diag.arbCount} 套 · 扭转 ${diag.arbTwistDeg.toFixed(2)}° · 伸长 ${diag.arbStretchMm.toFixed(2)} mm`
-    },
-    {
-      ok: frictionOk,
-      name: '坡面摩擦',
-      value: `μ_req ${model.frictionDemand.toFixed(3)} / ${model.frictionCapacity.toFixed(2)} · ${frictionState}`
-    },
-    {
-      ok: testsOk,
-      name: '静力自检',
-      value: tests.length ? `${passed} / ${tests.length} 通过` : '待运行'
-    },
-    {
-      ok: dynamicOk,
-      name: '动态自检',
-      value: dynamicTests.length ? `${dynamicPassed} / ${dynamicTests.length} 通过` : '待运行'
-    }
+    { id: 'sim', ok: sim.finite && !sim.recovered, name: '六自由度积分', value: `t ${sim.time.toFixed(2)} s · ${sim.stepHz} Hz · ${sim.substeps} 子步 · ${timeScale.toFixed(2)}× · 丢 ${dropped.toFixed(2)} s` },
+    { id: 'contact', ok: contactOk, name: '四轮接地', value: `${diag.contactCount} / 4 · 最小 ${loadDisplay(model.minLoad)} ${unitDisplay()}` },
+    { id: 'links', ok: linksOk, name: '悬架杆长偏差', value: `${diag.linkCount} 根 / ${diag.jointCount} 点 · ${diag.maxSuspLinkStretchMm.toFixed(3)} mm` },
+    { id: 'steer', ok: steerOk, name: '齿条 / 横拉杆', value: `齿条 ${formatSigned(diag.rackTravelMm, 1)} mm · 横拉杆 ${diag.tieRodStretchMm.toFixed(3)} mm` },
+    { id: 'arb', ok: arbOk, name: '防倾杆连接', value: `${diag.arbCount} 套 · 扭转 ${diag.arbTwistDeg.toFixed(2)}° · 伸长 ${diag.arbStretchMm.toFixed(2)} mm` },
+    { id: 'friction', ok: frictionOk, name: '坡面摩擦', value: `μ_req ${model.frictionDemand.toFixed(3)} / ${model.frictionCapacity.toFixed(2)} · ${frictionState}` },
+    { id: 'rockerResidual', ok: true, name: '摇臂闭合残差', value: '—' },
+    { id: 'motionRatio', ok: true, name: '运动比连续性', value: '—' },
+    { id: 'staticTests', ok: testsOk, name: '静力自检', value: tests.length ? `${passed} / ${tests.length} 通过` : '待运行' },
+    { id: 'dynamicTests', ok: dynamicOk, name: '动态自检', value: dynamicTests.length ? `${dynamicPassed} / ${dynamicTests.length} 通过` : '待运行' }
   ];
 
-  container.textContent = '';
   rows.forEach((row) => {
-    const item = document.createElement('div');
-    item.className = 'check-item ' + (row.ok ? 'is-ok' : 'is-warn');
-    const icon = document.createElement('span');
-    icon.className = 'check-icon';
-    icon.textContent = row.ok ? '✓' : '!';
-    const name = document.createElement('span');
-    name.className = 'check-name';
-    name.textContent = row.name;
-    const value = document.createElement('span');
-    value.className = 'check-val';
-    value.textContent = row.value;
-    item.append(icon, name, value);
-    container.appendChild(item);
+    let cached = UI.checkRows[row.id];
+    if (!cached || !cached.item || cached.item.parentNode !== container) {
+      const item = document.createElement('div');
+      item.className = 'check-item ' + (row.ok ? 'is-ok' : 'is-warn');
+      const icon = document.createElement('span');
+      icon.className = 'check-icon';
+      icon.textContent = row.ok ? '✓' : '!';
+      const name = document.createElement('span');
+      name.className = 'check-name';
+      name.textContent = row.name;
+      const value = document.createElement('span');
+      value.className = 'check-val';
+      value.textContent = row.value;
+      item.append(icon, name, value);
+      container.appendChild(item);
+      cached = { item, icon, name, value, ok: row.ok, text: row.name, valueText: row.value };
+      UI.checkRows[row.id] = cached;
+      return;
+    }
+    if (cached.ok !== row.ok) {
+      cached.ok = row.ok;
+      cached.item.className = 'check-item ' + (row.ok ? 'is-ok' : 'is-warn');
+      setNodeText(cached.icon, row.ok ? '✓' : '!');
+    }
+    if (cached.text !== row.name) {
+      cached.text = row.name;
+      setNodeText(cached.name, row.name);
+    }
+    if (cached.valueText !== row.value) {
+      cached.valueText = row.value;
+      setNodeText(cached.value, row.value);
+    }
   });
 }
 
@@ -8222,13 +9281,14 @@ function syncSimControls(model = UI.lastModel) {
   }
   setText('telemetrySimState', sim || SIM ? (running ? '运行' : '暂停') : '静态');
   setText('telemetrySimTime', `${simTime.toFixed(2)} s`);
-  setText('telemetrySimSteps', sim || SIM ? `${sim ? sim.stepHz : Math.round(1 / SIM_DT)} Hz · ${substeps} 子步/帧` : '—');
+  const timeScale = SIM && Number.isFinite(SIM.timeScale) ? SIM.timeScale : (sim && Number.isFinite(sim.timeScale) ? sim.timeScale : 1);
+  setText('telemetrySimSteps', sim || SIM ? `${sim ? sim.stepHz : Math.round(1 / SIM_DT)} Hz · ${substeps} 子步/帧 · ${timeScale.toFixed(2)}×` : '—');
 }
 
 function refreshTelemetry(model) {
   UI.lastModel = model;
   if (!model) return;
-  UI.selfTests = runSelfTests(state);
+  ensureStaticSelfTests();
   const sim = model.sim || null;
   const loads = model.loads.slice();
   const sumLoads = loads.reduce((acc, value) => acc + value, 0);
@@ -8332,7 +9392,9 @@ function refreshTelemetry(model) {
   }
   if (sim) {
     const stateText = sim.sliding ? '切向滑移' : sim.holding ? '静摩擦保持' : '瞬态';
-    setText('simDetail', `${sim.running ? '运行' : '暂停'} · t ${sim.time.toFixed(2)} s · ${sim.stepHz} Hz · ${stateText}`);
+    const backlogMs = (Number.isFinite(sim.backlog) ? sim.backlog : (Number.isFinite(sim.accumulator) ? sim.accumulator : 0)) * 1000;
+    const dropped = Number.isFinite(sim.droppedTime) ? sim.droppedTime : 0;
+    setText('simDetail', `${sim.running ? '运行' : '暂停'} · t ${sim.time.toFixed(2)} s · ${sim.stepHz} Hz · ${stateText} · 积压 ${backlogMs.toFixed(1)} ms · 丢 ${dropped.toFixed(2)} s`);
   } else {
     setText('simDetail', '静态参考');
   }
@@ -8679,7 +9741,7 @@ function initUI() {
   createAnnotationLabels();
   bindControls();
   syncControlsFromState();
-  refreshSelfTests();
+  refreshSelfTests({ dynamic: false });
   syncSimControls();
   CAMERA.onChange = (reason) => {
     if (reason === 'preset') {
@@ -8713,11 +9775,27 @@ UI.resetAll = resetAll;
    ========================================================================= */
 
 const REBUILD_KEYS = new Set(['wheelbase', 'trackFront', 'trackRear', 'wheelRadius', 'tireWidthF', 'tireWidthR']);
+const PHYSICS_KEYS = ['mass', 'frontWeightPct', 'cgHeight', 'cgLateral', 'wheelRateF', 'wheelRateR', 'dampingF', 'dampingR', 'arbFront', 'arbRear', 'slope', 'bank', 'friction'];
 const PENDING = {
   rebuild: false,
-  model: null,
-  lastBuildAt: 0
+  reason: '',
+  requestedAt: 0,
+  lastBuildAt: 0,
+  commits: 0,
+  failures: 0,
+  lastPolicy: 'none'
 };
+
+function physicsSignature(source = state) {
+  return PHYSICS_KEYS.map((key) => Number(source[key]).toPrecision(10)).join('|');
+}
+
+function stampReference(sim, source = state) {
+  if (!sim || !sim.reference) return;
+  sim.geometryRevision = sim.reference.geometryRevision;
+  sim.reference.physicsSignature = physicsSignature(source);
+  sim.steerApplied = source.steer;
+}
 
 let booted = false;
 let firstFrameRendered = false;
@@ -8733,9 +9811,12 @@ function liveModel() {
 function calibrateRack(sim, steerDeg) {
   if (!sim || !sim.reference || !sim.reference.suspension) return 0;
   const st = sim.state;
+  // B1-1: sim.state is the centre of mass; the linkage solver expects the
+  // body reference point.
+  const ref = simReferencePoint(sim);
   return suspRackForSteer(
     sim.reference.suspension.corners,
-    { x: st.x, y: st.y, z: st.z },
+    { x: ref.x, y: ref.y, z: ref.z },
     new THREE.Quaternion(st.qx, st.qy, st.qz, st.qw),
     steerDeg * DEG
   );
@@ -8752,57 +9833,87 @@ function updateSceneFromModel(model) {
   if (UI.initialized) UI.updateLabelPositions();
 }
 
-function requestRebuild(model) {
+function requestRebuild(reason = 'explicit') {
+  if (!PENDING.rebuild) PENDING.requestedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
   PENDING.rebuild = true;
-  PENDING.model = model;
+  PENDING.reason = reason;
+  PENDING.lastPolicy = reason === 'geometry' ? 'geometry-forced' : (reason || 'explicit');
 }
 
 function processPendingRebuild(now) {
-  if (!PENDING.rebuild || !PENDING.model) return;
+  if (!PENDING.rebuild) return;
   if (now - PENDING.lastBuildAt < 85) return;
-  PENDING.rebuild = false;
   PENDING.lastBuildAt = now;
-  if (!SIM) SIM = simCreate(state);
-  simReset(SIM, state, { settle: 0.5 });
-  SIM.rackShift = calibrateRack(SIM, state.steer);
-  const model = simBuildModel(SIM, state);
-  buildCar(model);
-  applyXray();
-  S.roadGroup.quaternion.copy(model.frame.q);
-  S.roadGroup.updateMatrixWorld(true);
-  updateCar(model);
-  S.scene.updateMatrixWorld(true);
-  updateOverlays(model);
-  S.scene.updateMatrixWorld(true);
-  UI.refreshSelfTests({ dynamic: false });
-  UI.refreshTelemetry(model);
-  UI.updateLabelPositions();
+  try {
+    if (!SIM) SIM = simCreate(state);
+    simReset(SIM, state, { settle: 0.5 });
+    SIM.advanceCarry = 0;
+    stampReference(SIM, state);
+    SIM.rackShift = calibrateRack(SIM, state.steer);
+    const model = simBuildModel(SIM, state);
+    buildCar(model);
+    applyXray();
+    S.roadGroup.quaternion.copy(model.frame.q);
+    S.roadGroup.updateMatrixWorld(true);
+    updateCar(model);
+    S.scene.updateMatrixWorld(true);
+    updateOverlays(model);
+    S.scene.updateMatrixWorld(true);
+    UI.refreshSelfTests({ dynamic: false });
+    UI.refreshTelemetry(model);
+    UI.updateLabelPositions();
+    PENDING.rebuild = false;
+    PENDING.commits += 1;
+    PENDING.failures = 0;
+  } catch (error) {
+    PENDING.failures += 1;
+    if (PENDING.failures >= 3) {
+      PENDING.rebuild = false;
+      showFatalError(error);
+    } else {
+      PENDING.rebuild = true;
+    }
+  }
 }
 
-function refreshAll({ rebuild = false } = {}) {
+function refreshAll({ rebuild = false, reason = 'params' } = {}) {
   if (!booted) return;
-  const reference = computeStatic(state);
-  if (!SIM) SIM = simCreate(state);
-  SIM.reference = reference;
-  SIM.rackShift = calibrateRack(SIM, state.steer);
-  const model = simBuildModel(SIM, state);
-  if (rebuild) {
-    requestRebuild(model);
-    UI.refreshTelemetry(model);
-    UI.refreshLabelContent(model);
+  if (PENDING.rebuild) { PENDING.lastPolicy = 'pending'; return; }
+  const staleGeometry = !SIM || geometryRevisionFor(state) !== SIM.geometryRevision;
+  if (rebuild || staleGeometry) {
+    requestRebuild(staleGeometry ? 'geometry' : reason);
     return;
   }
-  if (PENDING.rebuild) {
-    PENDING.model = model;
+  const stalePhysics = !SIM.reference || SIM.reference.physicsSignature !== physicsSignature(state);
+  if (stalePhysics) {
+    simRetargetReference(SIM, state);
+    stampReference(SIM, state);
+    SIM.rackShift = calibrateRack(SIM, state.steer);
+    const model = simBuildModel(SIM, state);
+    updateSceneFromModel(model);
     UI.refreshTelemetry(model);
     UI.refreshLabelContent(model);
+    PENDING.lastPolicy = 'params';
     return;
   }
-  // Update the mechanism before reading its diagnostics; telemetry reports the
-  // ARB twist and link closure for the pose that is actually on screen.
-  updateSceneFromModel(model);
-  UI.refreshTelemetry(model);
-  UI.refreshLabelContent(model);
+  const staleSteer = !nearly(SIM.steerApplied, state.steer, 1e-12);
+  if (staleSteer) {
+    SIM.rackShift = calibrateRack(SIM, state.steer);
+    SIM.steerApplied = state.steer;
+    const model = simBuildModel(SIM, state);
+    updateSceneFromModel(model);
+    UI.refreshTelemetry(model);
+    UI.refreshLabelContent(model);
+    PENDING.lastPolicy = 'display';
+    return;
+  }
+  PENDING.lastPolicy = 'display';
+  UI.refreshTelemetry(UI.lastModel);
+  UI.refreshLabelContent(UI.lastModel);
+  if (UI.lastModel) {
+    updateOverlays(UI.lastModel);
+    S.scene.updateMatrixWorld(false);
+  }
 }
 
 function formatStamp(date = new Date()) {
@@ -8828,7 +9939,7 @@ function formatLocalDate(date = new Date()) {
 
 function exportScreenshot() {
   if (!S.renderer) return false;
-  const model = liveModel();
+  const model = PENDING.rebuild && UI.lastModel ? UI.lastModel : liveModel();
   updateSceneFromModel(model);
   S.renderer.render(S.scene, S.camera);
 
@@ -8969,7 +10080,7 @@ function bindGlobalAPI() {
     getState: () => cloneState(state),
     getSnapshot: () => {
       const model = liveModel();
-      const tests = UI.selfTests.length ? UI.selfTests : runSelfTests(state);
+      const tests = (UI.selfTestCache && UI.selfTestCache.staticTests) || (UI.selfTests.length ? UI.selfTests : runSelfTests(state));
       const diag = getCarDiagnostics();
       return {
         version: APP_VERSION,
@@ -9040,6 +10151,29 @@ function bindGlobalAPI() {
           transition: Boolean(CAMERA.transition)
         },
         pendingRebuild: PENDING.rebuild,
+        setupRevision: typeof SETUP_REVISION === 'number' ? SETUP_REVISION : 0,
+        selfTestRuns: UI.selfTestCache && UI.selfTestCache.runs ? Object.assign({}, UI.selfTestCache.runs) : { static: 0, dynamic: 0 },
+        geometry: {
+          sceneRevision: CAR.geometryRevision || null,
+          physicsRevision: SIM && SIM.reference ? SIM.reference.geometryRevision : null,
+          pending: PENDING.rebuild,
+          policy: PENDING.lastPolicy,
+          commitCount: PENDING.commits,
+          mismatch: Boolean(CAR.diag.geometryMismatch),
+          dims: {
+            wheelbase: state.wheelbase,
+            trackFront: state.trackFront,
+            trackRear: state.trackRear,
+            wheelRadius: state.wheelRadius,
+            tireWidthF: state.tireWidthF,
+            tireWidthR: state.tireWidthR
+          }
+        },
+        assets: CAR.assets ? {
+          totals: Object.assign({}, CAR.assets.totals),
+          lastBuild: CAR.assets.lastBuild ? Object.assign({}, CAR.assets.lastBuild) : null,
+          lastTeardown: CAR.assets.lastTeardown ? Object.assign({}, CAR.assets.lastTeardown) : null
+        } : null,
         frameCount: UI.frameCount || 0
       };
     },
@@ -9047,12 +10181,16 @@ function bindGlobalAPI() {
       if (!patch || typeof patch !== 'object') return window.FSApp.getSnapshot();
       const previous = cloneState(state);
       const merged = sanitizeState(Object.assign({}, state, patch));
-      const dimensionsChanged = Array.from(REBUILD_KEYS).some((key) => !nearly(previous[key], merged[key], 1e-9));
-      const rebuild = typeof options.rebuild === 'boolean' ? options.rebuild : dimensionsChanged;
+      const dimensionsChanged = geometrySignature(merged) !== geometrySignature(previous);
+      const forced = options.rebuild === true;
+      const rebuild = dimensionsChanged || forced;
+      if (options.rebuild === false && dimensionsChanged) {
+        console.warn('[FS-01] geometry dimensions changed; rebuild:false is ignored');
+      }
       Object.assign(state, merged);
       syncControlsFromState();
       persistState();
-      refreshAll({ rebuild });
+      refreshAll({ rebuild, reason: dimensionsChanged ? 'geometry' : (forced ? 'explicit' : 'params') });
       return window.FSApp.getSnapshot();
     },
     reset: () => {
@@ -9071,8 +10209,14 @@ function bindGlobalAPI() {
     },
     resetDynamics: (options = {}) => {
       if (!SIM) SIM = simCreate(state);
+      if (SIM.geometryRevision !== geometryRevisionFor(state)) {
+        requestRebuild('geometry');
+        return window.FSApp.getSnapshot();
+      }
       const settle = Number.isFinite(options.settle) ? options.settle : 0;
       simReset(SIM, state, { settle });
+      SIM.advanceCarry = 0;
+      stampReference(SIM, state);
       const model = simBuildModel(SIM, state);
       updateSceneFromModel(model);
       UI.refreshTelemetry(model);
@@ -9088,7 +10232,11 @@ function bindGlobalAPI() {
     advanceSimulation: (seconds = 0.5) => {
       if (!SIM) SIM = simCreate(state);
       const duration = clamp(Number(seconds) || 0, 0, 10);
-      simRunFor(SIM, duration);
+      const carry = Number.isFinite(SIM.advanceCarry) ? SIM.advanceCarry : 0;
+      const total = carry + duration;
+      const steps = Math.floor((total + 1e-12) / SIM_DT);
+      SIM.advanceCarry = total - steps * SIM_DT;
+      for (let i = 0; i < steps; i += 1) simStep(SIM, SIM_DT);
       const model = simBuildModel(SIM, state);
       updateSceneFromModel(model);
       UI.refreshTelemetry(model);
@@ -9111,10 +10259,20 @@ function bindGlobalAPI() {
         push: CAR.diag.pushRodStretchMm,
         arb: CAR.diag.arbStretchMm
       },
-      solverOk: CAR.diag.rockerSolveOk
+      solverOk: CAR.diag.rockerSolveOk,
+      geometryRevision: CAR.geometryRevision || null,
+      physicsRevision: SIM && SIM.reference ? SIM.reference.geometryRevision : null,
+      geometryMismatch: Boolean(CAR.diag.geometryMismatch)
     }),
     runSelfTests: () => runSelfTests(state),
     runDynamicSelfTests: () => runDynamicSelfTests(state),
+    dispose: teardownScene,
+    getAssetStats: () => ({
+      totals: CAR.assets ? Object.assign({}, CAR.assets.totals) : null,
+      lastBuild: CAR.assets && CAR.assets.lastBuild ? Object.assign({}, CAR.assets.lastBuild) : null,
+      lastTeardown: CAR.assets && CAR.assets.lastTeardown ? Object.assign({}, CAR.assets.lastTeardown) : null,
+      renderer: S.renderer ? { geometries: S.renderer.info.memory.geometries, textures: S.renderer.info.memory.textures, programs: S.renderer.info.programs ? S.renderer.info.programs.length : 0 } : null
+    }),
     exportScreenshot,
     setCameraPreset,
     setCameraProjection
@@ -9125,15 +10283,15 @@ function animate(now) {
   // requestAnimationFrame timestamps are monotonic frame-clock values, but the
   // first callback may carry a timestamp from before the expensive boot. Never
   // seed the frame clock with performance.now(), and clamp anomalous deltas.
-  const dt = lastFrameTime ? clamp((now - lastFrameTime) / 1000, 0, 0.05) : 0;
+  const frameDt = lastFrameTime ? Math.max(0, (now - lastFrameTime) / 1000) : 0;
   lastFrameTime = now;
 
   UI.frameCount = (UI.frameCount || 0) + 1;
-  updateCamera(dt);
+  updateCamera(Math.min(frameDt, 0.05));
   processPendingRebuild(now);
 
   if (booted && SIM) {
-    const steps = simAdvance(SIM, dt);
+    const steps = simAdvance(SIM, frameDt);
     if (steps > 0 || !UI.lastDynamicUpdate) {
       const model = simBuildModel(SIM, state);
       updateSceneFromModel(model);
@@ -9174,6 +10332,7 @@ function boot() {
 
     initScene();
     SIM = simCreate(state, { settle: 1.8 });
+    stampReference(SIM, state);
     SIM.rackShift = calibrateRack(SIM, state.steer);
     const initialModel = simBuildModel(SIM, state);
     S.roadGroup.quaternion.copy(initialModel.frame.q);
@@ -9187,6 +10346,9 @@ function boot() {
     syncControlsFromState();
     persistState();
     bindGlobalAPI();
+    window.addEventListener('pagehide', () => {
+      if (typeof teardownScene === 'function') teardownScene();
+    }, { once: true });
 
     booted = true;
     lastFrameTime = 0;
