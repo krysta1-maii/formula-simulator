@@ -223,7 +223,7 @@ simApplyForceAt(sim, roadPoint, forceRoad, bucket)
 | `npm run test:dev-server` | 04 的 dev-server 边界 | 0/1 |
 | `npm run test:ui` | 04 的浏览器 UI 组 | 0/1；缺 Chrome 默认 0 并 SKIP，`FS_REQUIRE_CHROME=1` 时 1 |
 | `npm run test:browser` | 页面动力学 26 项 | 同上 |
-| `npm run test:camera` | 相机 20 项 | 同上 |
+| `npm run test:camera` | 相机 19 项 | 同上 |
 | `npm run build` | 唯一写入 `index.html` | 0/1 |
 | `npm run build:check` | `index.html` 与源码逐字节一致 | 0 一致，1 不一致 |
 | `npm run audit` | 全部审计；B0 阶段按设计失败 | 0 全部通过，1 断言失败，2 环境/装载错误 |

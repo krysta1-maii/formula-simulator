@@ -33,6 +33,8 @@
 
 ## 2. 现有测试覆盖映射
 
+本节记录 B0 开工前（fbb401d）的测试现状，表中的 47/52/99 项均为当时数量；当前口径为 `npm test` 50+80、`test:invariants` 27、`test:runtime` 78、`test:ui` 45（B5.4 断言后）、`test:camera` 19。
+
 ### 2.1 三层现状
 
 | 层 | 命令 | 数量 | 当前结果 | 说明 |
@@ -40,7 +42,7 @@
 | 静力 Node | npm run test:core | 47 | 全绿 | computeStatic 的平衡、包线、告警 |
 | 动力学 Node | npm run test:dynamics | 52 | 全绿 | 六自由度、机构、脉冲、滑移、帧率 |
 | 浏览器动力学 | npm run test:browser | 26 | 全绿（需 Chrome） | 真实页面、DOM、场景探针 |
-| 浏览器相机 | npm run test:camera | 20 | 全绿（需 Chrome） | 轨道、缩放、正交预设 |
+| 浏览器相机 | npm run test:camera | 19 | 全绿（需 Chrome） | 轨道、缩放、正交预设 |
 
 ### 2.2 静力 47 项的映射
 
@@ -70,7 +72,7 @@
 | [8] 随机包线 | 2 | 120 组有限、非负载荷 | B4.1 | 只检查有限性，不检查残差 |
 | [9] 动态自检 | 2 | 10 项（B2-1 后）、全部通过 | B5.3 | 自检本身未纳入回归判据 |
 
-### 2.4 浏览器 26 项与相机 20 项的映射
+### 2.4 浏览器 26 项与相机 19 项的映射
 
 | 组 | 数量 | 现有断言 | 邻近缺陷 | 覆盖判定 |
 | --- | ---: | --- | --- | --- |
@@ -83,11 +85,11 @@
 | 按钮 | 1 | 六个动态按钮存在 | U2 | 不测键盘激活 |
 | 几何重建 | 1 | 轴距 3.70 m 后接地 | B5.2 | 未测 rebuild=false 与代际混用 |
 | 弹窗与页面错误 | 2 | 自检条目 ≥ 24；无异常与控制台错误 | B5.3 | 不测周期 DOM 重建 |
-| 相机 | 20 | 预设、拖拽、滚轮、正交切换 | — | 与 12 项缺陷无交集 |
+| 相机 | 19 | 预设、拖拽、滚轮、正交切换 | — | 与 12 项缺陷无交集 |
 
 ### 2.5 缺口结论
 
-现有 99 项 Node、26 项浏览器、20 项相机检查全部通过，但对 12 项缺陷没有一条直接命中断言。原因有三类：测试从 computeStatic 的平衡姿态启动，掩盖了自由旋转与求解失败；测试只覆盖静态采样点或高帧率，未覆盖动态不可达、低速阈值与 10/5 Hz；Node 测试不装载渲染层，看不到每帧回写摇臂角种子。因此 B0 必须先建立独立的审计层，回归断言再按批次并入测试套件。自检数量按 R-06 冻结为静力 14 项加动力学 10 项共 24 项，浏览器动态断言 >=10、弹窗 >=24；README 第 19 行的 Node 动力学 45 项应改 52 项。
+现有 99 项 Node、26 项浏览器、19 项相机检查全部通过，但对 12 项缺陷没有一条直接命中断言。原因有三类：测试从 computeStatic 的平衡姿态启动，掩盖了自由旋转与求解失败；测试只覆盖静态采样点或高帧率，未覆盖动态不可达、低速阈值与 10/5 Hz；Node 测试不装载渲染层，看不到每帧回写摇臂角种子。因此 B0 必须先建立独立的审计层，回归断言再按批次并入测试套件。自检数量按 R-06 冻结为静力 14 项加动力学 10 项共 24 项，浏览器动态断言 >=10、弹窗 >=24；README 第 19 行的 Node 动力学 45 项应改 52 项。
 
 ## 3. B0 工具规格
 
@@ -95,17 +97,17 @@
 
 ~~~
 tools/
-  test-harness.mjs
   audit/
     _harness.mjs, run-all.mjs
     audit-free-body.mjs, audit-rocker-reach.mjs, audit-friction-low-speed.mjs
     audit-impulse-frame.mjs, audit-contact-gap.mjs, audit-frame-time.mjs
     audit-seed-writeback.mjs, audit-shadowing.mjs          # audit-seed-writeback=O1；audit-shadowing=A2
-    audit-browser-contract.mjs, audit-ui.mjs               # B5.2/5.3/5.4/O1；U1-U4/U6
     baseline/0.2.0.json
+  audit-browser/
+    _cdp.mjs, audit-browser-contract.mjs, audit-ui.mjs      # B5.2/5.3/5.4/O1；U1-U4/U6
 ~~~
 
-tools/test-harness.mjs 导出 loadThree()、loadPhysics(extraExports)、makeSetup(patch)、createChecker(title)、mulberry32(seed)。loadPhysics 内部维护与 build.mjs 相同的文件顺序（00-core、03-suspension、05-body-dynamics），只返回显式列出的 API，测试不直接依赖全局变量。若将来迁移到显式模块，只替换 loadPhysics 的实现，测试文件不改。
+tools/audit/_harness.mjs 导出 loadThree()、loadPhysics(extraExports)、makeSetup(patch)、mulberry32(seed) 与 createAudit(meta)；tools/audit-browser/_cdp.mjs 提供 CDP 连接。loadPhysics 内部维护与 build.mjs 相同的文件顺序（00-core、03-suspension、05-body-dynamics），只返回显式列出的 API，测试不直接依赖全局变量。若将来迁移到显式模块，只替换 loadPhysics 的实现，测试文件不改。
 
 tools/audit/_harness.mjs 导出 createAudit(meta)，其 check(id, ok, metrics, threshold, detail) 记录结构化结果；finish() 向 stdout 输出单个 JSON 对象，向 stderr 输出人类可读行，退出码 0 表示全部通过、1 表示断言失败、2 表示环境或装载错误。JSON 结构固定为：
 
@@ -185,7 +187,7 @@ audit 默认严格模式，任何未通过即退出 1，因此 B0 阶段该命�
 
 | 工作项 | 实施步骤 | 验收命令 | 依赖 | 风险与回滚 | 人日 |
 | --- | --- | --- | --- | --- | ---: |
-| B0-1 | 1. 新建 tools/test-harness.mjs，按 build.mjs:12-21 的文件顺序装载；2. 新建 tools/audit/_harness.mjs，实现 JSON 报告与 0/1/2 退出码；3. 逐个实现 8 个 Node 审计脚本，先跑通空场景再填断言；4. 每个脚本在 fbb401d 上记录红色输出 | node tools/audit/audit-free-body.mjs 等逐个执行 | — | 脚本依赖内部 API，源码重构会失效；以返回对象为边界，不读行号；回滚删除 tools/audit 与 test-harness | 0.6 |
+| B0-1 | 1. 新建 tools/test-harness.mjs（历史计划；实际落点为 `tools/audit/_harness.mjs`，见 §3.1），按 build.mjs:12-21 的文件顺序装载；2. 新建 tools/audit/_harness.mjs，实现 JSON 报告与 0/1/2 退出码；3. 逐个实现 8 个 Node 审计脚本，先跑通空场景再填断言；4. 每个脚本在 fbb401d 上记录红色输出 | node tools/audit/audit-free-body.mjs 等逐个执行 | — | 脚本依赖内部 API，源码重构会失效；以返回对象为边界，不读行号；回滚删除 tools/audit 与 test-harness | 0.6 |
 | B0-1b | 1. 实现 audit-browser-contract.mjs 与 audit-ui.mjs；2. 复用 B0-1 的 CDP 连接、JSON 报告与退出码；3. 在 fbb401d 上记录浏览器失败基线 | node tools/audit/audit-browser-contract.mjs；node tools/audit/audit-ui.mjs | B0-1 | 浏览器审计受 SwiftShader 时序影响；只做状态轮询与几何探针；回滚删除两个脚本与 baseline 条目 | 0.3 |
 | B0-2 | 1. 运行 run-all --update-baseline 生成 0.2.0.json；2. 生成 Markdown 表；3. 实现 --expect-baseline 的逐条比对与 diff；4. 在 PR 模板中加入基线 diff 检查 | node tools/audit/run-all.mjs --expect-baseline | B0-1 | 快照误更新；audit:update 人工执行，CI 只读；回滚恢复 JSON | 0.2 |
 | B0-3 | 1. 增加 npm scripts；2. run-all 支持 --group、--require-pass、--expect-baseline；3. 接入 CI 分层与严格 Chrome；4. 文档记录过渡期门禁 | npm run audit:physics；npm run build:check | B0-1、B0-2 | 门禁过早阻断未修批次；用分组命令与 knownFailure 控制；回滚 scripts | 0.2 |
@@ -279,7 +281,7 @@ B0-B4 修复合入时，完整 audit 仍会因未修条目失败，因此 PR 门
 
 本轮保留 new Function 装载全局脚本，不迁移 ES Modules。这与分册 01 的约束一致，理由有三点：审计脚本必须能在 fbb401d 的未修复代码上运行；物理修复要逐行对照，模块化会把 diff 淹没在移动与导出语句里；现有 99 项测试已验证该装载方式，迁移的收益与本轮目标无关。
 
-为避免装载方式固化，新增 tools/test-harness.mjs，所有新测试和审计脚本只通过 loadPhysics() 拿 API。分册 01 若在 B1 抽出显式模块，只需把 loadPhysics() 内部改为 import()，并保持返回字段不变；测试文件不改。构建一致性层校验 loadPhysics 的文件清单与 src/js 实际文件一致，防止漏装。
+为避免装载方式固化，新增 `tools/audit/_harness.mjs`，所有新测试和审计脚本只通过 `loadPhysics()` 拿 API。分册 01 若在 B1 抽出显式模块，只需把 loadPhysics() 内部改为 import()，并保持返回字段不变；测试文件不改。构建一致性层校验 loadPhysics 的文件清单与 src/js 实际文件一致，防止漏装。
 
 ### 6.2 Node 断言风格
 
@@ -342,6 +344,6 @@ B0-1 无前置；B0-2、B0-3 依赖 B0-1。R1 依赖 B1 的求解器结果字段
 
 ## 9. B5-1/B5-2 文档同步
 
-B5-1：按主册第 10 节更新 README 19/81/100/164/170-215/212 与 DESIGN 20.2/20.3/20.7/20.9/20.10/544/640/578/648；数字以 B4 后实测 50+80、test:invariants 27、test:runtime 78、test:ui 44、自检 24 为准；删除 45/52/22/8/40/5890/50 ms/参考点积分旧表述。
+B5-1：按主册第 10 节更新 README 19/81/100/164/170-215/212 与 DESIGN 20.2/20.3/20.7/20.9/20.10/544/640/578/648；数字以 B4 后实测 50+80、test:invariants 27、test:runtime 78、test:ui 45（B5.4 断言后；B5 施工时为 44）、自检 24 为准；删除 45/52/22/8/40/5890/50 ms/参考点积分旧表述。
 B5-2：同步自检与遥测文案：14+10=24、10 行检查表、solverOk/solverState/rockerResidualMm/motionRatioState；template 162/448/540 已由 B4 同步，B5 只核对，不改逻辑。
-验收：npm test 50+80、test:invariants 27、test:runtime 78、test:ui 44、audit 全绿、build:check strict；grep 旧值只允许出现在历史对照/审查报告。
+验收：npm test 50+80、test:invariants 27、test:runtime 78、test:ui 45（B5.4 断言后）、audit 全绿、build:check strict；grep 旧值只允许出现在历史对照/审查报告。

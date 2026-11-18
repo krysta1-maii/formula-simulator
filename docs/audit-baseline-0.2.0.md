@@ -11,7 +11,9 @@
 | 已知失败 | 39 |
 | 缺陷组 | 12 |
 
-本文件由 tools/audit/baseline/0.2.0.json 生成，用于记录 fbb401d 源码上的 B0 失败基线。当前源码未改动；修复批次每完成一项，应在同一提交中更新 JSON 中对应条目的 status/knownFailure。
+**历史快照说明：** 修复前基线（39 knownFailures）见提交 `ed8aa0a`；本文档是 B0 阶段在 `fbb401d` 上生成的修复前证据表，当前 `tools/audit/baseline/0.2.0.json` 已是修复后基线（51/51 pass、knownFailures 0）。两者分别作为“历史红”与“当前绿”的对照，不得混用。
+
+本文件由 tools/audit/baseline/0.2.0.json 生成，用于记录 fbb401d 源码上的 B0 失败基线（历史）。修复批次每完成一项，应在同一提交中更新 JSON 中对应条目的 status/knownFailure。
 
 ## 12 项缺陷证据
 
@@ -135,6 +137,6 @@
 
 ## 计数口径说明
 
-当前基线快照为 51 个唯一 check，其中 12 个通过、39 个已知失败。lead 验证消息记录为 50 checks / 39 knownFailures；差异来自 browser-contract 与 ui 的 page-errors 检查曾共用同一 id，唯一化后多出 1 个通过项，失败项数不变。以本 JSON 为准，未回改基线文件。
+本文档所记录的历史基线快照为 51 个唯一 check，其中 12 个通过、39 个已知失败。lead 验证消息记录为 50 checks / 39 knownFailures；差异来自 browser-contract 与 ui 的 page-errors 检查曾共用同一 id，唯一化后多出 1 个通过项，失败项数不变。以本 JSON 为准，未回改基线文件。
 
 已知失败项清单见 JSON 的 knownFailures 数组；审计脚本退出码约定为 0 通过、1 断言失败、2 环境或装载错误。
