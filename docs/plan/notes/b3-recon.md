@@ -12,26 +12,26 @@
 
 ## 0. 裁决（lead，2026-11-19）
 
-B3 尚未解冻；本节只冻结两项 audit 口径与解冻前清单，代码在 B3 提交中落实。授权边界：仅允许修改 tools/audit/audit-frame-time.mjs 的 B5.1/5-clamp50-time 实现、tools/audit-browser/audit-browser-contract.mjs 的 B5.3/telemetry-dom 观察配置，以及 tools/audit/baseline/0.2.0.json 中对应两条记录；不得改其他 check 的 id、阈值或实现，不得改 src/。
+B3 尚未解冻；本节只冻结两项 audit 口径、baseline 授权与解冻前清单，代码在 B3 提交中落实。授权边界：允许修改 tools/audit/audit-frame-time.mjs 的 B5.1/5-clamp50-time 实现、tools/audit-browser/audit-browser-contract.mjs 的 B5.3/telemetry-dom 观察配置；允许同步 tools/audit/baseline/0.2.0.json 的 runtime 组条目：B5.1 整组（60hz、30hz、10-time、5-time、5-clamp50-time、dropped-field）、B5.2/geometry-generation、B5.3/telemetry-dom、B5.4/material-release、O1/chunked-vs-one-shot。上述条目只允许 status/knownFailure/observed 的状态翻转与实测值变化，不删条目；其他组与其他 check 的实现、id、阈值不动；不得改 src/。
 
 ### 0.1 B5.1/5-clamp50-time：改为“验证截断已移除”
 
-1. check id 保持 B5.1/5-clamp50-time，不再模拟旧的 50 ms 应用层 clamp；删除 runCase(5,50) 这一输入。
+1. check id 保持 B5.1/5-clamp50-time，不再模拟旧的 50 ms 应用层 clamp；删除 runCase(5,50)（audit-frame-time.mjs:55）这一输入，check 块位于 :78-90。
 2. 用 5 Hz 墙钟驱动：runCase(5) 的 advanced 必须 >=0.98 s/s；另建一个 sim，调用 api.simAdvance(sim, 0.2)，断言本次推进 >=0.19 s 且返回步数 >=90。B3-1 后 0.2 s 应执行约 100 步（0.2 s），旧实现只能执行 40 步（0.08 s），该断言直接证明 50 ms 截断已移除。
 3. check 的 metrics 至少记录 advanced、steps、dt:0.2、limitRemoved:true；threshold 写“5 Hz wall advanced >=0.98 and simAdvance(0.2) >=0.19 s / 90 steps”。不再使用 clampMs 字段作为判据。
-4. baseline 同步：tools/audit/baseline/0.2.0.json 的 B5.1/5-clamp50-time 从 fail 改为 pass，observed 换成新的 metrics，并从 knownFailures 与 defectEvidence.B5.1.failing 中移除该 id；其他 B5.1 条目不动。该改动与 B3-1 同提交（或紧随其后），否则 audit:baseline 仍会报状态差。
+4. baseline 同步：授权已扩大为 B5.1 整组六条（60hz、30hz、10-time、5-time、5-clamp50-time、dropped-field）。B3-1 后这些条目的 status/observed 一并同步：5-clamp50 换新 metrics，其余按实测更新 advanced/dropped 等；从 knownFailures 与 defectEvidence.B5.1.failing 移除已转绿 id，不删条目。其他组的 baseline 条目不动；该改动与 B3-1 同提交（或紧随其后）。
 
 ### 0.2 B5.3/telemetry-dom：childList 为唯一判据
 
-1. check id 保持 B5.3/telemetry-dom；MutationObserver 配置改为 childList:true、subtree:true，空闲观察 1 s（sleep 1000）。
+1. check id 保持 B5.3/telemetry-dom；MutationObserver 配置改为 childList:true、subtree:true，空闲观察 1 s（sleep 1000）；observer 注入在 audit-browser-contract.mjs:78，check 块在 :82-88。
 2. nodeRebuilds 是唯一通过判据，必须为 0；另设 characterData:true 的辅助 observer 统计 textMutations，只写入 metrics，不作通过条件。模拟时钟、子步数和 timeScale 每 110 ms 变化，textMutations 允许大于 0；若 B3-3 保留节点成功，nodeRebuilds 应为 0。
 3. #checkList 不存在时判 fail，不得 skip；检查的 detail/threshold 同步改为“1 s idle childList rebuild count === 0；textMutations 仅记录”。
 4. baseline 同步：tools/audit/baseline/0.2.0.json 的 B5.3/telemetry-dom 从 fail 改为 pass，observed 换成 {nodeRebuilds:0, textMutations:N}，并从 knownFailures 与 defectEvidence.B5.3.failing 中移除该 id；其他 B5.3 内容不动。该改动与 B3-3 同提交。
 
 ### 0.3 解冻前清单
 
-1. 分册 05/B0-3 创建或登记 tools/test-runtime.mjs；脚本仅覆盖 frame/geometry/selftest/assets 四组，不并入 npm test 的 47+52，但加入 package.json 的 test:runtime 与 ci:node（npm test && npm run test:invariants && npm run test:runtime && npm run test:dev-server）。
-2. 两处 audit 改动与 baseline 两条记录只随 B3-1（B5.1）与 B3-3（B5.3）提交；解冻前不得提前修改 tools/。其他 audit check 一律不动。
+1. 解冻前清单：tools/test-runtime.mjs（owner 03）只覆盖 frame/geometry/selftest/assets 四组，不并入 npm test 的 47+52；package.json 的 test:runtime 与 ci:node（npm test && npm run test:invariants && npm run test:runtime && npm run test:dev-server）由你与 B0/05 的约定处理，B3 提交负责加入这两个 script；B3 完成后 ci:node 必须全绿。
+2. 两处 audit 改动随 B3-1（B5.1）与 B3-3（B5.3）提交；baseline 的 runtime 组条目（B5.1 六条、B5.2、B5.3、B5.4、O1）随对应 B3 提交同步，只改 status/knownFailure/observed，不删条目；其他组不动。解冻前不得提前修改 tools/。
 3. 施工顺序按 lead 裁决保持 B3-1 → B3-2 → B3-3/B3-4 → B4-4；30-ui/40-app 由 40-app 单点合并；B4-6 runner 先迁移或只追加独立块。
 4. B3 解冻前不写 src/；本文件只登记裁决与清单。
 
@@ -41,7 +41,7 @@ B3 的四项都不能在 B1/B2 之前冻结，原因不在文件冲突，而在�
 
 1. B1-1 的质心状态、B1-3 的角点分层结构、B1-4 的种子所有权、B1-5 的 solverDegraded/solverFailed 已合入。
 2. B2-1 的 sim.contact 投影与 simRetargetReference、B2-3 的 contactRoad/wheelPosRoad 已合入。
-3. tools/test-runtime.mjs 的脚本注册（test:runtime、ci:node）由 B0-3/分册 05 先落地；当前 package.json 只有 audit 脚本，尚无 test:runtime。
+3. tools/test-runtime.mjs 的脚本注册（test:runtime、ci:node）由 B3 提交按与 B0/05 的约定加入；当前 package.json 只有 audit 脚本，尚无 test:runtime。
 
 ### 1.1 当前工作区行号重定位
 
@@ -191,8 +191,8 @@ B2-1 原文把 processPendingRebuild 也列为调用点；实际上提交必须�
 
 两项已由 §0 裁决；以下只保留原因分析，施工按 §0.1/§0.2 执行。
 
-1. B5.1/5-clamp50-time 已过时。 audit 在 runCase(5,50) 里把每帧输入预先截到 50 ms，模拟的是旧 40-app.js:418 的应用层截断。B3-1 删除该截断后，sim 只看到 0.05 s 输入，1 s 墙钟推进 0.248 s 且 droppedTime=0（因为丢失发生在 audit 的调用侧，sim 无法知道 0.2 s 的原帧长），该 check 必然失败。可选处理：05 把 runCase(5,50) 改为 runCase(5,500)（或删除该 case，保留 raw 5 Hz），并重生成 baseline；否则 B3-1 无法让 audit:runtime 转绿。不建议为通过该 case 在 simAdvance 增加“第二帧长”参数，那会把应用层截断重新引入物理层。
-2. B5.3/telemetry-dom 的 characterData:true 与“只写变化文本”矛盾（裁决见 §0.2：childList 为唯一判据）。 模拟时钟运行，首行 t 1.20 s、子步数、timeScale 每 110 ms 变化；B3-3 保留节点后 childList 为 0，但 characterData 必然 >0，audit 仍失败。建议 05 把 observer 改为 childList:true,subtree:true，只断言“没有重建节点”；若坚持 characterData，则阈值不能为 0（至少 ≤ 每周期变化字段数）。B3-3 的验收采用“childList 0 + 文本只在值变化时写”。
+1. B5.1/5-clamp50-time 的原因：audit 在 runCase(5,50) 里把每帧输入预先截到 50 ms，模拟的是旧 40-app.js:418 的应用层截断。B3-1 删除该截断后，sim 只看到 0.05 s 输入，1 s 墙钟推进 0.248 s 且 droppedTime=0（丢失发生在 audit 的调用侧，sim 无法知道 0.2 s 的原帧长），该 check 必然失败。裁决见 §0.1：删除 runCase(5,50) 输入，改用 runCase(5) 与 simAdvance(0.2) 两条断言；不采用“改为 runCase(5,500)”或在 simAdvance 增加第二帧长参数。
+2. B5.3/telemetry-dom 的 characterData:true 与“只写变化文本”矛盾（裁决见 §0.2：childList 为唯一判据）。 模拟时钟运行，首行 t 1.20 s、子步数、timeScale 每 110 ms 变化；B3-3 保留节点后 childList 为 0，但 characterData 必然 >0，audit 仍失败。裁决见 §0.2：observer 改 childList:true,subtree:true，nodeRebuilds 为唯一判据；characterData 另设辅助计数，只记录不判定。B3-3 的验收采用“childList 0 + 文本只在值变化时写”。
 
 ### 4.3 浏览器断言的 CDP 方法
 
@@ -202,7 +202,7 @@ B3 追加断言时使用：
 
 - pending 逐帧：先 ctx.evaluate 注入 rAF 循环，记录 FSApp.getSnapshot().geometry.physicsRevision、FSApp.getSceneProbe().stretch.susp 与 sim.resetCount，再 setState({wheelbase:3.9},{rebuild:false})，等 2-3 帧后提交，读回收数；断言 pending 区间 physicsRevision 与 resetCount 恒定、stretch.susp<0.01、提交帧才变。
 - 10 Hz 限帧：在页面加载前用 Page.addScriptToEvaluateOnNewDocument 注入 requestAnimationFrame 包装（每 6 次转发 1 次，保留时间戳），再 Page.reload() 并重等 FSApp.ready；测量 2 s 墙钟内 sim.time，断言 Δ∈[1.85,2.0]、droppedTime<0.05。不要用固定 setInterval 驱动物理。
-- DOM 复用：ctx.evaluate 注入 MutationObserver，观察 #checkList 的 childList；建议不观察 characterData（见 4.2）。
+- DOM 复用：ctx.evaluate 注入 MutationObserver，观察 #checkList 的 childList（subtree:true）；另设 characterData 辅助计数，只记录不判定（§0.2）。
 - 材质释放：先确认 window.THREE.Material/BufferGeometry 存在，patch 两者的 prototype.dispose 计数；再触发轴距重建，断言 materialDisposed>=3（B3-4 目标 7）且 geometryDisposed>0。
 - 弹窗数量：FSApp.openModel() 后等动态分片完成，读 #selfTestList li 数量 >=24，dynamicTests.length>=10；等待时间用 1.5·T_total+500 ms（T_total 由 B2-1 合入后实测）。
 - teardown：FSApp.dispose() 后读 getAssetStats().renderer 与 assets.lastTeardown，断言 geometries/textures 归零、注册表清空、二次调用无异常；浏览器关闭前再收 page-errors。
@@ -215,7 +215,7 @@ B3 追加断言时使用：
 | revision 淘汰破坏语义 | 64 项 map 满后淘汰活动值，“回到原值同 revision”偶发失败 | setActiveGeometry 标记活动 key；淘汰跳过它；测试先插 70 个签名再验活动值；非活动旧值只保证未淘汰时稳定 |
 | 材质三类混淆 | 把 MAT.xray/MAT.carbonWing 或 CAR.decalCache 当实例释放，导致壳体贴图丢失；或漏掉 contactRing.clone() | disposeGroupChildren 保留集合来自 MAT/TEX/CAR.decalCache/CAR.shared；场景期 contactRing 计 sceneMaterialsDisposed；teardown 按场景→注册表→渲染器 |
 | 10 项动态自检分片 | 首片含 settle 2.5 s 仍可能 >50 ms；总时长随 B2-1 增至 10 项 | 生成器按 record yield；B2-1 合入后实测 T_total/T_first，阈值 1.5×；同步 API 仍返回 10 项；modal 断言 >=24 |
-| 审计与实现口径冲突 | B5.1/5-clamp50 仍模拟旧截断；B5.3 观察 characterData | 见 4.2，先由 05 改 audit/baseline，否则 B3 不能宣称 audit 转绿 |
+| 审计与实现口径冲突 | B5.1/5-clamp50 与 B5.3/telemetry-dom 的旧口径 | 两处已裁决（§0.1/§0.2）；B3-1/B3-3 同提交改 audit+baseline；不得提前改 tools/，否则 B3 不能宣称 audit 转绿 |
 | B1-1 质心语义 | calibrateRack 仍把 sim.state 当参考点 | 改用 simReferencePoint(SIM)；三处调用点同改；B1-1 验收后回归 |
 | B2-1 retarget 混用 | 在几何提交后调用 simRetargetReference 清空 settle 种子；或 pending 中调用 | 同代物理分支才调用；提交用 simReset；B2/B3 联调确认 process 调用点 |
 | solver 语义越权 | B3-3 自行实现首行判据或把 CAR.diag.rockerSolveOk 当 solverOk | 首行/两行归 B4-4；B3-2 probe 保留渲染诊断，快照 solverOk 由 B1-3 模型提供 |
@@ -245,7 +245,7 @@ B3-1 必须先于 B3-2 合入（同一个 40-app.js 的 animate/refreshAll 上�
 | 05-body-dynamics.js | B3-1 simAdvance、B3-2 revision、B3-3 生成器 | 无 B4 | B1/B2 先合；B3 三项在同一文件按序 |
 | 20-car.js/10-scene.js/22-car-dynamics.js | B3-2 revision/guard、B3-4 assets/dispose/teardown | 无 B4（B1-4 改 updateSuspension） | B3-2 先，B3-4 后；B1-4 已改 22 |
 | tools/test-dynamics-browser.mjs | B3-2 pending、B3-3 24 项、B3-4 材质/teardown | B4-6 runner 迁移 | B4-6 先行或只追加独立块；不改 try/finally |
-| package.json/README/DESIGN | test:runtime、数量/帧率文案 | B0-3、B4-8、B5-1/B5-2 | B0-3 加脚本，B5 统一改文档；B3 不重复改 README/DESIGN |
+| package.json/README/DESIGN | test:runtime、数量/帧率文案 | B0-3、B4-8、B5-1/B5-2 | B3 加 test:runtime/ci:node（不并入 npm test），B5 统一改文档；B3 不重复改 README/DESIGN |
 
 建议分工：
 
@@ -255,4 +255,4 @@ B3-1 必须先于 B3-2 合入（同一个 40-app.js 的 animate/refreshAll 上�
 4. 资源实现者：B3-4 的 20/10/22 与 FSApp.dispose；需要 B3-2 的 buildCar 边界先落地。
 5. B4-4 实现者：在 B3-3 之后改 refreshChecks 首行判据、新增 rockerResidual/motionRatio 两行与 #solverBadge；不改 10 行 id/顺序。B4-6 负责浏览器 runner 与清理，B5 负责 README/DESIGN 的数量与帧率文案。
 
-两处裁决已定（§0.1/§0.2）；解冻前由 05 完成 tools/test-runtime.mjs 的注册（§0.3），B3 施工时随 B3-1/B3-3 同提交修改两处 audit 与 baseline。解冻前不写 src/，B3-1/B3-3 的验收不再被两个过时断言卡住。
+两处裁决已定（§0.1/§0.2）；解冻前按 §0.3 完成 tools/test-runtime.mjs 与 package scripts，B3 施工时随 B3-1/B3-3 同提交修改两处 audit 与 runtime 组 baseline。完成验收为 node tools/audit/run-all.mjs --group runtime 与 npm run audit:baseline 均退出 0；后者依赖 B1/B2 owner 同步其 baseline 条目。解冻前不写 src/。

@@ -3,7 +3,7 @@
 | 项目 | 内容 |
 | --- | --- |
 | 分支 | `feat/plan-execution` |
-| HEAD | `fbb401d`（0.2.0）；`src/` 尚未改动，`tools/audit/` 与 `package.json` 已由 B0 提交 |
+| HEAD | `fbb401d`（0.2.0）为勘察基线；B1 施工已开始修改 `src/`，本文行号仍以 `fbb401d` 为准 |
 | 依据 | `docs/plan/contracts.v1.md` §1/§2/§4；分册 02（r2）；分册 01 §6.1；`tools/audit/{friction-low-speed,impulse-frame,contact-gap}.mjs` |
 | 性质 | 只读勘察；本文件是 B2 施工清单，不写 `src/` 与 `tools/` |
 | 状态 | B1 施工中，B2 未解冻；行号以 `fbb401d` 为准，B1 合入后按符号重新锚定。r1 三处裁决已于 2026-11-19 回写分册 02，本文 §8 标注“已裁决” |
@@ -54,7 +54,7 @@ B2 只消费 B1 的以下输出，不重定义；B1 未定稿的字段一律不�
 
 ## 3. B2-2 脉冲作用点（0.5 人日，合入序 1）
 
-**契约公式（`contracts.v1` §4.1，r1 已裁决）**：`P = refPos + R(q)·offset`，`r_CG = refPos + R(q)·cgBody`，`P - r_CG = R(q)·(offset - cgBody)`，`M = (R(q)·(offset-cgBody)) × forceRoad`。力只在路面系定义一次（`forceRoad`，不随姿态旋转）；车体系等价式 `R·(leverBody × (R⁻¹·forceRoad))` 只作核对，不设第二套定义。分册 02 §4.2 已按此回改，全文无 `forceBody`。
+**契约公式（`contracts.v1` §4.1，r1 已裁决）**：`P = refPos + R(q)·offset`，`r_CG = refPos + R(q)·cgBody`，`P - r_CG = R(q)·(offset - cgBody)`，`M = (R(q)·(offset-cgBody)) × forceRoad`。力只在路面系定义一次（`forceRoad`，不随姿态旋转）；车体系等价式 `R·(leverBody × (R⁻¹·forceRoad))` 只作核对，不设第二套定义。分册 02 §4.2 已按此回改，全文不再有车体系力字段。
 
 施工步骤：
 
@@ -113,7 +113,7 @@ B2 只消费 B1 的以下输出，不重定义；B1 未定稿的字段一律不�
 
 ## 6. B2-4 力装配统一（0.5 人日，合入序 4）
 
-1. 新增 `simApplyForceAt(sim, roadPoint, forceRoad, bucket)`：累加 `force`，把 `(roadPoint-cgWorld)×forceRoad` 同时累加到 `moment` 与 `momentParts[bucket]`。签名四参，累加器机制见 §8.1。
+1. 新增 `simApplyForceAt(sim, roadPoint, forceRoad, bucket)`：只读写 `sim._evalAccum`（`simEvaluate` 入口建、`finally` 删；缺失时抛错且消息含 `_evalAccum`），把 `(roadPoint-cgWorld)×forceRoad` 累加到 `momentParts[bucket]`，`moment` 由三项相加（裁决见 §8.1）。签名四参不变。
 2. 替换四处手写叉乘（05:306-311、337-341、364-368、379-382），bucket 分别 normal/friction/impulse；摩擦两个分支同桶。
 3. `simEvaluate` 返回 `momentParts`；`simBuildModel` 透传。
 4. `b2` 的等价性：以 B2-1 合入后的 HEAD 为基线，改造前后同组确定性用例完整 state 逐位相同。
@@ -147,25 +147,26 @@ B2 只消费 B1 的以下输出，不重定义；B1 未定稿的字段一律不�
 | [10] | 容量边界不抖振 | demand/capacity=0.99 与 1.01 各 5 s，`changes` ≤0 与 ≤2 |
 | [10] | 帧率一致 | 10/12/30/60/144 Hz 到同一 `sim.time` 与子步数，完整 state `===`；`lastChangeStep` 序列相同 |
 | [10] | 遥测无副作用 | 连续 100 次 `simBuildModel`，`changes/dwell/since/lastChangeStep` 不变 |
-| [10] | 横摆预算 | 8°/7° 与 10°/10° 各一次 SLIP→HOLD，预算与独立复算差 ≤1e-9 |
+| [10] | 横摆预算 | 8°/7° 与 10°/10° 各一次 SLIP→HOLD，预算只取 normal+impulse，与独立复算差 ≤1e-9；加回 friction 会产生 >1e-3 N·m·s 差异 |
 | [10] | 旧 flags 兼容 | `flags.holding === (mode==='HOLD')`、`flags.sliding === (mode==='SLIP')` |
-| [11] | 复合姿态 | 侧倾 10°+俯仰 10°：`ΔM_road = R·(0,0,-6880.45)`，模 6880.45，≤1e-9 |
+| [11] | 复合姿态 | 侧倾 10°+俯仰 10°：`ΔM` 与独立复算的 `(R·lever)×forceRoad` 一致，≤1e-9；不断言固定 6880.45 |
 | [11] | 侧倾/垂向脉冲 | `(3780,0,-670.95)`、`(0,0,-1086.30)`，≤1e-6 |
-| [11] | 差只含脉冲项 | `abs(ΔM - R·(lever×F))≤1e-9`，力差 `R·F` |
+| [11] | 差只含脉冲项 | `abs(ΔM - (R·lever)×forceRoad)≤1e-9`，力差 `forceRoad`（姿态无关） |
 | [12] | 独立复算 | `suspSolveCorner` 复算的 `contactRoad` 与消费值差 ≤1e-9 |
 | [12] | 力矩分解 | 三项和 ≤1e-9；法向/摩擦独立复算 ≤1e-6 N·m（水平、8°/7°、10° 俯仰、低附着） |
 | [12] | 横摆对称 | 水平对称 `abs(momentParts.friction[1])≤1e-6` |
 | [12] | `normalMomentX/Z` | 与 `contactPoints×loads` 重算差 ≤1e-6 |
+| [12] | 累加器生命周期 | 评估外调用抛错且消息含 `_evalAccum`；`simEvaluate`/`simBuildModel` 返回后 `sim._evalAccum === undefined`；100 次构建不残留 |
 | [12] | `simApplyForceAt` 等价 | 改造前后最终 state 逐位相同 |
 | 守卫 | grep | `simEvaluate` 内 `simCross(` 计数 0 |
 
-## 8. 开工前必须裁决的三项
+## 8. 三项裁决（已裁决，2026-11-19 回写 02）
 
-8.1 `simApplyForceAt` 的累加器。契约冻结四参签名且“无返回值、纯累加”，但没有累加目标。建议：模块级 `let SIM_FORCE_ACCUM = null`，`simEvaluate` 开头设置、`finally` 还原；`simApplyForceAt` 在 `SIM_FORCE_ACCUM === null` 时抛错。这样不改签名、不写 `sim`、实测可重复。备选是 `sim._accum`，但会与“`simEvaluate` 无副作用”的表述冲突，需 lead 选定。
+8.1 **累加器（已裁决）**：维持四参签名。`simEvaluate` 入口创建 `sim._evalAccum = { force:[0,0,0], momentParts:{normal:[0,0,0],friction:[0,0,0],impulse:[0,0,0]} }`，结束时读取并删除；`simApplyForceAt` 只读写该字段，缺失时抛错（消息含 `_evalAccum`），不得静默新建。属实现细节，不进入 `contracts.v1` 字段表；已写入 02 §4.4 第 1、2 步与验收第 2 条。原建议的模块级 `SIM_FORCE_ACCUM` 不采用。
 
-8.2 O-14 的横摆预算口径。若按字面把 `momentParts.friction[1]` 加进 `h`，控制量与被控量混在一起。反例：`L0=1`、饱和摩擦 `Lf=3`、无外部项，按字面 `h=1-3=-2`、`k=2/3`，本步后 `L=-1` 仍反向；按非摩擦口径 `h=1`、`k=1/3`，本步后 `L=0`。建议口径为“左侧 normal+impulse，右侧 friction”，并在分册 02 §4.1 第 8 条与 [10] 的断言同步改写；若坚持字面口径，则刹停系数必须解成不动点，工作量与风险都上升。
+8.2 **横摆预算（已裁决）**：采纳“`L_ext` 只取 normal + impulse”，`momentParts.friction` 只作观测与能量核算，不计入被控量。反例保留：`L0=1`、饱和摩擦 `Lf=3`、无外部项，若把摩擦计入 `h` 得 `h=1-3=-2`、`k=2/3`、本步后 `L=-1` 仍反向；按非摩擦口径 `h=1`、`k=1/3`、本步后 `L=0`。已回改 02 §4.1 第 4 步、验收第 8 条与 §4.4 的相关句子，[10] 的断言按非摩擦口径。
 
-8.3 分册 02 §4.2 的 `forceBody` 与契约 §4.1 的 `forceRoad` 冲突。按契约执行，B2-2 提交同时回改 02 §4.2 第 1、2、3、6 条与 §5.3 的公式说明；[11] 的复合姿态断言按 `(R·lever)×forceRoad` 计算，不再用 `R·(lever×forceBody)`。
+8.3 **力方向（已裁决）**：脉冲力统一为路面系 `forceRoad`，公式 `M = (R(q)·(offset−cgBody)) × forceRoad`；车体系等价式只在注释中作核对，不作第二套定义。已回改 02 §4.2 第 1、2、3、5、6 步与 §5.3，两文件均无车体系力字段。零姿态俯仰 `(0,0,-6880.45)`、侧倾 `(3780,0,-670.95)`、垂向 `(0,0,-1086.30)` 保留；复合姿态按公式逐姿态计算，不保 6880.45 模长。
 
 ## 9. 风险
 

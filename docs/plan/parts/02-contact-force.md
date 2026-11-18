@@ -152,7 +152,7 @@ C-1 至 C-4 出自同一结构原因：`atRest`（05:324-326）是每步重算�
 6. 独立复算测试：对每个角点计算 `cross(contact - cg, [0, N_i, 0])` 与 `cross(contact - cg, f_i)`，分别与 `momentParts.normal`、`momentParts.friction` 比对，容差 1e-6 N·m。
 7. grep 守卫：`awk '/^function simEvaluate/,/^}/' src/js/05-body-dynamics.js | grep -c 'simCross('` 必须为 0；`simCross` 在 05 中只允许出现在 `simApplyForceAt` 函数体与四元数辅助函数处。
 
-**依赖。** B2-3（统一接地点）。本任务改动物理路径（统一力装配），但只做等价替换；数值等价由验收第 5 条与 `npm test` 守护。
+**依赖。** B2-3（统一接地点）。本任务改动物理路径（统一力装配），但只做等价替换；数值等价由验收第 6 条与 `npm test` 守护。
 
 **验收。** 入口命令 `node tools/audit/audit-contact-gap.mjs --group full`（完整组，含从 B2-3 移交的力矩一致性条目，O-12）与 `npm test` 的 `[12]` 段：
 
@@ -164,7 +164,7 @@ C-1 至 C-4 出自同一结构原因：`atRest`（05:324-326）是每步重算�
 6. 等价性：以 B2-1 合入后的 HEAD 为对照基线，`simApplyForceAt` 改造前后同一组确定性用例的最终 state 逐位相同（含 B2-2 的脉冲工况）。
 7. grep 守卫输出为 0。
 
-**风险与回滚。** `simApplyForceAt` 是纯累加替换，风险集中在力臂原点写错（必须是质心）、bucket 漏记与 `_evalAccum` 未清理，三者由验收第 1、2、7 条覆盖。字段命名若与分册 01 的 `ForceEvaluation` 冲突，以分册 01 为准并在同一提交更新本册用例。回滚为 revert B2-4，B2-3 与 B2-1 不依赖其字段。
+**风险与回滚。** `simApplyForceAt` 是纯累加替换，风险集中在力臂原点写错（必须是质心）、bucket 漏记与 `_evalAccum` 未清理，三者由验收第 1、2、3、7 条覆盖。字段命名若与分册 01 的 `ForceEvaluation` 冲突，以分册 01 为准并在同一提交更新本册用例。回滚为 revert B2-4，B2-3 与 B2-1 不依赖其字段。
 
 ## 5. 与分册 01 的接口契约
 
