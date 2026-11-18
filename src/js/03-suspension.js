@@ -4,6 +4,14 @@
 
 const V = (x, y, z) => new THREE.Vector3(x, y, z);
 
+// Motion-ratio guard rails. The current front/rear linkage intentionally runs
+// above 1 (about 1.27 and 1.01), so a solved corner is valid up to 2.5. The
+// instantaneous ratio state in 05-body-dynamics shares the same ceiling; the
+// lower bound and the design-relative check remain in force.
+const SUSP_RATIO_MIN = 0.2;
+const SUSP_RATIO_MAX = 2.5;
+const SUSP_INSTANT_RATIO_MIN = 0.05;
+
 /**
  * Hardpoints and design geometry for the four corners.
  *
@@ -11,45 +19,49 @@ const V = (x, y, z) => new THREE.Vector3(x, y, z);
  * Body-frame points come from the chassis hardpoints; wheel-local points are
  * expressed in the upright/wheel frame and are rotated by the design camber.
  *
- * The spring-damper unit sits above the rocker: the damper eye is on the same
- * side of the pivot as the push arm, so bump travel shortens the unit and the
- * coil is always in compression.
+ * The layout is the current-generation pull/push-rod arrangement: the front
+ * corners drive the rockers through a pushrod from the lower upright, the rear
+ * corners drive them through a pullrod from the upper upright. Each rocker
+ * carries a longitudinal, near-horizontal spring-damper unit; bump travel
+ * rotates the rocker and shortens the unit. The steering arms sit close to the
+ * upright centre height to keep bump steer small.
  */
 function buildCornerData(model) {
   return model.wheels.map((wheel, index) => {
     const front = wheel.axle === 'front';
     const zSign = wheel.zSign;
     const innerZ = front ? 0.17 : 0.125;
-    const rockerZ = front ? 0.225 : 0.15;
     const body = {
       lowerFront: V(wheel.x + (front ? 0.31 : 0.23), front ? 0.145 : 0.16, zSign * innerZ),
       lowerRear: V(wheel.x - (front ? 0.30 : 0.22), front ? 0.145 : 0.16, zSign * innerZ),
       upperFront: V(wheel.x + (front ? 0.21 : 0.17), front ? 0.345 : 0.355, zSign * (innerZ - 0.025)),
       upperRear: V(wheel.x - (front ? 0.20 : 0.16), front ? 0.345 : 0.355, zSign * (innerZ - 0.025)),
       track: front
-        ? V(wheel.x - 0.44, 0.315, zSign * 0.295)
-        : V(wheel.x + 0.34, 0.315, zSign * 0.115),
-      rocker: V(wheel.x + (front ? -0.42 : 0.30), front ? 0.56 : 0.45, zSign * rockerZ),
+        ? V(wheel.x - 0.100, 0.256, zSign * 0.250)
+        : V(wheel.x + 0.055, 0.258, zSign * 0.160),
+      rocker: front
+        ? V(wheel.x - 0.3335555968, 0.4763013204, zSign * 0.1703457239)
+        : V(wheel.x + 0.2301430269, 0.2200000000, zSign * 0.0750000000),
       damper: front
-        ? V(wheel.x - 0.36, 0.79, zSign * 0.10)
-        : V(wheel.x + 0.34, 0.66, zSign * 0.09),
+        ? V(wheel.x - 0.8181192550, 0.4072443937, zSign * 0.1066914327)
+        : V(wheel.x + 0.6536795738, 0.3632529467, zSign * 0.0200000000),
       diff: V(wheel.x + 0.08, 0.30, zSign * 0.17)
     };
     body.trackBase = body.track.clone();
     const wheelLocal = {
       lower: V(0.015, -0.215, -zSign * 0.105),
       upper: V(-0.010, 0.215, -zSign * 0.105),
-      track: V(0.100, -0.020, -zSign * 0.105),
-      push: front ? V(0.040, -0.185, -zSign * 0.080) : V(0.000, -0.185, -zSign * 0.080),
+      track: V(-0.100, -0.020, -zSign * 0.105),
+      push: front ? V(0.040, -0.185, -zSign * 0.080) : V(0.000, 0.2129498711, -zSign * 0.080),
       drive: V(0.000, 0.000, -zSign * 0.060)
     };
     const rocker = {
       pivot: body.rocker.clone(),
-      pushArm: front ? V(0.130, -0.010, 0) : V(-0.130, -0.010, 0),
-      damperArm: front ? V(0.070, -0.050, 0) : V(-0.070, -0.050, 0),
-      arbArm: front ? V(-0.060, 0.050, 0) : V(0.060, 0.050, 0),
-      baseAngle: front ? -0.10 : 0.10,
-      gain: 14,
+      pushArm: front ? V(-0.0513243542, -0.0400570614, 0) : V(-0.0546044635, 0.0353022808, 0),
+      damperArm: front ? V(-0.1004629500, -0.1372333569, 0) : V(0.0714106700, 0.1426098111, 0),
+      arbArm: front ? V(-0.045, 0.020, 0) : V(0.050, 0.030, 0),
+      baseAngle: 0,
+      gain: front ? 7.4 : 6.8,
       mesh: null,
       axle: null
     };
@@ -304,8 +316,12 @@ function suspSolveRaw(corner, bodyPos, bodyQuat, rackShift, seed, cold) {
   const norm = Math.max(Math.abs(finalEval.f[0]), Math.abs(finalEval.f[1]), Math.abs(finalEval.f[2]));
   const converged = norm < 1e-6;
   const analyticFinal = suspJacobianAnalytic(corner, finalEval, rackShift, thL, thU, spin);
-  const jacobian = lastJ ||
+  // Prefer the Jacobian evaluated at the converged state. lastJ belongs to the
+  // previous Newton iterate and biases the analytic motion ratio when the seed
+  // chain is already close: the cold and warm paths must report the same ratio.
+  const jacobian =
     ((analyticFinal && analyticFinal.every((row) => row.every(Number.isFinite))) ? analyticFinal : null) ||
+    lastJ ||
     suspJacobianAt(corner, bodyPos, bodyQuat, rackShift, finalEval, thL, thU, spin);
   return {
     thL,
@@ -496,15 +512,15 @@ function suspSolveCorner(corner, bodyPos, bodyQuat, rackShift, seed, withRatio) 
   }
   const state = raw.evalState;
   const seedAngle = seed && Number.isFinite(seed.rockerAngle) ? seed.rockerAngle : corner.rocker.baseAngle;
-  const rocker = suspRockerAngle(corner, state.P, seedAngle);
-  const coilLength = suspCoilLength(corner, rocker.angle);
+  let rocker = suspRockerAngle(corner, state.P, seedAngle);
+  let coilLength = suspCoilLength(corner, rocker.angle);
   let motionRatio = null;
   let motionRatioState = 'unavailable';
   if (withRatio) {
     const ratio = suspMotionRatioAnalytic(corner, state, raw, rocker.angle);
     if (ratio != null && Number.isFinite(ratio)) {
       motionRatio = ratio;
-      motionRatioState = (ratio > 0.2 && ratio < 0.8) ? 'ok' : 'unavailable';
+      motionRatioState = (ratio > SUSP_RATIO_MIN && ratio < SUSP_RATIO_MAX) ? 'ok' : 'unavailable';
     }
   }
   const frame = { converged: raw.converged, error: raw.error };
@@ -522,6 +538,25 @@ function suspSolveCorner(corner, bodyPos, bodyQuat, rackShift, seed, withRatio) 
   const bodyOrigin = new THREE.Vector3(bodyPos.x, bodyPos.y, bodyPos.z);
   const wheelPosRoad = wheelPosBody.clone().applyQuaternion(bodyQuat).add(bodyOrigin);
   const contactRoad = contactBody.clone().applyQuaternion(bodyQuat).add(bodyOrigin);
+  let pushPoint = state.P.clone();
+  if (!raw.converged && Number.isFinite(contactRoad.y)) {
+    // A failed frame solve must not leak an off-plane contact or a second,
+    // unrelated coil length into forces and rendering. Translate the complete
+    // upright so its contact lies on the road, then close the rocker and coil
+    // again at that same projected pose. Wishbone/tie closure remains degraded
+    // through frame.converged=false; there is no hidden exact-solution claim.
+    const correctionRoad = new THREE.Vector3(0, -contactRoad.y, 0);
+    contactRoad.add(correctionRoad);
+    wheelPosRoad.add(correctionRoad);
+    const correctionBody = correctionRoad.clone().applyQuaternion(bodyQuat.clone().invert());
+    wheelPosBody.add(correctionBody);
+    contactBody.add(correctionBody);
+    pushPoint.add(correctionBody);
+    rocker = suspRockerAngle(corner, pushPoint, seedAngle);
+    coilLength = suspCoilLength(corner, rocker.angle);
+    motionRatio = null;
+    motionRatioState = 'unavailable';
+  }
   return {
     thL: raw.thL,
     thU: raw.thU,
@@ -535,14 +570,14 @@ function suspSolveCorner(corner, bodyPos, bodyQuat, rackShift, seed, withRatio) 
     seed: { thL: raw.thL, thU: raw.thU, spin: raw.spin, rockerAngle: rocker.angle },
     converged: raw.converged,
     error: raw.error,
-    wheelPos: state.C.clone(),
+    wheelPos: wheelPosBody.clone(),
     wheelQuat: state.wheelQuat.clone(),
-    contact,
+    contact: contactBody.clone(),
     contactBody,
     wheelPosBody,
     contactRoad,
     wheelPosRoad,
-    pushPoint: state.P.clone(),
+    pushPoint,
     rockerAngle: rocker.angle
   };
 }
@@ -552,36 +587,111 @@ function suspWheelSteer(quat) {
   return Math.atan2(-dir.z, dir.x);
 }
 
+// Rack calibration envelope. The fresh front geometry needs about 32.2 mm of
+// rack travel for 18 deg of steer, so the scan covers +/-60 mm and is sampled
+// before bisection. The bracket must be monotonic; every sample starts the
+// corner solve cold so a previous branch or seed can never leak into this
+// calibration (and no corner.rackSeed is written).
+const SUSP_RACK_SCAN_RANGE = 0.060;
+const SUSP_RACK_SCAN_STEPS = 24;
+const SUSP_RACK_BISECT_ROUNDS = 42;
+const SUSP_RACK_SHIFT_EPS = 1e-10;
+
 /**
  * Find the rack displacement that makes the mean front wheel angle match the
  * driver input. Called only when the steering input or the design changes.
+ *
+ * The mean angle curve is monotonic in this geometry. The routine first scans
+ * the full envelope, records every sign-changing bracket, prefers a bracket
+ * whose local slope agrees with the global slope, then bisects it with cold
+ * solves. Returns a number; callers keep their existing numeric contract.
  */
 function suspRackForSteer(corners, bodyPos, bodyQuat, steerRad) {
   const fronts = corners.filter((corner) => corner.front);
   if (!fronts.length) return 0;
+  const target = Number.isFinite(steerRad) ? steerRad : 0;
   const meanAt = (shift) => {
     let sum = 0;
     for (const corner of fronts) {
-      const solved = suspSolveRaw(corner, bodyPos, bodyQuat, shift, corner.rackSeed, false);
-      corner.rackSeed = { thL: solved.thL, thU: solved.thU, spin: solved.spin };
+      // Cold solve: no persistent rack seed, no branch inherited from the
+      // caller's physics state. The calibration is therefore repeatable and
+      // independent of whatever the sim seeds currently hold.
+      const solved = suspSolveRaw(corner, bodyPos, bodyQuat, shift, null, true);
+      if (!solved.converged) return NaN;
       sum += suspWheelSteer(solved.evalState.wheelQuat);
     }
     return sum / fronts.length;
   };
-  let lo = -0.12;
-  let hi = 0.12;
-  let loAngle = meanAt(lo);
-  let hiAngle = meanAt(hi);
-  if (loAngle > hiAngle) {
-    const tmp = lo; lo = hi; hi = tmp;
-    const tmpA = loAngle; loAngle = hiAngle; hiAngle = tmpA;
+  const samples = [];
+  const step = (2 * SUSP_RACK_SCAN_RANGE) / SUSP_RACK_SCAN_STEPS;
+  let direction = 0;
+  let monotonic = true;
+  let previous = null;
+  let minSample = null;
+  let maxSample = null;
+  for (let i = 0; i <= SUSP_RACK_SCAN_STEPS; i += 1) {
+    const shift = -SUSP_RACK_SCAN_RANGE + i * step;
+    const angle = meanAt(shift);
+    if (!Number.isFinite(angle)) continue;
+    const sample = { shift, angle };
+    samples.push(sample);
+    if (!minSample || angle < minSample.angle) minSample = sample;
+    if (!maxSample || angle > maxSample.angle) maxSample = sample;
+    if (previous) {
+      const delta = angle - previous.angle;
+      if (Math.abs(delta) > 1e-12) {
+        const sign = Math.sign(delta);
+        if (direction === 0) direction = sign;
+        else if (sign !== direction) monotonic = false;
+      }
+    }
+    previous = sample;
   }
-  if (steerRad <= loAngle) return lo;
-  if (steerRad >= hiAngle) return hi;
-  for (let i = 0; i < 42; i += 1) {
+  if (!samples.length) return 0;
+  const brackets = [];
+  for (let i = 1; i < samples.length; i += 1) {
+    const a = samples[i - 1];
+    const b = samples[i];
+    const da = a.angle - target;
+    const db = b.angle - target;
+    if (da === 0) return a.shift;
+    if (db === 0) return b.shift;
+    if (da * db < 0) {
+      const slope = (b.angle - a.angle) / (b.shift - a.shift);
+      brackets.push({ lo: a, hi: b, slope, agrees: direction === 0 || Math.sign(slope) === direction });
+    }
+  }
+  if (!brackets.length) {
+    // The requested angle is outside the scanned envelope. Return the closest
+    // reachable end of the measured curve rather than an arbitrary zero.
+    if (target <= minSample.angle) return minSample.shift;
+    if (target >= maxSample.angle) return maxSample.shift;
+    return 0;
+  }
+  // A globally monotonic scan has one bracket by construction. If the cold
+  // solves do not produce a monotonic curve (for example near a reachability
+  // limit), fall back to the strongest local bracket whose slope agrees with
+  // the overall direction.
+  let bracket = brackets[0];
+  if (!monotonic) {
+    bracket = brackets.find((candidate) => candidate.agrees) || brackets[0];
+    for (const candidate of brackets) {
+      if (candidate.agrees && Math.abs(candidate.slope) > Math.abs(bracket.slope)) bracket = candidate;
+    }
+  }
+  let lo = bracket.lo.shift;
+  let hi = bracket.hi.shift;
+  let loAngle = bracket.lo.angle;
+  for (let i = 0; i < SUSP_RACK_BISECT_ROUNDS && hi - lo > SUSP_RACK_SHIFT_EPS; i += 1) {
     const mid = 0.5 * (lo + hi);
-    const value = meanAt(mid);
-    if (value < steerRad) lo = mid; else hi = mid;
+    const angle = meanAt(mid);
+    if (!Number.isFinite(angle)) break;
+    if ((angle - target) * (loAngle - target) > 0) {
+      lo = mid;
+      loAngle = angle;
+    } else {
+      hi = mid;
+    }
   }
   return 0.5 * (lo + hi);
 }

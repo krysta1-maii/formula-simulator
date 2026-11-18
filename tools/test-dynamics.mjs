@@ -16,7 +16,7 @@ const factory = new Function('THREE', 'localStorage',
   ' simCreate, simReset, simStep, simRunFor, simAdvance, simBuildModel, simApplyImpulse,' +
   ' simEvaluate, runDynamicSelfTests, SIM_DT, simQuatFromEuler, simQuatRotate, simEulerFromQuat,' +
   ' suspSolveCorner, suspensionBuild, suspRackForSteer, suspWheelSteer, simReferencePoint,' +
-  ' simRetargetReference, simApplyForceAt' +
+  ' simRetargetReference, simApplyForceAt, suspRockerPoint, suspEvalReset, suspEvalCount' +
   '};');
 const api = factory(THREE, { getItem: () => null, setItem: () => {} });
 const {
@@ -42,7 +42,10 @@ const {
   simQuatFromEuler,
   simQuatRotate,
   simRetargetReference,
-  simApplyForceAt
+  simApplyForceAt,
+  suspRockerPoint,
+  suspEvalReset,
+  suspEvalCount
 } = api;
 
 let failures = 0;
@@ -87,8 +90,18 @@ const reference = computeStatic(DEFAULTS);
 check('inertia is finite and positive', finite(reference.inertia.Ixx) && reference.inertia.Ixx > 0 && reference.inertia.Iyy > 0 && reference.inertia.Izz > 0, JSON.stringify(reference.inertia));
 check('natural frequencies are finite and positive', finite(reference.frequencies.heave) && reference.frequencies.heave > 0 && reference.frequencies.roll > 0 && reference.frequencies.pitch > 0, Object.values(reference.frequencies).map((value) => value.toFixed(2)).join(' / ') + ' Hz');
 check('wheel damping is positive', reference.damperRateWheel.every((value) => finite(value) && value > 0));
-check('motion ratios are in range', reference.motionRatio.front >= 0.3 && reference.motionRatio.front <= 0.9 && reference.motionRatio.rear >= 0.3 && reference.motionRatio.rear <= 0.9);
+check(
+  'motion ratios follow the horizontal-spring design',
+  reference.motionRatio.front > 1.20 && reference.motionRatio.front < 1.35 &&
+    reference.motionRatio.rear > 0.95 && reference.motionRatio.rear < 1.10,
+  reference.motionRatio.front.toFixed(4) + ' / ' + reference.motionRatio.rear.toFixed(4)
+);
 check('coil rate follows wheel rate / i^2', reference.springRateCoil.every((value, index) => Math.abs(value - reference.springRates[index] / Math.pow(reference.suspension.design[index].motionRatio, 2)) < 1e-6));
+check(
+  'coil rates recompute to the horizontal-spring targets',
+  reference.springRateCoil.every((value, index) => Math.abs(value / 1000 - (index < 2 ? 87 : 158)) < 1),
+  reference.springRateCoil.map((value) => (value / 1000).toFixed(2)).join(' / ') + ' N/mm'
+);
 
 console.log('\n[1b] mechanism kinematics');
 const mechanism = reference.suspension.corners;
@@ -117,19 +130,75 @@ check(
   designRows.map((row, i) => ((solvedRows[3][i].coilLength - row.length0) * 1000).toFixed(2)).join(' / ') + ' mm'
 );
 check(
-  'measured motion ratios stay positive',
-  solvedRows.every((row) => row.every((corner) => corner.motionRatio != null && corner.motionRatio > 0.15 && corner.motionRatio < 1.5)),
+  'measured motion ratios stay inside the 0.2-2.5 guard',
+  solvedRows.every((row) => row.every((corner) => corner.motionRatio != null && corner.motionRatio > 0.2 && corner.motionRatio < 2.5)),
   reference.motionRatio.front.toFixed(3) + ' / ' + reference.motionRatio.rear.toFixed(3)
 );
-const rackSteer = 12 * Math.PI / 180;
-const rackShift = suspRackForSteer(mechanism, { x: 0, y: 0, z: 0 }, new THREE.Quaternion(), rackSteer);
-const rackSolved = mechanism.filter((corner) => corner.front).map((corner) =>
-  suspSolveCorner(corner, { x: 0, y: 0, z: 0 }, new THREE.Quaternion(), rackShift, null, false));
-const meanSteer = rackSolved.reduce((acc, row) => acc + suspWheelSteer(row.wheelQuat), 0) / rackSolved.length;
 check(
-  'rack calibration reaches the steering input',
-  Math.abs(meanSteer - rackSteer) < 0.01,
-  (meanSteer * 180 / Math.PI).toFixed(2) + '° at ' + (rackShift * 1000).toFixed(1) + ' mm'
+  'every ±25 mm mechanism solution is healthy above a ratio of 1',
+  solvedRows.every((row) => row.every((corner) => corner.ok && corner.frame.converged && corner.rocker.feasible)),
+  solvedRows.map((row) => row.map((corner) => corner.motionRatioState).join('/')).join(' · ')
+);
+// Low bump steer: the steering arm height is chosen so ±25 mm of wheel travel
+// changes the wheel angle only marginally.
+let frontBumpSteer = 0;
+let rearBumpSteer = 0;
+const bumpQuat = new THREE.Quaternion();
+for (const corner of mechanism) {
+  const base = suspSolveCorner(corner, { x: 0, y: 0, z: 0 }, bumpQuat, 0, null, false);
+  for (const mm of [-25, 25]) {
+    const moved = suspSolveCorner(corner, { x: 0, y: -mm / 1000, z: 0 }, bumpQuat, 0, base.seed, false);
+    const delta = Math.abs(suspWheelSteer(moved.wheelQuat) - suspWheelSteer(base.wheelQuat)) * 180 / Math.PI;
+    if (corner.front) frontBumpSteer = Math.max(frontBumpSteer, delta);
+    else rearBumpSteer = Math.max(rearBumpSteer, delta);
+  }
+}
+check(
+  '±25 mm bump steer stays small',
+  frontBumpSteer < 0.15 && rearBumpSteer < 0.06,
+  '前 ' + frontBumpSteer.toFixed(4) + '° / 后 ' + rearBumpSteer.toFixed(4) + '°'
+);
+
+// Rack calibration: ±18° is about 32 mm of travel with this steering geometry.
+const rackQuat = new THREE.Quaternion();
+const rackOrigin = { x: 0, y: 0, z: 0 };
+const rackTargets = [-18, -12, 0, 12, 18];
+let rackWorstError = 0;
+const rackShifts = [];
+for (const deg of rackTargets) {
+  const target = deg * Math.PI / 180;
+  const shift = suspRackForSteer(mechanism, rackOrigin, rackQuat, target);
+  const solved = mechanism.filter((corner) => corner.front).map((corner) =>
+    suspSolveCorner(corner, rackOrigin, rackQuat, shift, null, false));
+  const mean = solved.reduce((acc, row) => acc + suspWheelSteer(row.wheelQuat), 0) / solved.length;
+  rackWorstError = Math.max(rackWorstError, Math.abs(mean - target) * 180 / Math.PI);
+  rackShifts.push(shift);
+}
+check(
+  'rack calibration reaches ±18° with a mean error below 1e-4°',
+  rackWorstError < 1e-4,
+  'worst ' + rackWorstError.toExponential(2) + '° at ' + rackShifts.map((value, index) => rackTargets[index] + '°=' + (value * 1000).toFixed(2) + 'mm').join(' / ')
+);
+check(
+  'rack calibration returns a monotonic shift over the target range',
+  rackShifts.every((value, index) => index === 0 || value > rackShifts[index - 1]),
+  rackShifts.map((value) => (value * 1000).toFixed(2)).join(' / ') + ' mm'
+);
+check(
+  'rack calibration does not write corner.rackSeed',
+  mechanism.every((corner) => corner.rackSeed === undefined),
+  mechanism.map((corner) => corner.rackSeed === undefined ? 'clean' : 'seeded').join(' / ')
+);
+const rackSteer18 = 18 * Math.PI / 180;
+const rackShiftA = suspRackForSteer(mechanism, rackOrigin, rackQuat, rackSteer18);
+for (const corner of mechanism) corner.rackSeed = { thL: 0.4, thU: -0.3, spin: 0.2 };
+const rackShiftB = suspRackForSteer(mechanism, rackOrigin, rackQuat, rackSteer18);
+const rackShiftC = suspRackForSteer(mechanism, rackOrigin, rackQuat, -rackSteer18);
+for (const corner of mechanism) delete corner.rackSeed;
+check(
+  'rack calibration is repeatable and independent of stale seeds',
+  rackShiftA === rackShiftB && Math.abs(rackShiftC + rackShiftA) < 1e-9,
+  (rackShiftA * 1000).toFixed(6) + ' / ' + (rackShiftB * 1000).toFixed(6) + ' mm · -18° ' + (rackShiftC * 1000).toFixed(6) + ' mm'
 );
 const strokeSim = simCreate(DEFAULTS, { settle: 1.5 });
 simApplyImpulse(strokeSim, 'heave');
@@ -145,6 +214,19 @@ check(
   'solved wheel poses remain on the plane',
   strokeModel.solved.every((row) => Math.abs(row.contact[1]) < 1e-6),
   strokeModel.solved.map((row) => row.contact[1].toExponential(1)).join(' / ')
+);
+const strokeEval = simEvaluate(strokeSim);
+check(
+  'telemetry coil length equals the force-chain length',
+  strokeModel.solved.every((row, i) =>
+    row && row.coilLength === strokeEval.corners[i].coilLength &&
+    row.coilSource === strokeEval.corners[i].coilSource),
+  strokeModel.solved.map((row) => row.coilSource).join(' / ')
+);
+check(
+  'healthy telemetry reports the mechanism as the coil source',
+  strokeModel.solved.every((row) => row && row.coilSource === 'mechanism'),
+  strokeModel.solved.map((row) => row.coilSource).join(' / ')
 );
 check('static self-tests still pass', runSelfTests(DEFAULTS).every((test) => test.ok));
 
@@ -752,6 +834,206 @@ check('quatFromEuler uses Ry*Rz*Rx', maxDiff3(actual, matVec3(expected, [1, 0, 0
 const oldOrder = matMul3(matMul3(Ry, Rx), Rz);
 const oldVec = matVec3(oldOrder, [1, 0, 0]);
 check('Ry*Rx*Rz is distinguishable from the documented order', maxDiff3(actual, oldVec) > 1e-6, maxDiff3(actual, oldVec).toExponential(2));
+
+console.log('\n[14] +18° steering with heave/roll/pitch pulses');
+const steeredSource = make({ steer: 18 });
+const steerCalSim = simCreate(steeredSource, { settle: 1.0 });
+const steerCalPos = simReferencePoint(steerCalSim);
+const steerCalState = steerCalSim.state;
+const steerCalQuat = new THREE.Quaternion(steerCalState.qx, steerCalState.qy, steerCalState.qz, steerCalState.qw);
+const steerRackShift = suspRackForSteer(
+  steerCalSim.reference.suspension.corners,
+  steerCalPos,
+  steerCalQuat,
+  18 * Math.PI / 180
+);
+check(
+  '+18° rack shift lands at the design travel',
+  steerRackShift > 0.030 && steerRackShift < 0.035,
+  (steerRackShift * 1000).toFixed(3) + ' mm'
+);
+for (const kind of ['heave', 'roll', 'pitch']) {
+  const sim = simCreate(steeredSource, { settle: 0.8 });
+  sim.rackShift = steerRackShift;
+  simRunFor(sim, 0.5);
+  simApplyImpulse(sim, kind);
+  let maxEval = 0;
+  let minCoil = Infinity;
+  let maxCoil = -Infinity;
+  let minLoad = Infinity;
+  let maxLoad = -Infinity;
+  let maxCoilJump = 0;
+  let maxWheelJump = 0;
+  let maxLoadJump = 0;
+  let badContact = 0;
+  let badSolver = 0;
+  let badSource = 0;
+  let previous = null;
+  for (let step = 0; step < 400; step += 1) {
+    suspEvalReset();
+    simStep(sim);
+    maxEval = Math.max(maxEval, suspEvalCount());
+    const model = simBuildModel(sim);
+    for (let i = 0; i < 4; i += 1) {
+      const row = model.solved[i];
+      if (!row || !row.ok || row.motionRatioState !== 'ok') badSolver += 1;
+      if (!row || row.coilSource !== 'mechanism' || !Number.isFinite(row.coilLength)) badSource += 1;
+      if (!row || Math.abs(row.contact[1]) > 1e-6) badContact += 1;
+      if (!row) continue;
+      minCoil = Math.min(minCoil, row.coilLength);
+      maxCoil = Math.max(maxCoil, row.coilLength);
+      minLoad = Math.min(minLoad, model.loads[i]);
+      maxLoad = Math.max(maxLoad, model.loads[i]);
+      if (previous) {
+        maxCoilJump = Math.max(maxCoilJump, Math.abs(row.coilLength - previous.coil[i]));
+        maxLoadJump = Math.max(maxLoadJump, Math.abs(model.loads[i] - previous.load[i]));
+        const wheel = row.wheelPos;
+        const oldWheel = previous.wheel[i];
+        maxWheelJump = Math.max(maxWheelJump, Math.hypot(
+          wheel[0] - oldWheel[0],
+          wheel[1] - oldWheel[1],
+          wheel[2] - oldWheel[2]
+        ));
+      }
+    }
+    previous = {
+      coil: model.solved.map((row) => (row ? row.coilLength : NaN)),
+      wheel: model.solved.map((row) => (row ? row.wheelPos : [NaN, NaN, NaN])),
+      load: model.loads.slice()
+    };
+  }
+  const tail = simBuildModel(sim);
+  check(
+    '+18° ' + kind + ' pulse keeps coil, contact, wheel path and loads continuous',
+    badSolver === 0 && badSource === 0 && badContact === 0 &&
+      maxEval <= 30 &&
+      Number.isFinite(minCoil) && minCoil > 0.30 && maxCoil < 0.46 &&
+      maxCoil - minCoil > 0.002 &&
+      maxCoilJump < 1.5e-3 && maxWheelJump < 5e-3 && maxLoadJump < 300 &&
+      minLoad > 0 && maxLoad > reference.maxLoad &&
+      sim.flags.finite && !sim.solverDegraded && tail.solverOk && !tail.sim.solverDegraded,
+    'eval ' + maxEval +
+      ' · L ' + (minCoil * 1000).toFixed(1) + '-' + (maxCoil * 1000).toFixed(1) + ' mm' +
+      ' · ΔL ' + (maxCoilJump * 1000).toFixed(3) + ' mm' +
+      ' · Δwheel ' + (maxWheelJump * 1000).toFixed(3) + ' mm' +
+      ' · ΔN ' + maxLoadJump.toFixed(1) +
+      ' · N ' + minLoad.toFixed(1) + '-' + maxLoad.toFixed(1)
+  );
+}
+
+console.log('\n[15] wheelbase boundaries 3.20 / 3.55 / 3.70 / 3.90');
+for (const wheelbase of [3.20, 3.55, 3.70, 3.90]) {
+  const source = make({ wheelbase, steer: 18 });
+  const boundary = computeStatic(source);
+  const boundaryCorners = boundary.suspension.corners;
+  let boundaryClosure = 0;
+  let boundaryContact = 0;
+  let boundaryOk = true;
+  for (const mm of [-25, 0, 25]) {
+    for (const corner of boundaryCorners) {
+      const solved = suspSolveCorner(corner, { x: 0, y: -mm / 1000, z: 0 }, new THREE.Quaternion(), 0, null, true);
+      boundaryClosure = Math.max(boundaryClosure, solved.error);
+      boundaryContact = Math.max(boundaryContact, Math.abs(solved.contact.y - mm / 1000));
+      if (!solved.ok) boundaryOk = false;
+    }
+  }
+  check(
+    'wheelbase ' + wheelbase.toFixed(2) + ' m: ±25 mm closure and plane contact',
+    boundaryClosure < 1e-6 && boundaryContact < 1e-6 && boundaryOk,
+    'closure ' + (boundaryClosure * 1000).toExponential(2) + ' mm · contact ' + boundaryContact.toExponential(2) + ' m'
+  );
+
+  const boundarySim = simCreate(source, { settle: 0.8 });
+  const boundaryPos = simReferencePoint(boundarySim);
+  const boundaryQuat = new THREE.Quaternion(
+    boundarySim.state.qx, boundarySim.state.qy, boundarySim.state.qz, boundarySim.state.qw);
+  const boundaryShift = suspRackForSteer(
+    boundarySim.reference.suspension.corners, boundaryPos, boundaryQuat, 18 * Math.PI / 180);
+  boundarySim.rackShift = boundaryShift;
+  simRunFor(boundarySim, 0.4);
+  simApplyImpulse(boundarySim, 'pitch');
+  let boundaryBad = 0;
+  let boundaryMaxCoilJump = 0;
+  let boundaryMaxArb = 0;
+  let boundaryMaxResidual = 0;
+  let previousCoil = null;
+  for (let step = 0; step < 240; step += 1) {
+    simStep(boundarySim);
+    const boundaryModel = simBuildModel(boundarySim);
+    for (const row of boundaryModel.solved) {
+      if (!row || !row.ok || row.coilSource !== 'mechanism') boundaryBad += 1;
+    }
+    boundaryMaxArb = Math.max(boundaryMaxArb, ...boundaryModel.arbForce.map((value) => Math.abs(value)));
+    boundaryMaxResidual = Math.max(boundaryMaxResidual, ...boundaryModel.rockerResidualMm.map((value) => Math.abs(value)));
+    if (boundarySim.solverDegraded) boundaryBad += 1;
+    const coil = boundaryModel.solved.map((row) => (row ? row.coilLength : NaN));
+    if (previousCoil) {
+      for (let i = 0; i < coil.length; i += 1) {
+        boundaryMaxCoilJump = Math.max(boundaryMaxCoilJump, Math.abs(coil[i] - previousCoil[i]));
+      }
+    }
+    previousCoil = coil;
+  }
+  const boundaryTail = simBuildModel(boundarySim);
+  check(
+    'wheelbase ' + wheelbase.toFixed(2) + ' m: +18° pitch pulse keeps ARB, links and coil healthy',
+    boundaryBad === 0 && boundaryTail.solverOk && !boundarySim.solverDegraded &&
+      boundarySim.flags.finite && boundaryMaxCoilJump < 2e-3 &&
+      boundaryMaxArb > 0 && Number.isFinite(boundaryMaxArb) &&
+      boundaryMaxResidual < 1e-4 &&
+      Number.isFinite(boundaryShift) && boundaryMaxCoilJump > 0,
+    'rack ' + (boundaryShift * 1000).toFixed(2) + ' mm · ΔL ' +
+      (boundaryMaxCoilJump * 1000).toFixed(3) + ' mm · ARB ' +
+      boundaryMaxArb.toFixed(0) + ' N · residual ' + boundaryMaxResidual.toExponential(1) +
+      ' mm · loads ' + boundaryTail.loads.map((value) => value.toFixed(0)).join('/')
+  );
+}
+
+console.log('\n[16] coil telemetry fallback and degraded state');
+{
+  const sim = simCreate(DEFAULTS, { settle: 0.2 });
+  const q = simQuatFromEuler(0, 20 * Math.PI / 180, 0);
+  sim.state.qw = q[0];
+  sim.state.qx = q[1];
+  sim.state.qy = q[2];
+  sim.state.qz = q[3];
+  const model = simBuildModel(sim);
+  const evaluation = simEvaluate(sim);
+  const sameLength = model.solved.every((row, i) =>
+    row && row.coilLength === evaluation.corners[i].coilLength &&
+    row.coilSource === evaluation.corners[i].coilSource);
+  const fallbackRows = model.solved.filter((row) => row && row.coilSource === 'fallback').length;
+  const rejectedRows = model.solved.filter((row) => row && !row.ok).length;
+  check(
+    'fallback telemetry reports the force-chain coil length',
+    sameLength && fallbackRows > 0 && rejectedRows > 0,
+    fallbackRows + ' fallback · ' + rejectedRows + ' not ok'
+  );
+  const projected = model.solved.map((row, i) => {
+    if (!row || row.coilSource !== 'fallback') return { delta: 0, contactY: 0 };
+    const corner = sim.reference.suspension.corners[i];
+    const visible = corner.body.damper.distanceTo(suspRockerPoint(corner, corner.rocker.damperArm, row.rockerAngle));
+    return { delta: Math.abs(visible - row.coilLength), contactY: Math.abs(row.contact[1]) };
+  });
+  const maxVisibleDelta = Math.max(...projected.map((row) => row.delta));
+  const maxContactY = Math.max(...projected.map((row) => row.contactY));
+  check(
+    'fallback rendering uses the same projected coil and on-plane contact',
+    maxVisibleDelta < 1e-12 && maxContactY < 1e-12,
+    'ΔL ' + maxVisibleDelta.toExponential(2) + ' m · contactY ' + maxContactY.toExponential(2) + ' m'
+  );
+  check(
+    'solved.ok=false is reflected as degraded telemetry',
+    model.sim.solverDegraded === true && model.solverOk === false,
+    'degraded ' + model.sim.solverDegraded + ' · solverOk ' + model.solverOk
+  );
+  simStep(sim);
+  check(
+    'integration latches the degraded state',
+    sim.solverDegraded === true,
+    'solverDegraded ' + sim.solverDegraded + ' · failureSteps ' + sim.solverFailureSteps
+  );
+}
 
 console.log('\n' + (failures === 0 ? 'PASS' : 'FAIL') + '  ' + (checks - failures) + '/' + checks + ' checks');
 if (failures > 0) process.exitCode = 1;

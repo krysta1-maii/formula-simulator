@@ -1,8 +1,8 @@
 {
   "name": "formula-simulator",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
-  "description": "方程式赛车动力学模拟器 · 阶段二六自由度车身与动态悬架",
+  "description": "方程式赛车动力学模拟器 · 内置卧式悬挂与六自由度车身",
   "type": "module",
   "scripts": {
     "build": "node tools/build.mjs",
@@ -15,6 +15,7 @@
     "ci:node": "npm test && npm run test:invariants && npm run test:runtime && npm run test:dev-server",
     "bench": "node tools/bench.mjs",
     "test:browser": "node tools/test-dynamics-browser.mjs",
+    "test:suspension": "node tools/test-suspension-packaging.mjs",
     "test:camera": "node tools/test-camera.mjs",
     "test:ui": "node tools/test-ui-browser.mjs",
     "test:dev-server": "node tools/test-dev-server.mjs",
@@ -28,7 +29,7 @@
     "audit:update": "node tools/audit/run-all.mjs --update-baseline",
     "docs:capture": "node tools/build.mjs && node tools/capture-docs.mjs",
     "dev": "node tools/dev-server.mjs",
-    "ci:browser": "npm run test:browser && npm run test:camera && npm run test:ui"
+    "ci:browser": "npm run test:browser && npm run test:suspension && npm run test:camera && npm run test:ui"
   },
   "engines": {
     "node": ">=18"

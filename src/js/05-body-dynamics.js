@@ -151,7 +151,7 @@ function simRatioState(sim, index, row, instantRatio) {
   const design = Math.abs(row && row.dLdDelta) > 1e-6 ? Math.abs(row.dLdDelta) : 0.5;
   const previous = sim.cornerRatio[index];
   const finite = Number.isFinite(instantRatio);
-  const inRange = finite && instantRatio > 0.05 && instantRatio < 2.0;
+  const inRange = finite && instantRatio > SUSP_INSTANT_RATIO_MIN && instantRatio < SUSP_RATIO_MAX;
   const nearDesign = inRange && instantRatio / design > 0.3 && instantRatio / design < 3.0;
   const continuous = previous == null ||
     (finite && Math.abs(instantRatio - previous) / Math.max(Math.abs(previous), 1e-6) < 0.2);
@@ -387,25 +387,30 @@ function simEvaluate(sim, dt = SIM_DT) {
     let coilLength = NaN;
     let lengthDot = 0;
     let ratio = 1;
+    let coilSource = 'none';
     if (geometry && design) {
       const row = design[i];
       solved = suspSolveCorner(geometry[i], bodyPos, bodyQuat, rackShift, sim.cornerSeed[i], true);
       sim.cornerSeed[i] = solved.seed;
       const ratioCheck = simRatioState(sim, i, row, solved.motionRatio);
-      if (!ratioCheck.ok) degraded = true;
+      if (!ratioCheck.ok || !solved.ok) degraded = true;
       const deltaDot = -cornerVelocityY;
       if (solved.frame.converged) {
         const dLdDelta = -ratioCheck.ratio;
         lengthDot = dLdDelta * deltaDot;
         coilLength = solved.coilLength;
+        coilSource = 'mechanism';
         springForce = row.coilRate * (coilLength - row.refLength) * dLdDelta;
         dampingForce = row.coilDamping * lengthDot * dLdDelta;
       } else {
-        // Diverged solve: fall back to the design linkage slope so the state
-        // stays finite, and flag it through the corner record.
+        // Diverged solve: suspSolveCorner has projected the same upright to
+        // the road and re-closed its rocker/coil at that pose. Only the damper
+        // velocity uses the design slope. Force, telemetry and rendering all
+        // consume this projected length; no unrelated linear length is mixed in.
         const dLdDelta = row.dLdDelta;
         lengthDot = dLdDelta * deltaDot;
-        coilLength = row.length0 + dLdDelta * (-cornerY);
+        coilLength = solved.coilLength;
+        coilSource = 'fallback';
         springForce = row.coilRate * (coilLength - row.refLength) * dLdDelta;
         dampingForce = row.coilDamping * dLdDelta * dLdDelta * deltaDot;
       }
@@ -460,6 +465,7 @@ function simEvaluate(sim, dt = SIM_DT) {
       wheelPos: wheelPosRoad,
       solved,
       coilLength,
+      coilSource,
       lengthDot,
       motionRatio: ratio
     });
@@ -1012,7 +1018,12 @@ function simBuildModel(sim, source = state) {
         feasible: solvedCorner.rocker.feasible,
         branch: solvedCorner.rocker.branch
       },
-      coilLength: solvedCorner.coilLength,
+      // Telemetry must report the length the force chain actually used. A
+      // converged mechanism solve uses its own closure; a diverged solve falls
+      // back to the design linkage slope in simEvaluate, and coilSource records
+      // which path supplied this value.
+      coilLength: corner.coilLength,
+      coilSource: corner.coilSource,
       motionRatio: solvedCorner.motionRatio,
       motionRatioState: solvedCorner.motionRatioState,
       converged: solvedCorner.frame.converged,
@@ -1062,7 +1073,9 @@ function simBuildModel(sim, source = state) {
     capacity: evaluation.capacity,
     impulse: evaluation.impulse ? evaluation.impulse.label : null,
     resetCount: sim.resetCount,
-    solverDegraded: Boolean(sim.solverDegraded),
+    // A telemetry build is a read-only probe; report a degraded current state
+    // even if no integration step has committed the latch yet.
+    solverDegraded: Boolean(sim.solverDegraded || evaluation.degraded),
     solverFailed: Boolean(sim.solverFailed),
     mode: sim.contact ? sim.contact.mode : 'HOLD',
     dwell: sim.contact ? sim.contact.dwell : 0,

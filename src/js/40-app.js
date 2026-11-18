@@ -278,7 +278,7 @@ function exportScreenshot() {
   ctx.fillStyle = 'rgba(133,149,168,0.55)';
   ctx.font = `500 ${Math.round(9 * scale)}px ui-monospace, monospace`;
   const creditY = cardX + cardW > width - 260 * scale ? cardY - 10 * scale : height - pad;
-  ctx.fillText('FORMULA SIMULATOR  ·  DESIGN.md v0.2  ·  THREE.JS r149', width - pad, creditY);
+  ctx.fillText('FORMULA SIMULATOR  ·  DESIGN.md v' + APP_VERSION + '  ·  THREE.JS r149', width - pad, creditY);
   ctx.textAlign = 'left';
 
   const link = document.createElement('a');
@@ -299,6 +299,125 @@ function showFatalError(error) {
   if (screen) screen.hidden = false;
   if (message && error && error.message) {
     message.textContent = '当前浏览器无法启动三维动态底盘演示：' + error.message;
+  }
+}
+
+function suspensionPackagingProbe() {
+  const enclosures = [];
+  if (CAR.bodyworkGroup) {
+    CAR.bodyworkGroup.traverse((object) => {
+      if (object.isMesh && /^envelope-/.test(object.name || '')) enclosures.push(object);
+    });
+  }
+  S.scene.updateMatrixWorld(true);
+  const bodyInverse = S.bodyPivot.matrixWorld.clone().invert();
+  const bodyQuaternion = S.bodyPivot.getWorldQuaternion(new THREE.Quaternion());
+  const direction = new THREE.Vector3(0.923, 0.271, 0.277).normalize().applyQuaternion(bodyQuaternion);
+  const ray = new THREE.Raycaster(new THREE.Vector3(), direction, 0, 20);
+  const boxes = enclosures.map((mesh) => ({ mesh, box: new THREE.Box3().setFromObject(mesh) }));
+  const materials = enclosures.map((mesh) => ({ material: mesh.material, side: mesh.material.side }));
+  for (const entry of materials) entry.material.side = THREE.DoubleSide;
+
+  try {
+  const inside = (point) => {
+    for (const entry of boxes) {
+      if (!entry.box.containsPoint(point)) continue;
+      ray.ray.origin.copy(point);
+      const hits = ray.intersectObject(entry.mesh, false);
+      if (hits.length % 2 === 1) return true;
+    }
+    return false;
+  };
+  const localPoint = (point) => point.clone().applyMatrix4(bodyInverse).toArray().map((value) => Number(value.toFixed(5)));
+  const components = [];
+  const objectLabel = (object) => {
+    const names = [];
+    let current = object;
+    for (let depth = 0; current && depth < 4; depth += 1) {
+      if (current.name) names.unshift(current.name);
+      current = current.parent;
+    }
+    return names.join('/') || object.type;
+  };
+  const sampleRoot = (root, label, perMesh = 72) => {
+    if (!root) return;
+    const result = { label, samples: 0, outside: 0, examples: [] };
+    root.traverse((object) => {
+      if (!object.isMesh || !object.geometry || !object.geometry.attributes.position) return;
+      const positions = object.geometry.attributes.position;
+      const step = Math.max(1, Math.ceil(positions.count / perMesh));
+      const point = new THREE.Vector3();
+      for (let i = 0; i < positions.count; i += step) {
+        point.fromBufferAttribute(positions, i).applyMatrix4(object.matrixWorld);
+        result.samples += 1;
+        if (!inside(point)) {
+          result.outside += 1;
+          if (result.examples.length < 32) {
+            result.examples.push({ object: objectLabel(object), geometry: object.geometry.type, point: localPoint(point) });
+          }
+        }
+      }
+    });
+    components.push(result);
+  };
+
+  sampleRoot(CAR.internalGroup, 'inboard-suspension-and-driveline');
+  for (const spring of CAR.springs || []) {
+    sampleRoot(spring.assembly, 'coilover-' + spring.corner.key);
+    sampleRoot(spring.jointMount, 'mount-' + spring.corner.key, 24);
+    sampleRoot(spring.jointDamper, 'damper-eye-' + spring.corner.key, 24);
+  }
+
+  const hardpoints = [];
+  for (const corner of CAR.corners || []) {
+    const points = {
+      rocker: corner.rocker.pivot,
+      damperMount: corner.body.damper,
+      pushTip: suspRockerPoint(corner, corner.rocker.pushArm, corner.angle),
+      damperTip: suspRockerPoint(corner, corner.rocker.damperArm, corner.angle)
+    };
+    for (const [name, local] of Object.entries(points)) {
+      const world = local.clone().applyMatrix4(S.bodyPivot.matrixWorld);
+      hardpoints.push({ corner: corner.key, name, inside: inside(world), point: local.toArray() });
+    }
+  }
+  const coilAxes = (CAR.corners || []).map((corner) => {
+    const a = corner.body.damper;
+    const b = suspRockerPoint(corner, corner.rocker.damperArm, corner.angle);
+    const axis = b.clone().sub(a);
+    const length = axis.length();
+    return {
+      corner: corner.key,
+      actuation: corner.front ? 'pushrod' : 'pullrod',
+      length,
+      tiltDeg: length > 1e-9 ? Math.asin(Math.abs(axis.y) / length) * RAD : 90,
+      longitudinalDominant: length > 1e-9 && Math.abs(axis.x) > Math.abs(axis.z),
+      a: a.toArray(),
+      b: b.toArray()
+    };
+  });
+  const internalVisible = CAR.internalGroup ? CAR.internalGroup.visible : false;
+  const springVisibility = (CAR.springs || []).every((spring) =>
+    spring.assembly.visible === internalVisible &&
+    spring.jointMount.visible === internalVisible &&
+    spring.jointDamper.visible === internalVisible);
+  const samples = components.reduce((sum, row) => sum + row.samples, 0);
+  const outside = components.reduce((sum, row) => sum + row.outside, 0);
+  const exposedHardpoints = hardpoints.filter((row) => !row.inside);
+  const skinMountVisible = Boolean(CAR.skinMountGroup && CAR.skinMountGroup.visible);
+  return {
+    ok: outside === 0 && exposedHardpoints.length === 0 && internalVisible === Boolean(state.xray) && springVisibility && skinMountVisible,
+    samples,
+    outside,
+    hardpoints,
+    exposedHardpoints,
+    components: components.filter((row) => row.samples > 0),
+    coilAxes,
+    enclosures: enclosures.map((mesh) => mesh.name),
+    visibility: { xray: Boolean(state.xray), internalVisible, springVisibility, skinMountVisible }
+  };
+  } finally {
+    for (const entry of materials) entry.material.side = entry.side;
   }
 }
 
@@ -422,6 +541,7 @@ function bindGlobalAPI() {
         console.warn('[FS-01] geometry dimensions changed; rebuild:false is ignored');
       }
       Object.assign(state, merged);
+      if (Object.prototype.hasOwnProperty.call(patch, 'xray')) applyXray();
       syncControlsFromState();
       persistState();
       refreshAll({ rebuild, reason: dimensionsChanged ? 'geometry' : (forced ? 'explicit' : 'params') });
@@ -451,6 +571,7 @@ function bindGlobalAPI() {
       simReset(SIM, state, { settle });
       SIM.advanceCarry = 0;
       stampReference(SIM, state);
+      SIM.rackShift = calibrateRack(SIM, state.steer);
       const model = simBuildModel(SIM, state);
       updateSceneFromModel(model);
       UI.refreshTelemetry(model);
@@ -479,6 +600,7 @@ function bindGlobalAPI() {
     },
     openModel: UI.openModelModal,
     closeModel: UI.closeModelModal,
+    getSuspensionPackaging: () => suspensionPackagingProbe(),
     getSceneProbe: () => ({
       springs: (CAR.springs || []).map((spring) => spring.lastA.distanceTo(spring.lastB)),
       wireLengths: SIM && SIM.reference && SIM.reference.suspension

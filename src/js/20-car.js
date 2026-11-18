@@ -6,6 +6,7 @@ const CAR = {
   dynamicGroup: null,
   bodyworkGroup: null,
   internalGroup: null,
+  skinMountGroup: null,
   shellMeshes: [],
   wheels: [],
   corners: [],
@@ -161,17 +162,17 @@ function initCarAssets() {
   MAT.rubber.side = THREE.DoubleSide;
   MAT.rubber.reflectivity = 0.0;
 
-  // Helical spring: unit length along Y, radius in XZ, shared by all corners.
+  // Compact horizontal coilover: 40 mm outer radius, unit length along Y.
   const springPoints = [];
   const coilTurns = 8;
   const coilSegments = 280;
   for (let i = 0; i <= coilSegments; i += 1) {
     const t = i / coilSegments;
     const angle = t * coilTurns * TAU;
-    springPoints.push(new THREE.Vector3(Math.cos(angle) * 0.055, t - 0.5, Math.sin(angle) * 0.055));
+    springPoints.push(new THREE.Vector3(Math.cos(angle) * 0.034, t - 0.5, Math.sin(angle) * 0.034));
   }
   const springCurve = new THREE.CatmullRomCurve3(springPoints);
-  const springGeo = new THREE.TubeGeometry(springCurve, 300, 0.0095, 5, false);
+  const springGeo = new THREE.TubeGeometry(springCurve, 300, 0.006, 5, false);
   springGeo.userData.shared = true;
   CAR.shared.spring = springGeo;
 
@@ -303,7 +304,11 @@ function registerShellGroup(group) {
 function applyXray() {
   const enabled = Boolean(state.xray);
   if (CAR.internalGroup) CAR.internalGroup.visible = enabled;
-  for (const spring of CAR.springs) spring.assembly.visible = enabled;
+  for (const spring of CAR.springs) {
+    spring.assembly.visible = enabled;
+    spring.jointDamper.visible = enabled;
+    spring.jointMount.visible = enabled;
+  }
   for (const mesh of CAR.shellMeshes) {
     if (mesh.userData.isDecal) {
       mesh.visible = !enabled;
@@ -737,36 +742,11 @@ function buildBodywork(model) {
   }
 
   /* ----------------------------- monocoque ----------------------------- */
-  const monoTopSamples = [
-    { x: xF + 0.83, y: 0.278 },
-    { x: xF + 0.63, y: 0.315 },
-    { x: xF + 0.38, y: 0.365 },
-    { x: xF + 0.13, y: 0.425 },
-    { x: xF - 0.15, y: 0.492 },
-    { x: xF - 0.45, y: 0.555 },
-    { x: xF - 0.80, y: 0.600 },
-    { x: xF - 1.15, y: 0.625 },
-    { x: xF - 1.45, y: 0.645 },
-    { x: xF - 1.75, y: 0.650 },
-    { x: xF - 2.10, y: 0.620 }
-  ];
-  const monoSections = [
-    { x: xF + 0.83, w: 0.075, y0: 0.190, y1: 0.278, e: 0.82 },
-    { x: xF + 0.62, w: 0.11, y0: 0.165, y1: 0.315, e: 0.8 },
-    { x: xF + 0.38, w: 0.17, y0: 0.140, y1: 0.365, e: 0.76 },
-    { x: xF + 0.13, w: 0.245, y0: 0.115, y1: 0.425, e: 0.73 },
-    { x: xF - 0.15, w: 0.32, y0: 0.096, y1: 0.492, e: 0.7 },
-    { x: xF - 0.45, w: 0.40, y0: 0.082, y1: 0.555, e: 0.68 },
-    { x: xF - 0.80, w: 0.47, y0: 0.074, y1: 0.600, e: 0.66 },
-    { x: xF - 1.15, w: 0.53, y0: 0.068, y1: 0.625, e: 0.64 },
-    { x: xF - 1.45, w: 0.56, y0: 0.064, y1: 0.645, e: 0.64 },
-    { x: xF - 1.75, w: 0.54, y0: 0.063, y1: 0.650, e: 0.66 },
-    { x: xF - 2.10, w: 0.45, y0: 0.070, y1: 0.620, e: 0.7 },
-    { x: xF - 2.45, w: 0.34, y0: 0.083, y1: 0.545, e: 0.74 },
-    { x: xF - 2.80, w: 0.22, y0: 0.110, y1: 0.430, e: 0.8 },
-    { x: xF - 3.08, w: 0.12, y0: 0.150, y1: 0.320, e: 0.88 }
-  ];
+  const bodyProfiles = buildBodyworkProfiles(dims);
+  const monoSections = bodyProfiles.monocoque;
+  const monoTopSamples = monoSections.slice(0, 11).map((section) => ({ x: section.x, y: section.y1 }));
   const monocoque = makeLoftMesh(monoSections, MAT.paint, { segments: 36, exponent: 0.7 });
+  monocoque.name = 'envelope-monocoque';
   addBodyMesh(monocoque);
 
   // Accent stripe running the length of the nose and through the cockpit.
@@ -914,17 +894,10 @@ function buildBodywork(model) {
 
   /* ----------------------------- engine cover + airbox + fin ----------------------------- */
   {
-    const coverSections = [
-      { x: xF - 1.60, w: 0.245, y0: 0.58, y1: 0.700, e: 0.8 },
-      { x: xF - 1.80, w: 0.27, y0: 0.55, y1: 0.755, e: 0.75 },
-      { x: xF - 2.02, w: 0.27, y0: 0.50, y1: 0.815, e: 0.72 },
-      { x: xF - 2.30, w: 0.24, y0: 0.43, y1: 0.800, e: 0.7 },
-      { x: xF - 2.60, w: 0.20, y0: 0.36, y1: 0.735, e: 0.7 },
-      { x: xF - 2.95, w: 0.14, y0: 0.29, y1: 0.620, e: 0.74 },
-      { x: xF - 3.25, w: 0.085, y0: 0.24, y1: 0.470, e: 0.82 },
-      { x: xF - 3.48, w: 0.045, y0: 0.22, y1: 0.335, e: 0.9 }
-    ];
-    addBodyMesh(makeLoftMesh(coverSections, MAT.paintDeep, { segments: 28, exponent: 0.72 }));
+    const coverSections = bodyProfiles.engineCover;
+    const engineCover = makeLoftMesh(coverSections, MAT.paintDeep, { segments: 28, exponent: 0.72 });
+    engineCover.name = 'envelope-engine-cover';
+    addBodyMesh(engineCover);
 
     // Shark fin livery element.
     const finShape = new THREE.Shape();
@@ -1182,13 +1155,19 @@ function buildBodywork(model) {
 
   /* ----------------------------- rear structures ----------------------------- */
   {
-    const gearbox = makeRoundedBox(0.44, 0.29, 0.34, 0.06, MAT.darkMetal);
-    gearbox.position.set(xR + 0.24, 0.29, 0);
+    // Keep the default silhouette unchanged. Other wheelbases need a longer
+    // bellhousing/suspension carrier because the rear axle moves relative to
+    // the engine-cover loft; its front extension encloses the same inboard unit.
+    const rearPackageExtension = Math.abs(dims.L - 3.55) * 1.20;
+    const gearbox = makeRoundedBox(0.44 + rearPackageExtension, 0.29, 0.34, 0.06, MAT.darkMetal);
+    gearbox.name = 'envelope-gearbox';
+    gearbox.position.set(xR + 0.24 + rearPackageExtension * 0.5, 0.29, 0);
     addBodyMesh(gearbox);
 
     // Rear suspension carrier: the wishbones and pullrods attach to this
     // carbon/metal structure rather than to thin bodywork.
     const rearCarrier = makeRoundedBox(0.58, 0.36, 0.30, 0.055, MAT.darkMetal);
+    rearCarrier.name = 'envelope-rear-carrier';
     rearCarrier.position.set(xR - 0.15, 0.31, 0);
     addBodyMesh(rearCarrier);
     for (const sign of [-1, 1]) {

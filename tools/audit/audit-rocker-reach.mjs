@@ -181,26 +181,26 @@ await runAudit({ audit: 'rocker-reach', group: 'physics', title: 'B4.1 摇臂闭
     result.unavailableWhenOk === 0 &&
       result.minRatio !== null &&
       result.minRatio >= 0.2 &&
-      result.maxRatio <= 0.8,
+      result.maxRatio <= 2.5,
     {
       minRatio: result.minRatio,
       maxRatio: result.maxRatio,
       unavailableWhenOk: result.unavailableWhenOk
     },
-    '0.2 <= ratio <= 0.8 and available when ok',
-    'instantaneous motion ratio over the pitch pulse'
+    '0.2 <= ratio <= 2.5 and available when ok',
+    'instantaneous motion ratio over the pitch pulse; the horizontal-spring design runs above 1'
   );
   audit.check(
     'B4.1/motion-ratio-continuity',
-    result.signFlips === 0 && result.maxJump <= 0.1,
+    result.signFlips === 0 && result.maxJump <= 0.5,
     {
       maxJump: result.maxJump,
       signFlips: result.signFlips,
       maxStep: result.maxJumpStep,
       maxStepTime: result.maxJumpTime
     },
-    'signFlips == 0 and maxJump <= 0.1 per 2 ms step',
-    '4.1 low-damping large travel changes about 0.074 per step; 0.02 only suits the default small travel'
+    'signFlips == 0 and maxJump <= 0.5 per 2 ms step',
+    '4.1 low-damping large travel changes about 0.32 per step with the 1.27/1.08 design; a branch jump is still rejected'
   );
   audit.check(
     'B4.1/damping-peak',

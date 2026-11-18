@@ -15,7 +15,7 @@ const factory = new Function('THREE', 'localStorage',
   ' DEFAULTS, computeStatic, simCreate, simStep, simRunFor, simBuildModel, simApplyImpulse, simEvaluate,' +
   ' simReferencePoint, simQuatRotate, suspSolveCorner, suspSolveRaw, suspRockerAngle, suspRockerAngleNewton,' +
   ' suspRockerPoint, suspCoilLength, suspDesign, suspEval, suspEvalReset, suspEvalCount, suspensionBuild,' +
-  ' SIM_DT, simEulerFromQuat' +
+  ' SIM_DT, simEulerFromQuat, simRatioState' +
   '};');
 const api = factory(THREE, { getItem: () => null, setItem: () => {} });
 
@@ -215,6 +215,20 @@ if (runGroup('ratio')) {
   }
   check('ratio/no-sign-flip', signFlip === 0, String(signFlip));
   check('ratio/suspEval-budget', maxEval <= 30, String(maxEval));
+
+  // The 0.8 ceiling was raised to 2.5, not removed: an instantaneous ratio above
+  // the guard, or a jump away from the previous ratio, must still be rejected.
+  const guardRow = reference.suspension.design[0];
+  const accepted = api.simRatioState(api.simCreate(api.DEFAULTS, { settle: 0 }), 0, guardRow, 1.2);
+  const aboveGuard = api.simRatioState(api.simCreate(api.DEFAULTS, { settle: 0 }), 0, guardRow, 2.6);
+  const belowGuard = api.simRatioState(api.simCreate(api.DEFAULTS, { settle: 0 }), 0, guardRow, 0.04);
+  const jumpSim = api.simCreate(api.DEFAULTS, { settle: 0 });
+  api.simRatioState(jumpSim, 0, guardRow, 1.2);
+  const jump = api.simRatioState(jumpSim, 0, guardRow, 0.5);
+  check('ratio/design-above-one-accepted', accepted.ok === true && Math.abs(accepted.ratio - 1.2) < 1e-12, JSON.stringify(accepted));
+  check('ratio/above-2.5-rejected', aboveGuard.ok === false && Math.abs(aboveGuard.ratio - Math.abs(guardRow.dLdDelta)) < 1e-12, JSON.stringify(aboveGuard));
+  check('ratio/below-guard-rejected', belowGuard.ok === false, JSON.stringify(belowGuard));
+  check('ratio/discontinuity-rejected', jump.ok === false && Math.abs(jump.ratio - 1.2) < 1e-12, JSON.stringify(jump));
 }
 
 /* group shadow: reference.source must be mandatory */

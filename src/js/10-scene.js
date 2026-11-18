@@ -42,10 +42,10 @@ const CAMERA_PRESETS = {
   rear: { theta: Math.PI, phi: Math.PI / 2, zoom: 2.45, fitWidth: 3.1, target: [0, 0.55, 0], projection: 'orthographic' },
   top: { theta: Math.PI / 2, phi: 0.002, zoom: 6.0, fitWidth: 6.3, target: [0, 0.55, 0], projection: 'orthographic' },
   portrait: { theta: 0.26, phi: 1.18, zoom: 8.05, target: [0, 0.55, 0], projection: 'perspective' },
-  inspectSteering: { theta: 0.55, phi: 0.72, zoom: 1.82, target: [1.35, 0.34, 0], arc: 0.22 },
+  inspectSteering: { theta: 0.55, phi: 0.72, zoom: 1.82, target: [1.675, 0.30, 0], arc: 0.22 },
   inspectDrivetrain: { theta: 2.40, phi: 0.70, zoom: 1.82, target: [-1.40, 0.34, 0], arc: 0.22 },
-  inspectArb: { theta: 0.15, phi: 0.72, zoom: 1.95, target: [1.34, 0.55, 0], arc: 0.22 },
-  inspectArbRear: { theta: 2.55, phi: 0.45, zoom: 1.82, target: [-1.45, 0.52, 0], arc: 0.22 }
+  inspectArb: { theta: 0.15, phi: 0.72, zoom: 1.95, target: [1.53, 0.43, 0], arc: 0.22 },
+  inspectArbRear: { theta: 2.55, phi: 0.45, zoom: 1.82, target: [-1.30, 0.40, 0], arc: 0.22 }
 };
 
 const PORTRAIT_QUERY = window.matchMedia('(max-width: 980px) and (orientation: portrait)');
