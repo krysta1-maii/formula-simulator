@@ -53,7 +53,9 @@ async function pressTab(client, shift = false) {
 }
 
 async function focusSelector(client, selector) {
-  await client.evaluate('document.querySelector(' + JSON.stringify(selector) + ').focus()');
+  const target = JSON.stringify(selector);
+  const focused = await waitFor(client, "(function () { var el = document.querySelector(" + target + "); if (!el) return false; el.focus(); return document.activeElement === el; })()", 1500, 25);
+  if (!focused) throw new Error('could not focus ' + selector);
 }
 
 async function activeInfo(client) {
@@ -69,13 +71,77 @@ async function waitReady(client) {
   return false;
 }
 
+async function waitFor(client, expression, timeoutMs = 3000, interval = 50) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const ok = await client.evaluate('Boolean(' + expression + ')').catch(() => false);
+    if (ok) return true;
+    await sleep(interval);
+  }
+  return false;
+}
+
+async function waitForViewport(client, width, height) {
+  await waitFor(client, 'innerWidth === ' + width + ' && Math.abs(innerHeight - ' + height + ') <= 1');
+  await waitFor(client, "matchMedia('(max-width: 980px)').matches === " + (width <= 980 ? 'true' : 'false'));
+  await client.evaluate('new Promise(function (resolve) { requestAnimationFrame(function () { requestAnimationFrame(function () { resolve(true); }); }); })');
+  await sleep(80);
+}
+
+async function waitForModalClosed(client) {
+  await client.evaluate("if (!document.getElementById('modelModal').hidden) window.FSApp.closeModel()");
+  await waitFor(client, "document.getElementById('modelModal').hidden && !document.body.classList.contains('modal-open')");
+  await waitFor(client, "document.querySelector('.topbar').inert === false");
+}
+
+function panelOpenExpression(id) {
+  return "document.getElementById('" + id + "').classList.contains('is-open')";
+}
+
+async function ensurePanelOpen(client, id) {
+  const toggle = id === 'panelControls' ? 'btnToggleControls' : 'btnToggleTelemetry';
+  const expression = panelOpenExpression(id);
+  if (!(await client.evaluate(expression))) {
+    await client.evaluate("document.getElementById('" + toggle + "').click()");
+  }
+  if (!(await waitFor(client, expression))) {
+    await client.evaluate("document.getElementById('" + toggle + "').click()");
+    await waitFor(client, expression);
+  }
+  return client.evaluate(expression);
+}
+
+async function openPanelStable(client, id) {
+  const expression = panelOpenExpression(id);
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await ensurePanelOpen(client, id);
+    if (!(await waitFor(client, expression))) {
+      await closePanel(client, id);
+      continue;
+    }
+    const stable = await client.evaluate('new Promise(function (resolve) { requestAnimationFrame(function () { requestAnimationFrame(function () { resolve(Boolean(' + expression + ')); }); }); })');
+    if (stable) return true;
+    await closePanel(client, id);
+  }
+  return false;
+}
+
+async function closePanel(client, id) {
+  const expression = panelOpenExpression(id);
+  if (await client.evaluate(expression)) {
+    const selector = '[data-close-panel="' + id + '"]';
+    await client.evaluate('document.querySelector(' + JSON.stringify(selector) + ').click()');
+  }
+  await waitFor(client, '!' + expression);
+}
+
 async function closePanels(client) {
-  await client.evaluate("document.querySelectorAll('[data-close-panel]').forEach(function (button) { button.click(); })");
-  await sleep(260);
+  await closePanel(client, 'panelControls');
+  await closePanel(client, 'panelTelemetry');
 }
 
 async function establishCleanUi(client) {
-  await client.evaluate("if (!document.getElementById('modelModal').hidden) window.FSApp.closeModel()");
+  await waitForModalClosed(client);
   await closePanels(client);
 }
 
@@ -101,7 +167,7 @@ try {
   const sizes = [[844, 390], [667, 375], [1024, 400], [1280, 720]];
   for (const [width, height] of sizes) {
     await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
-    await sleep(320);
+    await waitForViewport(client, width, height);
     const metrics = await evaluateJson(metricsScript);
     const label = width + 'x' + height;
     const inView = (rect) => Boolean(rect) && rect.display !== 'none' && rect.top >= -1 && rect.bottom <= metrics.innerHeight + 1 && rect.left >= -1 && rect.right <= metrics.innerWidth + 1;
@@ -110,19 +176,18 @@ try {
     if (width === 844 && height === 390) {
       const netHeight = metrics.bottomBar.top - metrics.topbar.bottom;
       check('844x390 leaves at least 55% for the scene', netHeight >= metrics.innerHeight * 0.55, netHeight.toFixed(1) + ' / ' + metrics.innerHeight);
-      await evaluate("document.querySelectorAll('[data-close-panel]').forEach(function (button) { button.click(); })");
-      await sleep(260);
-      await evaluate("document.getElementById('btnToggleControls').click()");
-      await sleep(360);
+      await closePanels(client);
+      const panelStable = await openPanelStable(client, 'panelControls');
+      await waitFor(client, panelOpenExpression('panelControls'));
       const panel = await evaluateJson("(function () { var p = document.getElementById('panelControls'); var b = p.getBoundingClientRect(); var s = document.getElementById('btnScreenshot'); var sb = s.getBoundingClientRect(); return { open: p.classList.contains('is-open'), top: b.top, bottom: b.bottom, screenshotTop: sb.top, screenshotBottom: sb.bottom, viewport: innerHeight }; })()");
-      check('844x390 panel stays inside the viewport', panel.open && panel.bottom <= panel.viewport + 1 && panel.top >= -1, JSON.stringify(panel));
+      check('844x390 panel stays inside the viewport', panelStable && panel.open && panel.bottom <= panel.viewport + 1 && panel.top >= -1, JSON.stringify(panel));
       check('844x390 screenshot button is visible', panel.screenshotTop >= 0 && panel.screenshotBottom <= panel.viewport + 1, panel.screenshotTop.toFixed(1) + '..' + panel.screenshotBottom.toFixed(1));
-      await evaluate("document.querySelectorAll('[data-close-panel]')[0].click()");
-      await sleep(260);
+      await closePanel(client, 'panelControls');
     }
   }
   await send('Emulation.clearDeviceMetricsOverride');
-  await sleep(750);
+  await waitFor(client, 'innerWidth === 1280');
+  await sleep(150);
 
   setGroup('keyboard');
   await evaluate('window.FSApp.setSimRunning(false)');
@@ -141,8 +206,7 @@ try {
   check('Space on the page toggles simulation', (await evaluateJson('window.FSApp.getSnapshot().sim.running')) === true);
 
   await evaluate('window.FSApp.setState({ slope: 6 })');
-  await evaluate("(function () { var p = document.getElementById('panelControls'); if (!p.classList.contains('is-open')) document.getElementById('btnToggleControls').click(); })()");
-  await sleep(360);
+  await ensurePanelOpen(client, 'panelControls');
   await focusSelector(client, '#slope');
   await press(client, 'h', 'KeyH', 72);
   check('h does not change slope while the range is focused', Math.abs((await evaluateJson('window.FSApp.getState().slope')) - 6) < 1e-9);
@@ -179,12 +243,14 @@ try {
   check('modal blocks shortcuts and Escape returns focus', modalShortcutsBlocked && (await evaluate("document.getElementById('modelModal').hidden")) === true && (await activeInfo(client)).id === 'btnHelp');
 
   setGroup('focus');
+  await waitForModalClosed(client);
   await closePanels(client);
-  await evaluate("document.getElementById('btnToggleControls').click()");
-  await sleep(320);
-  await evaluate("document.querySelector('#panelControls .panel-close').focus()");
-  await evaluate("document.querySelectorAll('[data-close-panel]')[0].click()");
-  await sleep(120);
+  const openedForFocus = await ensurePanelOpen(client, 'panelControls');
+  if (!openedForFocus) throw new Error('panelControls did not open for the focus check');
+  await focusSelector(client, '#panelControls .panel-close');
+  await waitFor(client, "document.activeElement === document.querySelector('#panelControls .panel-close')");
+  await evaluate("document.querySelector('[data-close-panel=\"panelControls\"]').click()");
+  await waitFor(client, "document.activeElement === document.getElementById('btnToggleControls')");
   const closedInfo = await activeInfo(client);
   const closedPanel = await evaluateJson("(function () { var p = document.getElementById('panelControls'); return { inert: p.inert === true, ariaHidden: p.getAttribute('aria-hidden'), visibility: getComputedStyle(p).visibility }; })()");
   check('closing a panel returns focus and marks it inert', closedInfo.id === 'btnToggleControls' && closedInfo.inPanel === false && closedPanel.inert === true && closedPanel.ariaHidden === 'true', JSON.stringify({ focus: closedInfo, panel: closedPanel }));
@@ -194,8 +260,7 @@ try {
     if ((await activeInfo(client)).inPanel) tabInsidePanel = true;
   }
   check('Tab never enters a closed panel', tabInsidePanel === false);
-  await evaluate("document.getElementById('btnToggleControls').click()");
-  await sleep(360);
+  await ensurePanelOpen(client, 'panelControls');
   await focusSelector(client, '#btnToggleControls');
   const openedPanel = await evaluateJson("(function () { var p = document.getElementById('panelControls'); return { inert: p.inert === true, ariaHidden: p.getAttribute('aria-hidden'), open: p.classList.contains('is-open') }; })()");
   check('opening a panel clears inert and aria-hidden', openedPanel.open === true && openedPanel.inert === false && openedPanel.ariaHidden === null, JSON.stringify(openedPanel));
@@ -226,11 +291,10 @@ try {
   check('Escape restores focus and background inert state', afterModal.id === 'btnHelp' && panelAfterModal.inert === true);
 
   await send('Emulation.setDeviceMetricsOverride', { width: 844, height: 390, deviceScaleFactor: 1, mobile: false });
-  await sleep(320);
-  await evaluate("document.getElementById('btnToggleControls').click()");
-  await sleep(260);
+  await waitForViewport(client, 844, 390);
+  await openPanelStable(client, 'panelControls');
   await evaluate("document.getElementById('btnToggleTelemetry').click()");
-  await sleep(320);
+  await waitFor(client, "document.getElementById('panelTelemetry').classList.contains('is-open') && !document.getElementById('panelControls').classList.contains('is-open')");
   const exclusive = await evaluateJson("(function () { var l = document.getElementById('panelControls'); var r = document.getElementById('panelTelemetry'); return { leftOpen: l.classList.contains('is-open'), leftInert: l.inert === true, rightOpen: r.classList.contains('is-open') }; })()");
   check('exclusive panel opening closes and inerts the other', exclusive.leftOpen === false && exclusive.leftInert === true && exclusive.rightOpen === true, JSON.stringify(exclusive));
   await closePanels(client);
@@ -241,7 +305,7 @@ try {
   await evaluate('window.FSApp.setSimRunning(true)');
   await evaluate('window.FSApp.setState({ slope: 0, bank: 0 })');
   await evaluate("document.getElementById('btnSimToggle').click()");
-  await sleep(520);
+  await waitFor(client, 'window.FSApp.getSnapshot().sim.running === false');
   const paused = await evaluateJson("(function () { return { detail: document.getElementById('simDetail').textContent, telemetry: document.getElementById('telemetrySimState').textContent, status: document.getElementById('simStatus').textContent, button: document.getElementById('btnSimToggle').textContent, running: window.FSApp.getSnapshot().sim.running }; })()");
   check('pause updates every status field from one path', paused.running === false && paused.detail.indexOf('暂停') >= 0 && paused.detail.indexOf('运行') !== 0 && paused.telemetry === '暂停' && paused.status === '暂停' && paused.button === '继续', JSON.stringify(paused));
   await evaluate("document.getElementById('btnSimToggle').click()");
@@ -295,7 +359,7 @@ try {
   check('4.1 residual row and warning expose the residual', splitResidualRow.indexOf('is-error') >= 0 || splitResidualRow.indexOf('is-warn') >= 0, splitResidualRow + ' / ' + splitWarning.slice(0, 80));
   const dynamicTests = await evaluate('window.FSApp.runDynamicSelfTests().length');
   await evaluate('window.FSApp.openModel()');
-  await sleep(1800);
+  await waitFor(client, "document.querySelectorAll('#selfTestList li').length >= 24", 4000);
   const modalItems = await evaluate("document.querySelectorAll('#selfTestList li').length");
   check('self-tests expose 10 dynamic and 24 total entries', dynamicTests >= 10 && modalItems >= 24, dynamicTests + ' dynamic / ' + modalItems + ' total');
   await evaluate('window.FSApp.closeModel()');
@@ -309,6 +373,21 @@ try {
   await evaluate('window.FSApp.resetDynamics({ settle: 1 })');
   await sleep(500);
   check('solver display recovers after reset', (await evaluateJson('window.FSApp.getSnapshot().solverState')) === 'ok' && (await evaluate("document.getElementById('solverBadge').hidden")) === true);
+
+  setGroup('assets');
+  const threeGlobal = await evaluate('Boolean(window.THREE && window.THREE.Material && window.THREE.BufferGeometry && window.THREE.Material.prototype && typeof window.THREE.Material.prototype.dispose === "function" && window.THREE.BufferGeometry.prototype && typeof window.THREE.BufferGeometry.prototype.dispose === "function")');
+  if (!threeGlobal) {
+    check('B5.4 rebuild releases materials and geometry', false, 'window.THREE Material/BufferGeometry prototype unavailable');
+  } else {
+    await evaluate("(function () { if (window.__uiDisposeHooked) return; window.__uiMatDispose = 0; window.__uiGeomDispose = 0; var materialProto = window.THREE.Material.prototype; var materialDispose = materialProto.dispose; materialProto.dispose = function () { window.__uiMatDispose += 1; return materialDispose.call(this); }; var geometryProto = window.THREE.BufferGeometry.prototype; var geometryDispose = geometryProto.dispose; geometryProto.dispose = function () { window.__uiGeomDispose += 1; return geometryDispose.call(this); }; window.__uiDisposeHooked = true; })()");
+    await evaluate('window.FSApp.setState({ wheelbase: 3.70 })');
+    const released = await waitFor(client, 'window.__uiMatDispose >= 3 && window.__uiGeomDispose > 0', 4000);
+    const disposeCounts = await evaluateJson('({ materialDisposed: window.__uiMatDispose, geometryDisposed: window.__uiGeomDispose })');
+    check('B5.4 rebuild releases materials and geometry', released === true, 'materialDisposed=' + disposeCounts.materialDisposed + ' geometryDisposed=' + disposeCounts.geometryDisposed);
+    await evaluate('window.FSApp.setState({ wheelbase: 3.55 })');
+    await waitForRebuild(client);
+    await evaluate('window.FSApp.resetDynamics({ settle: 1 })');
+  }
 
   setGroup('display');
   const copy = await evaluate("document.querySelector('#showLoads').closest('label').querySelector('small').textContent");
