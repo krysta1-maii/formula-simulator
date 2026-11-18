@@ -149,5 +149,10 @@ const b = computeStatic(make({ slope: 6, bank: 5, mass: 812 }));
 check('identical inputs give identical loads', JSON.stringify(a.loads) === JSON.stringify(b.loads));
 check('identical inputs give identical pose', a.heave === b.heave && a.pitch === b.pitch && a.roll === b.roll);
 
+console.log('\n[10] cleanup guards');
+check('dead material set is removed', !read('src/js/20-car.js').includes('createDefaultBodyMaterialSet'));
+check('screenshot name is state-aware', !read('src/js/40-app.js').includes('FS-01_static_'));
+check('capture-docs dead helper is removed', !read('tools/capture-docs.mjs').includes('latestDownload'));
+
 console.log('\n' + (failures === 0 ? 'PASS' : 'FAIL') + '  ' + (checks - failures) + '/' + checks + ' checks');
 if (failures > 0) process.exitCode = 1;

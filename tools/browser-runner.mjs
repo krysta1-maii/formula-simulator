@@ -167,8 +167,12 @@ export async function launchBrowser({
     let messageId = 1;
     const pending = new Map();
     const pageErrors = [];
+    const networkRequests = [];
     socket.onmessage = (event) => {
       const message = JSON.parse(event.data);
+      if (message.method === 'Network.requestWillBeSent' && message.params && message.params.request) {
+        networkRequests.push(message.params.request.url);
+      }
       if (message.id && pending.has(message.id)) {
         const entry = pending.get(message.id);
         pending.delete(message.id);
@@ -213,7 +217,7 @@ export async function launchBrowser({
     if (!ready) throw new BrowserEnvError('FSApp did not become ready');
     await sleep(600);
 
-    return { send, evaluate, evaluateJson, pageErrors, close: cleanup, port };
+    return { send, evaluate, evaluateJson, pageErrors, networkRequests, close: cleanup, port };
   } catch (error) {
     await cleanup();
     if (error instanceof BrowserEnvError) throw error;

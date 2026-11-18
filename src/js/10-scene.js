@@ -1031,6 +1031,14 @@ function buildOverlay() {
   S.cgProjectionCross = projCross;
 }
 
+const LOAD_ARROW_REF_HEIGHT = 0.30;
+const LOAD_ARROW_MAX_HEIGHT = 1.35;
+
+function loadArrowHeight(loadN, referenceN) {
+  const ref = Number.isFinite(referenceN) && referenceN > 1 ? referenceN : 1;
+  return clamp((loadN / ref) * LOAD_ARROW_REF_HEIGHT, 0, LOAD_ARROW_MAX_HEIGHT);
+}
+
 function updateOverlays(model) {
   const visible = Boolean(state.showLoads);
   S.loadOverlay.visible = visible;
@@ -1051,7 +1059,7 @@ function updateOverlays(model) {
     const fore = wheel.axle === 'front' ? 0.24 : -0.24;
     const baseX = contact.x + forwardX * fore + lateralX * outward;
     const baseZ = contact.z + forwardZ * fore + lateralZ * outward;
-    const arrowHeight = clamp(0.26 + 0.56 * (load / Math.max(avgCorner, 1)), 0.2, 0.88);
+    const arrowHeight = loadArrowHeight(load, Math.max(avgCorner, 1));
     const arrow = S.loadArrows[i];
     const shaftLength = Math.max(0.02, arrowHeight - arrow.arrow.head);
     arrow.arrow.group.position.set(baseX, 0.035, baseZ);

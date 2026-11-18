@@ -14,7 +14,7 @@ const factory = new Function('THREE', 'localStorage',
   read('src/js/00-core.js') + '\n' + read('src/js/03-suspension.js') + '\n' + read('src/js/05-body-dynamics.js') + '\nreturn {' +
   ' computeStatic, computeBodyInertia, runSelfTests, DEFAULTS, NUM_LIMITS, GRAVITY,' +
   ' simCreate, simReset, simStep, simRunFor, simAdvance, simBuildModel, simApplyImpulse,' +
-  ' simEvaluate, runDynamicSelfTests, SIM_DT, simQuatFromEuler, simEulerFromQuat,' +
+  ' simEvaluate, runDynamicSelfTests, SIM_DT, simQuatFromEuler, simQuatRotate, simEulerFromQuat,' +
   ' suspSolveCorner, suspensionBuild, suspRackForSteer, suspWheelSteer, simReferencePoint,' +
   ' simRetargetReference, simApplyForceAt' +
   '};');
@@ -40,6 +40,7 @@ const {
   simReferencePoint,
   simEvaluate,
   simQuatFromEuler,
+  simQuatRotate,
   simRetargetReference,
   simApplyForceAt
 } = api;
@@ -726,6 +727,31 @@ function poseAt(pitchDeg, rollDeg, patch) {
   const count = (body.match(/simCross\(/g) || []).length;
   check('simEvaluate has no bare simCross call', count === 0, String(count));
 }
+
+console.log('\n[10] render fallback quaternion');
+function matMul3(a, b) {
+  const out = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+  for (let i = 0; i < 3; i += 1) for (let j = 0; j < 3; j += 1) for (let k = 0; k < 3; k += 1) out[i][j] += a[i][k] * b[k][j];
+  return out;
+}
+function matVec3(m, v) {
+  return [0, 1, 2].map((i) => m[i][0] * v[0] + m[i][1] * v[1] + m[i][2] * v[2]);
+}
+function maxDiff3(a, b) {
+  return Math.max(...[0, 1, 2].map((i) => Math.abs(a[i] - b[i])));
+}
+const yaw = 0.7, pitch = 0.3, roll = -0.4;
+const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch), cr = Math.cos(roll), sr = Math.sin(roll);
+const Ry = [[cy, 0, sy], [0, 1, 0], [-sy, 0, cy]];
+const Rz = [[cp, -sp, 0], [sp, cp, 0], [0, 0, 1]];
+const Rx = [[1, 0, 0], [0, cr, -sr], [0, sr, cr]];
+const expected = matMul3(matMul3(Ry, Rz), Rx);
+const quat = simQuatFromEuler(yaw, pitch, roll);
+const actual = simQuatRotate(quat, [1, 0, 0]);
+check('quatFromEuler uses Ry*Rz*Rx', maxDiff3(actual, matVec3(expected, [1, 0, 0])) < 1e-12, maxDiff3(actual, matVec3(expected, [1, 0, 0])).toExponential(2));
+const oldOrder = matMul3(matMul3(Ry, Rx), Rz);
+const oldVec = matVec3(oldOrder, [1, 0, 0]);
+check('Ry*Rx*Rz is distinguishable from the documented order', maxDiff3(actual, oldVec) > 1e-6, maxDiff3(actual, oldVec).toExponential(2));
 
 console.log('\n' + (failures === 0 ? 'PASS' : 'FAIL') + '  ' + (checks - failures) + '/' + checks + ' checks');
 if (failures > 0) process.exitCode = 1;

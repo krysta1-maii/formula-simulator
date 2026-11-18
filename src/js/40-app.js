@@ -283,7 +283,8 @@ function exportScreenshot() {
 
   const link = document.createElement('a');
   screenshotCount += 1;
-  link.download = `FS-01_static_${formatStamp()}_${screenshotCount}.png`;
+  const mode = model.sim ? (model.sim.running ? 'dynamic' : 'paused') : 'static';
+  link.download = `FS-01_${mode}_${formatStamp()}_${screenshotCount}.png`;
   link.href = canvas.toDataURL('image/png');
   link.click();
   return true;
@@ -335,6 +336,11 @@ function bindGlobalAPI() {
         yawDeg: model.poseDeg.yaw,
         bodyPos: model.bodyPos ? { x: model.bodyPos.x, y: model.bodyPos.y, z: model.bodyPos.z } : null,
         solved: model.solved || null,
+        solverOk: model.solverOk === true,
+        solverState: solverStateOf(model),
+        rockerResidualMm: model.rockerResidualMm ? model.rockerResidualMm.slice() : null,
+        rockerFeasible: model.rockerFeasible ? model.rockerFeasible.slice() : null,
+        motionRatioState: model.motionRatioState ? model.motionRatioState.slice() : null,
         bodyVelocity: model.bodyVelocity ? { x: model.bodyVelocity.x, y: model.bodyVelocity.y, z: model.bodyVelocity.z } : null,
         bodyRatesDeg: model.bodyRatesDeg || null,
         travelMm: model.travelMm.slice(),
@@ -488,6 +494,9 @@ function bindGlobalAPI() {
         arb: CAR.diag.arbStretchMm
       },
       solverOk: CAR.diag.rockerSolveOk,
+      solverState: solverStateOf(UI.lastModel),
+      rockerResidualMm: UI.lastModel && Array.isArray(UI.lastModel.rockerResidualMm) ? UI.lastModel.rockerResidualMm.slice() : [],
+      loadArrowHeights: (S.loadArrows || []).map((entry) => entry.arrow.shaft.scale.y + entry.arrow.head),
       geometryRevision: CAR.geometryRevision || null,
       physicsRevision: SIM && SIM.reference ? SIM.reference.geometryRevision : null,
       geometryMismatch: Boolean(CAR.diag.geometryMismatch)

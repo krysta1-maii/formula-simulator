@@ -2,18 +2,14 @@
   "schema": 1,
   "appVersion": "0.2.0",
   "commit": "fbb401d",
-  "generatedAt": "2026-11-18T17:36:20.169Z",
+  "generatedAt": "2026-11-18T18:30:29.505Z",
   "environment": {
     "node": "v24.22.1",
     "platform": "linux",
     "arch": "x64",
     "chrome": "auto"
   },
-  "knownFailures": [
-    "U2/space-key",
-    "U3/panel-focus",
-    "U4/pause-text"
-  ],
+  "knownFailures": [],
   "defectEvidence": {
     "B4.1": {
       "checks": [
@@ -122,11 +118,7 @@
         "U3/panel-focus",
         "U4/pause-text"
       ],
-      "failing": [
-        "U2/space-key",
-        "U3/panel-focus",
-        "U4/pause-text"
-      ]
+      "failing": []
     }
   },
   "checks": {
@@ -277,15 +269,15 @@
         "unreachableOk": 0,
         "firstViolation": {
           "corner": 0,
-          "step": 121,
-          "time": 1.7440000000000013,
+          "step": 120,
+          "time": 1.7420000000000013,
           "targetMm": 707.834385779026,
-          "minReachMm": 707.9226519817585,
-          "residualMm": 17.601649504897175,
-          "ratio": 1.211875888078058,
+          "minReachMm": 708.389959517888,
+          "residualMm": 18.15278380883345,
+          "ratio": 1.8188641280690767,
           "ok": false
         },
-        "maxViolationMm": 16.48696273097128
+        "maxViolationMm": 17.51709856004169
       },
       "threshold": "unreachableOk == 0",
       "detail": "unreachable geometry must not report ok"
@@ -297,13 +289,13 @@
       "knownFailure": false,
       "observed": {
         "okWithResidual": 0,
-        "maxResidualMm": 37.023928774079565,
+        "maxResidualMm": 38.24940867480908,
         "maxResidualInfo": {
           "corner": 0,
           "step": 166,
           "time": 1.8340000000000014,
           "ok": false,
-          "residualMm": 37.023928774079565
+          "residualMm": 38.24940867480908
         }
       },
       "threshold": "okWithResidual == 0 and residual <= 0.1 mm when ok",
@@ -315,8 +307,8 @@
       "status": "pass",
       "knownFailure": false,
       "observed": {
-        "minRatio": 0.22830226431946524,
-        "maxRatio": 0.7954914410704714,
+        "minRatio": 0.2282833995022969,
+        "maxRatio": 0.7948478266553802,
         "unavailableWhenOk": 0
       },
       "threshold": "0.2 <= ratio <= 0.8 and available when ok",
@@ -328,10 +320,10 @@
       "status": "pass",
       "knownFailure": false,
       "observed": {
-        "maxJump": 0.07411268055557152,
+        "maxJump": 0.07291881783087617,
         "signFlips": 0,
-        "maxStep": 118,
-        "maxStepTime": 1.7380000000000013
+        "maxStep": 217,
+        "maxStepTime": 1.9360000000000015
       },
       "threshold": "signFlips == 0 and maxJump <= 0.1 per 2 ms step",
       "detail": "4.1 low-damping large travel changes about 0.074 per step; 0.02 only suits the default small travel"
@@ -342,14 +334,14 @@
       "status": "pass",
       "knownFailure": false,
       "observed": {
-        "peakDampingKN": 1.3425196703209508,
+        "peakDampingKN": 1.733605875929732,
         "peakInfo": {
           "corner": 0,
-          "step": 212,
-          "time": 1.9260000000000015,
-          "dampingN": 1342.5196703209508,
-          "ratio": 1.748591258965759,
-          "ok": false
+          "step": 402,
+          "time": 2.3059999999999676,
+          "dampingN": 1733.6058759297318,
+          "ratio": 0.681934982210335,
+          "ok": true
         }
       },
       "threshold": "peakDampingKN <= 15",
@@ -361,15 +353,15 @@
       "status": "pass",
       "knownFailure": false,
       "observed": {
-        "plainPeakKN": 1.3425241729334527,
-        "writebackPeakKN": 1.3425241729334527,
+        "plainPeakKN": 1.733605875929732,
+        "writebackPeakKN": 1.733605875929732,
         "relativeDelta": 0,
         "writebackPeakInfo": {
-          "frame": 26,
-          "sub": 5,
+          "frame": 50,
+          "sub": 3,
           "index": 0,
-          "time": 1.9280000000000015,
-          "ratio": 1.199762988508568
+          "time": 2.3079999999999674,
+          "ratio": 1.3998719797071244
         }
       },
       "threshold": "abs(writebackPeak - plainPeak) / plainPeak <= 0.01",
@@ -395,7 +387,7 @@
       "knownFailure": false,
       "observed": {
         "poisonDelta": 0,
-        "poisonPeakKN": 1.3425241729334527
+        "poisonPeakKN": 1.733605875929732
       },
       "threshold": "state delta <= 1e-12 after poisoning corner.angle",
       "detail": "physics must not read corner.angle as a seed"
@@ -406,7 +398,7 @@
       "status": "pass",
       "knownFailure": false,
       "observed": {
-        "plainPeakKN": 1.3425241729334527
+        "plainPeakKN": 1.733605875929732
       },
       "threshold": "plainPeakKN <= 15",
       "detail": "same physical envelope as B4.1"
@@ -1067,26 +1059,26 @@
       "status": "pass",
       "knownFailure": false,
       "observed": {
-        "wheelGapMaxMm": 0,
-        "linkStretchMm": 1.1324274851176597e-11,
-        "diagStretchMm": 2.7755575615628914e-12,
+        "wheelGapMaxMm": 1.5699769780618585e-9,
+        "linkStretchMm": 1.099120794378905e-11,
+        "diagStretchMm": 2.55351295663786e-12,
         "stretch": {
-          "susp": 2.7755575615628914e-12,
-          "tie": 1.1324274851176597e-11,
+          "susp": 2.6645352591003757e-12,
+          "tie": 1.099120794378905e-11,
           "push": 2.220446049250313e-13,
-          "arb": 4.163336342344337e-14
+          "arb": 5.551115123125783e-14
         },
         "beforeWheelbase": 3.55,
         "afterWheelbase": 3.9,
         "sceneWheel0": [
-          1.9500091528828547,
-          0.3599279088477904,
-          -0.810013694185061
+          1.9500091528806385,
+          0.3599279083470385,
+          -0.8100136941808712
         ],
         "solvedWheel0": [
-          1.9500091528828547,
-          0.3599279088477904,
-          -0.810013694185061
+          1.950009152880977,
+          0.3599279079829744,
+          -0.8100136941809061
         ]
       },
       "threshold": "wheel gap <= 1e-6 m and link stretch <= 0.001 mm",
@@ -1173,13 +1165,13 @@
     "U2/space-key": {
       "audit": "ui",
       "group": "ui",
-      "status": "fail",
-      "knownFailure": true,
+      "status": "pass",
+      "knownFailure": false,
       "observed": {
-        "focused": "btnHelp",
-        "modalOpen": false,
+        "focused": "",
+        "modalOpen": true,
         "beforeRunning": true,
-        "afterRunning": false
+        "afterRunning": true
       },
       "threshold": "Space opens the help modal and does not toggle simulation",
       "detail": "focused button keeps its native Space behaviour"
@@ -1187,12 +1179,12 @@
     "U3/panel-focus": {
       "audit": "ui",
       "group": "ui",
-      "status": "fail",
-      "knownFailure": true,
+      "status": "pass",
+      "knownFailure": false,
       "observed": {
         "open": false,
-        "inert": false,
-        "ariaHidden": null,
+        "inert": true,
+        "ariaHidden": "true",
         "focusable": 38
       },
       "threshold": "closed panel is inert and aria-hidden",
@@ -1201,10 +1193,10 @@
     "U4/pause-text": {
       "audit": "ui",
       "group": "ui",
-      "status": "fail",
-      "knownFailure": true,
+      "status": "pass",
+      "knownFailure": false,
       "observed": {
-        "detail": "运行 · t 2.10 s · 500 Hz · 静摩擦保持",
+        "detail": "暂停 · t 2.82 s · 500 Hz · 静摩擦保持 · 积压 244.0 ms · 丢 3.40 s",
         "running": false
       },
       "threshold": "simDetail contains pause and does not start with running",

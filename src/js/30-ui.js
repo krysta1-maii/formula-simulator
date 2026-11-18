@@ -23,8 +23,12 @@ const UI = {
   partLabels: [],
   inspectIndex: -1,
   elements: {},
-  modalReturnFocus: null
+  modalReturnFocus: null,
+  modalInert: null,
+  solverState: 'ok'
 };
+
+const PANEL_TABINDEX = new WeakMap();
 
 const SETUP_KEYS = ['mass', 'frontWeightPct', 'cgHeight', 'cgLateral', 'wheelbase', 'trackFront', 'trackRear', 'wheelRadius', 'tireWidthF', 'tireWidthR', 'wheelRateF', 'wheelRateR', 'dampingF', 'dampingR', 'arbFront', 'arbRear', 'slope', 'bank', 'friction'];
 let SETUP_REVISION = 0;
@@ -348,6 +352,71 @@ function isCompact() {
   return window.innerWidth <= 980;
 }
 
+function setPanelInert(panel, inert) {
+  if (!panel) return;
+  if ('inert' in panel) {
+    panel.inert = inert;
+  } else if (inert) {
+    const saved = [];
+    $$('button, [href], input, select, textarea, summary, [tabindex]', panel).forEach((element) => {
+      saved.push([element, element.getAttribute('tabindex')]);
+      element.setAttribute('tabindex', '-1');
+    });
+    PANEL_TABINDEX.set(panel, saved);
+  } else {
+    const saved = PANEL_TABINDEX.get(panel) || [];
+    saved.forEach(([element, value]) => {
+      if (value === null) element.removeAttribute('tabindex');
+      else element.setAttribute('tabindex', value);
+    });
+    PANEL_TABINDEX.delete(panel);
+  }
+  if (inert) panel.setAttribute('aria-hidden', 'true');
+  else panel.removeAttribute('aria-hidden');
+}
+
+function modalFocusables(modal) {
+  return $$('button, [href], input, select, textarea, summary, [tabindex]', modal).filter((element) => {
+    if (element.disabled) return false;
+    if (element.getAttribute('tabindex') === '-1') return false;
+    if (element.closest('[inert]')) return false;
+    return element.offsetParent !== null;
+  });
+}
+
+function setModalBackgroundInert() {
+  if (UI.modalInert) return;
+  UI.modalInert = new Map();
+  $$('#viewport, .topbar, .panel, .bottom-bar, .viewport-hint, #mobileScrim').forEach((element) => {
+    UI.modalInert.set(element, element.inert);
+    element.inert = true;
+  });
+}
+
+function restoreModalBackgroundInert() {
+  if (!UI.modalInert) return;
+  UI.modalInert.forEach((value, element) => {
+    element.inert = value;
+  });
+  UI.modalInert = null;
+}
+
+function trapModalFocus(event) {
+  const modal = document.getElementById('modelModal');
+  if (!modal || modal.hidden) return;
+  const items = modalFocusables(modal);
+  if (!items.length) return;
+  const first = items[0];
+  const last = items[items.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    last.focus();
+    event.preventDefault();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    first.focus();
+    event.preventDefault();
+  }
+}
+
 function updatePanelUI() {
   const left = document.getElementById('panelControls');
   const right = document.getElementById('panelTelemetry');
@@ -357,11 +426,11 @@ function updatePanelUI() {
   const rightButton = document.getElementById('btnToggleTelemetry');
   if (leftButton) {
     leftButton.classList.toggle('is-active', Boolean(leftOpen));
-    leftButton.setAttribute('aria-pressed', String(Boolean(leftOpen)));
+    leftButton.setAttribute('aria-expanded', String(Boolean(leftOpen)));
   }
   if (rightButton) {
     rightButton.classList.toggle('is-active', Boolean(rightOpen));
-    rightButton.setAttribute('aria-pressed', String(Boolean(rightOpen)));
+    rightButton.setAttribute('aria-expanded', String(Boolean(rightOpen)));
   }
   const scrim = document.getElementById('mobileScrim');
   if (scrim) scrim.hidden = !(isCompact() && (leftOpen || rightOpen));
@@ -373,9 +442,18 @@ function setPanel(panelId, open, { exclusive = false } = {}) {
   if (open && exclusive) {
     const otherId = panelId === 'panelControls' ? 'panelTelemetry' : 'panelControls';
     const other = document.getElementById(otherId);
-    if (other) other.classList.remove('is-open');
+    if (other) {
+      other.classList.remove('is-open');
+      setPanelInert(other, true);
+    }
+  }
+  if (!open && panel.contains(document.activeElement)) {
+    const toggleId = panelId === 'panelControls' ? 'btnToggleControls' : 'btnToggleTelemetry';
+    const toggle = document.getElementById(toggleId);
+    if (toggle) toggle.focus({ preventScroll: true });
   }
   panel.classList.toggle('is-open', open);
+  setPanelInert(panel, !open);
   updatePanelUI();
 }
 
@@ -391,11 +469,13 @@ function openModelModal() {
   if (!modal) return;
   UI.modalReturnFocus = document.activeElement;
   modal.hidden = false;
+  setModalBackgroundInert();
   document.body.classList.add('modal-open');
   refreshSelfTests();
   window.setTimeout(() => {
-    const closeButton = modal.querySelector('button[data-close-modal]');
-    if (closeButton) closeButton.focus();
+    const items = modalFocusables(modal);
+    const target = modal.querySelector('button[data-close-modal]') || items[0];
+    if (target) target.focus();
   }, 20);
 }
 
@@ -404,6 +484,7 @@ function closeModelModal() {
   if (!modal || modal.hidden) return;
   modal.hidden = true;
   document.body.classList.remove('modal-open');
+  restoreModalBackgroundInert();
   if (UI.modalReturnFocus && typeof UI.modalReturnFocus.focus === 'function') {
     UI.modalReturnFocus.focus();
   }
@@ -466,10 +547,13 @@ function refreshSelfTests({ dynamic = true, force = false } = {}) {
   const rightStatus = document.getElementById('selfTestStatus');
   if (rightStatus) rightStatus.textContent = `${passed} / ${total} 通过`;
 
+  const solverState = UI.lastModel ? solverStateOf(UI.lastModel) : 'ok';
+  const solverWarn = solverState !== 'ok';
+  const solverText = solverState === 'failed' ? '求解失败' : solverState === 'degraded' ? '求解降级' : '求解正常';
   const summary = document.getElementById('selfTestSummary');
   if (summary) {
-    summary.textContent = `${passed} / ${total} 项通过 · 静态 ${staticTests.length} / 动态 ${dynamicTests.length}`;
-    summary.style.color = passed === total ? 'var(--ok)' : 'var(--warn)';
+    summary.textContent = `${passed} / ${total} 项通过 · 静态 ${staticTests.length} / 动态 ${dynamicTests.length}${solverWarn ? ' · ' + solverText : ''}`;
+    summary.style.color = passed === total && !solverWarn ? 'var(--ok)' : 'var(--warn)';
   }
 
   const list = document.getElementById('selfTestList');
@@ -646,6 +730,30 @@ function setNodeText(element, text) {
   element.textContent = text;
 }
 
+function solverStateOf(model) {
+  const sim = model && model.sim;
+  if (sim && sim.solverFailed) return 'failed';
+  if (sim && sim.solverDegraded) return 'degraded';
+  if (model && model.solverOk === true) return 'ok';
+  if (sim) return 'failed';
+  return 'ok';
+}
+
+function refreshSolverBadge(model) {
+  const state = solverStateOf(model);
+  if (UI.solverState === state) return;
+  UI.solverState = state;
+  const badge = document.getElementById('solverBadge');
+  if (!badge) return;
+  badge.dataset.state = state;
+  if (state === 'ok') {
+    badge.hidden = true;
+    return;
+  }
+  badge.hidden = false;
+  badge.textContent = state === 'degraded' ? '求解降级' : '求解失败';
+}
+
 function refreshChecks(model) {
   const container = document.getElementById('checkList');
   if (!container || !model) return;
@@ -669,25 +777,38 @@ function refreshChecks(model) {
   const frictionState = sim.sliding ? '滑移' : sim.holding ? '静摩擦' : '—';
   const timeScale = Number.isFinite(sim.timeScale) ? sim.timeScale : 1;
   const dropped = Number.isFinite(sim.droppedTime) ? sim.droppedTime : 0;
+  const solverState = solverStateOf(model);
+  const solverOk = model.solverOk === true;
+  const residuals = Array.isArray(model.rockerResidualMm) ? model.rockerResidualMm : [];
+  const feasible = Array.isArray(model.rockerFeasible) ? model.rockerFeasible : [];
+  const residualMaxMm = residuals.length ? Math.max.apply(null, residuals) : NaN;
+  const failedCorners = feasible.filter((value) => !value).length;
+  const residualOk = feasible.length === 4 && feasible.every(Boolean) && Number.isFinite(residualMaxMm) && residualMaxMm < 0.1;
+  const ratioStates = Array.isArray(model.motionRatioState) ? model.motionRatioState : [];
+  const unavailableCorners = ratioStates.filter((value) => value !== 'ok').length;
+  const motionOk = ratioStates.length === 4 && unavailableCorners === 0;
+  const solverLabel = solverState === 'failed' ? '失败' : solverState === 'degraded' ? '降级' : '正常';
 
   const rows = [
-    { id: 'sim', ok: sim.finite && !sim.recovered, name: '六自由度积分', value: `t ${sim.time.toFixed(2)} s · ${sim.stepHz} Hz · ${sim.substeps} 子步 · ${timeScale.toFixed(2)}× · 丢 ${dropped.toFixed(2)} s` },
+    { id: 'sim', ok: sim.finite && !sim.recovered && solverOk, name: '六自由度积分与求解', value: `t ${sim.time.toFixed(2)} s · ${sim.stepHz} Hz · ${sim.substeps} 子步 · ${timeScale.toFixed(2)}× · 丢 ${dropped.toFixed(2)} s · 求解 ${solverLabel}` },
     { id: 'contact', ok: contactOk, name: '四轮接地', value: `${diag.contactCount} / 4 · 最小 ${loadDisplay(model.minLoad)} ${unitDisplay()}` },
     { id: 'links', ok: linksOk, name: '悬架杆长偏差', value: `${diag.linkCount} 根 / ${diag.jointCount} 点 · ${diag.maxSuspLinkStretchMm.toFixed(3)} mm` },
     { id: 'steer', ok: steerOk, name: '齿条 / 横拉杆', value: `齿条 ${formatSigned(diag.rackTravelMm, 1)} mm · 横拉杆 ${diag.tieRodStretchMm.toFixed(3)} mm` },
     { id: 'arb', ok: arbOk, name: '防倾杆连接', value: `${diag.arbCount} 套 · 扭转 ${diag.arbTwistDeg.toFixed(2)}° · 伸长 ${diag.arbStretchMm.toFixed(2)} mm` },
     { id: 'friction', ok: frictionOk, name: '坡面摩擦', value: `μ_req ${model.frictionDemand.toFixed(3)} / ${model.frictionCapacity.toFixed(2)} · ${frictionState}` },
-    { id: 'rockerResidual', ok: true, name: '摇臂闭合残差', value: '—' },
-    { id: 'motionRatio', ok: true, name: '运动比连续性', value: '—' },
+    { id: 'rockerResidual', ok: residualOk, error: solverState === 'failed', name: '摇臂闭合残差', value: Number.isFinite(residualMaxMm) ? `${residualMaxMm.toFixed(3)} / 0.100 mm · 失败 ${failedCorners} 角` : '—' },
+    { id: 'motionRatio', ok: motionOk, error: solverState === 'failed', name: '运动比连续性', value: ratioStates.length ? `不可用 ${unavailableCorners} 角 · 求解${solverLabel}` : '—' },
     { id: 'staticTests', ok: testsOk, name: '静力自检', value: tests.length ? `${passed} / ${tests.length} 通过` : '待运行' },
     { id: 'dynamicTests', ok: dynamicOk, name: '动态自检', value: dynamicTests.length ? `${dynamicPassed} / ${dynamicTests.length} 通过` : '待运行' }
   ];
 
   rows.forEach((row) => {
+    const className = 'check-item ' + (row.ok ? 'is-ok' : row.error ? 'is-error' : 'is-warn');
     let cached = UI.checkRows[row.id];
     if (!cached || !cached.item || cached.item.parentNode !== container) {
       const item = document.createElement('div');
-      item.className = 'check-item ' + (row.ok ? 'is-ok' : 'is-warn');
+      item.className = className;
+      item.dataset.checkId = row.id;
       const icon = document.createElement('span');
       icon.className = 'check-icon';
       icon.textContent = row.ok ? '✓' : '!';
@@ -699,13 +820,14 @@ function refreshChecks(model) {
       value.textContent = row.value;
       item.append(icon, name, value);
       container.appendChild(item);
-      cached = { item, icon, name, value, ok: row.ok, text: row.name, valueText: row.value };
+      cached = { item, icon, name, value, ok: row.ok, className, text: row.name, valueText: row.value };
       UI.checkRows[row.id] = cached;
       return;
     }
-    if (cached.ok !== row.ok) {
+    if (cached.className !== className) {
+      cached.className = className;
       cached.ok = row.ok;
-      cached.item.className = 'check-item ' + (row.ok ? 'is-ok' : 'is-warn');
+      cached.item.className = className;
       setNodeText(cached.icon, row.ok ? '✓' : '!');
     }
     if (cached.text !== row.name) {
@@ -717,6 +839,23 @@ function refreshChecks(model) {
       setNodeText(cached.value, row.value);
     }
   });
+}
+
+function renderSimStatus(model = UI.lastModel) {
+  const sim = model && model.sim ? model.sim : null;
+  if (!sim && !SIM) {
+    setText('simDetail', '静态参考');
+    return;
+  }
+  const running = SIM ? SIM.running : sim ? sim.running : true;
+  const time = SIM ? SIM.time : sim ? sim.time : 0;
+  const sliding = SIM ? SIM.flags.sliding : Boolean(sim && sim.sliding);
+  const holding = SIM ? SIM.flags.holding : Boolean(sim && sim.holding);
+  const stateText = sliding ? '切向滑移' : holding ? '静摩擦保持' : '瞬态';
+  const backlogMs = (Number.isFinite(sim && sim.backlog) ? sim.backlog : (Number.isFinite(sim && sim.accumulator) ? sim.accumulator : 0)) * 1000;
+  const dropped = Number.isFinite(sim && sim.droppedTime) ? sim.droppedTime : 0;
+  const stepHz = sim && sim.stepHz ? sim.stepHz : Math.round(1 / SIM_DT);
+  setText('simDetail', `${running ? '运行' : '暂停'} · t ${time.toFixed(2)} s · ${stepHz} Hz · ${stateText} · 积压 ${backlogMs.toFixed(1)} ms · 丢 ${dropped.toFixed(2)} s`);
 }
 
 function syncSimControls(model = UI.lastModel) {
@@ -743,6 +882,7 @@ function syncSimControls(model = UI.lastModel) {
   setText('telemetrySimTime', `${simTime.toFixed(2)} s`);
   const timeScale = SIM && Number.isFinite(SIM.timeScale) ? SIM.timeScale : (sim && Number.isFinite(sim.timeScale) ? sim.timeScale : 1);
   setText('telemetrySimSteps', sim || SIM ? `${sim ? sim.stepHz : Math.round(1 / SIM_DT)} Hz · ${substeps} 子步/帧 · ${timeScale.toFixed(2)}×` : '—');
+  renderSimStatus(model);
 }
 
 function refreshTelemetry(model) {
@@ -850,15 +990,6 @@ function refreshTelemetry(model) {
   if (model.inertia) {
     setText('dynInertia', `${model.inertia.Ixx.toFixed(0)} / ${model.inertia.Iyy.toFixed(0)} / ${model.inertia.Izz.toFixed(0)} kg·m²`);
   }
-  if (sim) {
-    const stateText = sim.sliding ? '切向滑移' : sim.holding ? '静摩擦保持' : '瞬态';
-    const backlogMs = (Number.isFinite(sim.backlog) ? sim.backlog : (Number.isFinite(sim.accumulator) ? sim.accumulator : 0)) * 1000;
-    const dropped = Number.isFinite(sim.droppedTime) ? sim.droppedTime : 0;
-    setText('simDetail', `${sim.running ? '运行' : '暂停'} · t ${sim.time.toFixed(2)} s · ${sim.stepHz} Hz · ${stateText} · 积压 ${backlogMs.toFixed(1)} ms · 丢 ${dropped.toFixed(2)} s`);
-  } else {
-    setText('simDetail', '静态参考');
-  }
-
   const diag = getCarDiagnostics();
   setText('linkStatus', `${diag.linkCount} 根 · ${diag.jointCount} 点 · 悬架杆长偏差 ${diag.maxSuspLinkStretchMm.toFixed(3)} mm`);
   setText(
@@ -876,7 +1007,7 @@ function refreshTelemetry(model) {
     const dynamicPassed = dynamicTests.filter((test) => test.ok).length;
     setText(
       'selfTestStatus',
-      `静力 ${passed} / ${tests.length}${dynamicTests.length ? ` · 动态 ${dynamicPassed} / ${dynamicTests.length}` : ''}`
+      `静力 ${passed} / ${tests.length}${dynamicTests.length ? ` · 动态 ${dynamicPassed} / ${dynamicTests.length}` : ''} · ${solverStateOf(model) === 'failed' ? '求解失败' : solverStateOf(model) === 'degraded' ? '求解降级' : '求解正常'}`
     );
   }
 
@@ -888,7 +1019,19 @@ function refreshTelemetry(model) {
   if (warning) {
     const title = warning.querySelector('b');
     const detail = warning.querySelector('span');
-    if (model.liftedCount > 0) {
+    const solverState = solverStateOf(model);
+    const residuals = Array.isArray(model.rockerResidualMm) ? model.rockerResidualMm : [];
+    const residualMax = residuals.length ? Math.max.apply(null, residuals) : NaN;
+    const feasible = Array.isArray(model.rockerFeasible) ? model.rockerFeasible : [];
+    const failedCorners = feasible.filter((value) => !value).length;
+    const ratioStates = Array.isArray(model.motionRatioState) ? model.motionRatioState : [];
+    const unavailable = ratioStates.filter((value) => value !== 'ok').length;
+    warning.classList.toggle('is-error', solverState === 'failed');
+    if (solverState !== 'ok') {
+      warning.hidden = false;
+      title.textContent = solverState === 'failed' ? `求解失败：${failedCorners} 个角点不可达` : `求解降级：${failedCorners} 个角点不可达`;
+      detail.textContent = `最大残差 ${Number.isFinite(residualMax) ? residualMax.toFixed(3) : '—'} mm（判据 0.100 mm）· 运动比不可用 ${unavailable} 角；载荷按降级分支计算。`;
+    } else if (model.liftedCount > 0) {
       warning.hidden = false;
       title.textContent = `${model.liftedCount} 个车轮卸载`;
       detail.textContent = '等效悬挂力已截断为 0；请减小倾角、质心高度或横向偏移，或提高轮心率。';
@@ -905,6 +1048,13 @@ function refreshTelemetry(model) {
     }
   }
 
+  refreshSolverBadge(model);
+  const solveResiduals = Array.isArray(model.rockerResidualMm) ? model.rockerResidualMm : [];
+  const solveMax = solveResiduals.length ? Math.max.apply(null, solveResiduals) : NaN;
+  const solveRatios = Array.isArray(model.motionRatioState) ? model.motionRatioState : [];
+  const solveUnavailable = solveRatios.filter((value) => value !== 'ok').length;
+  const solveState = solverStateOf(model);
+  setText('cornerSolveStatus', Number.isFinite(solveMax) ? `max ${solveMax.toFixed(3)} / 0.100 mm · 不可用 ${solveUnavailable} 角 · ${solveState === 'failed' ? '求解失败' : solveState === 'degraded' ? '求解降级' : '求解正常'}` : '—');
   syncSimControls(model);
   refreshChecks(model);
   refreshLabelContent(model);
@@ -1086,6 +1236,12 @@ function bindControls() {
   bindWindowChrome();
 }
 
+const SHORTCUT_BLOCK_SELECTOR = 'button, a[href], summary, label, input, select, textarea, [contenteditable=""], [contenteditable="true"], [role="button"], [role="slider"], [role="switch"], [role="checkbox"]';
+function shortcutTargetBlocked(target) {
+  if (!target || typeof target.closest !== 'function') return false;
+  return Boolean(target.closest(SHORTCUT_BLOCK_SELECTOR));
+}
+
 function bindKeyboard() {
   window.addEventListener('keydown', (event) => {
     const tag = event.target && event.target.tagName ? event.target.tagName.toLowerCase() : '';
@@ -1093,6 +1249,10 @@ function bindKeyboard() {
     const modal = document.getElementById('modelModal');
     const modalOpen = modal && !modal.hidden;
 
+    if (event.key === 'Tab' && modalOpen) {
+      trapModalFocus(event);
+      return;
+    }
     if (event.key === 'Escape') {
       if (modalOpen) {
         closeModelModal();
@@ -1106,11 +1266,12 @@ function bindKeyboard() {
       return;
     }
     if (isTyping || modalOpen) return;
+    if (event.defaultPrevented || shortcutTargetBlocked(event.target)) return;
     // Leave browser and OS shortcuts (Ctrl+R, Cmd+O, Alt+...) alone.
     if (event.ctrlKey || event.metaKey || event.altKey) return;
 
     const key = event.key.toLowerCase();
-    if (event.code === 'Space') {
+    if (event.key === ' ' || event.code === 'Space') {
       simulationToggle();
       event.preventDefault();
     } else if (key === 'i') {
@@ -1180,8 +1341,10 @@ function bindWindowChrome() {
   // embedded browsers, so use the same media query as the CSS layout.
   const compactQuery = window.matchMedia('(max-width: 980px)');
   const onCompactChange = (event) => {
-    setPanel('panelControls', !event.matches);
-    setPanel('panelTelemetry', !event.matches);
+    if (event.matches) {
+      setPanel('panelControls', false);
+      setPanel('panelTelemetry', false);
+    }
     updatePanelUI();
   };
   if (compactQuery.addEventListener) compactQuery.addEventListener('change', onCompactChange);

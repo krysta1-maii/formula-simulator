@@ -10,11 +10,8 @@ const _vecE = new THREE.Vector3();
 const _dir = new THREE.Vector3();
 const _mid = new THREE.Vector3();
 const _qSteer = new THREE.Quaternion();
-const _qPitch = new THREE.Quaternion();
-const _qRoll = new THREE.Quaternion();
 const _qYaw = new THREE.Quaternion();
 const _axisY = new THREE.Vector3(0, 1, 0);
-const _axisX = new THREE.Vector3(1, 0, 0);
 const _axisZ = new THREE.Vector3(0, 0, 1);
 
 function initCarSceneGroups() {
@@ -1112,9 +1109,8 @@ function updateCar(model) {
     S.bodyPivot.quaternion.set(model.bodyQuat[1], model.bodyQuat[2], model.bodyQuat[3], model.bodyQuat[0]);
   } else {
     S.bodyPivot.position.set(bodyPos.x, bodyPos.y, bodyPos.z);
-    _qPitch.setFromAxisAngle(_axisZ, model.pitch);
-    _qRoll.setFromAxisAngle(_axisX, model.roll);
-    S.bodyPivot.quaternion.copy(_qYaw).multiply(_qRoll).multiply(_qPitch);
+    const quat = simQuatFromEuler(yaw, model.pitch || 0, model.roll || 0);
+    S.bodyPivot.quaternion.set(quat[1], quat[2], quat[3], quat[0]);
   }
   S.bodyPivot.updateMatrix();
 
@@ -1133,26 +1129,24 @@ function updateCar(model) {
         solvedCorner.wheelQuat[2],
         solvedCorner.wheelQuat[3]
       );
+    } else if (corner.front) {
+      const axisLocal = _vecC.copy(corner.wheelLocal.upper).sub(corner.wheelLocal.lower).normalize();
+      const axisWorld = _vecD.copy(axisLocal).applyQuaternion(corner.restQuat);
+      const pivot = _vecE.copy(corner.wheelLocal.lower).applyQuaternion(corner.restQuat).add(corner.restCenter);
+      _qSteer.setFromAxisAngle(axisWorld, state.steer * DEG);
+      // The body's planar pose carries the wheel with it. Pitch and roll move
+      // the body relative to the contact plane and therefore load the springs,
+      // but the contact patch itself stays on the road.
+      const pivotPlan = _vecA.set(bodyPos.x, 0, bodyPos.z)
+        .add(_vecB.set(pivot.x, 0, pivot.z).applyQuaternion(_qYaw));
+      pivotPlan.y = pivot.y;
+      const offset = _vecC.copy(corner.restCenter).sub(pivot).applyQuaternion(_qSteer).applyQuaternion(_qYaw);
+      root.position.copy(pivotPlan).add(offset);
+      root.quaternion.copy(_qYaw).multiply(_qSteer).multiply(corner.restQuat);
     } else {
-          if (corner.front) {
-            const axisLocal = _vecC.copy(corner.wheelLocal.upper).sub(corner.wheelLocal.lower).normalize();
-            const axisWorld = _vecD.copy(axisLocal).applyQuaternion(corner.restQuat);
-            const pivot = _vecE.copy(corner.wheelLocal.lower).applyQuaternion(corner.restQuat).add(corner.restCenter);
-            _qSteer.setFromAxisAngle(axisWorld, state.steer * DEG);
-            // The body's planar pose carries the wheel with it. Pitch and roll move
-            // the body relative to the contact plane and therefore load the springs,
-            // but the contact patch itself stays on the road.
-            const pivotPlan = _vecA.set(bodyPos.x, 0, bodyPos.z)
-              .add(_vecB.set(pivot.x, 0, pivot.z).applyQuaternion(_qYaw));
-            pivotPlan.y = pivot.y;
-            const offset = _vecC.copy(corner.restCenter).sub(pivot).applyQuaternion(_qSteer).applyQuaternion(_qYaw);
-            root.position.copy(pivotPlan).add(offset);
-            root.quaternion.copy(_qYaw).multiply(_qSteer).multiply(corner.restQuat);
-          } else {
-            const offset = _vecA.set(corner.restCenter.x, 0, corner.restCenter.z).applyQuaternion(_qYaw);
-            root.position.set(bodyPos.x + offset.x, model.dims.R, bodyPos.z + offset.z);
-            root.quaternion.copy(_qYaw).multiply(corner.restQuat);
-          }
+      const offset = _vecA.set(corner.restCenter.x, 0, corner.restCenter.z).applyQuaternion(_qYaw);
+      root.position.set(bodyPos.x + offset.x, model.dims.R, bodyPos.z + offset.z);
+      root.quaternion.copy(_qYaw).multiply(corner.restQuat);
     }
     root.updateMatrix();
     root.updateMatrixWorld(true);
