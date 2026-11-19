@@ -2,130 +2,83 @@
 /**
  * Dynamic chassis browser smoke test.
  *
- * Runs index.html in headless Chrome over CDP and checks the stage-02
+ * Runs the built page in headless Chrome over CDP and checks the stage-02
  * contract: live fixed-step simulation, pause/resume, impulse response,
- * low-grip sliding, reset and the browser-side dynamic self-tests. The test
- * skips gracefully when no Chrome binary is available.
+ * low-grip sliding, reset and the browser-side dynamic self-tests.
  */
-import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-
-const CANDIDATES = [
-  process.env.CHROME_PATH,
-  process.env.GOOGLE_CHROME_BIN,
-  '/usr/bin/google-chrome',
-  '/usr/bin/google-chrome-stable',
-  '/usr/bin/chromium',
-  '/usr/bin/chromium-browser',
-  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-  'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe'
-].filter(Boolean);
-const chromePath = CANDIDATES.find((candidate) => existsSync(candidate));
-if (!chromePath) {
-  console.log('SKIP camera test: no Chrome/Chromium binary found (set CHROME_PATH to enable).');
-  process.exit(0);
-}
+import { browserGate, launchBrowser, BrowserEnvError } from './browser-runner.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const pageUrl = 'file://' + join(root, 'index.html');
-const port = 9400 + Math.floor(Math.random() * 400);
-const profile = mkdtempSync(join(tmpdir(), 'fs-camera-'));
-const chrome = spawn(chromePath, [
-  '--headless=new',
-  '--hide-scrollbars',
-  '--mute-audio',
-  '--remote-debugging-port=' + port,
-  '--user-data-dir=' + profile,
-  '--window-size=1280,900',
-  '--force-device-scale-factor=1',
-  '--enable-unsafe-swiftshader',
-  '--use-angle=swiftshader',
-  '--disable-dev-shm-usage',
-  '--no-first-run',
-  '--no-default-browser-check',
-  '--disable-background-timer-throttling',
-  '--disable-renderer-backgrounding',
-  '--disable-backgrounding-occluded-windows',
-  pageUrl
-], { stdio: 'ignore' });
-
 const sleep = (ms) => new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
 let failures = 0;
+let envFailure = false;
+let client = null;
+let send;
+let evaluate;
+let evaluateJson;
+let pageErrors = [];
 
 function check(name, ok, detail = '') {
   console.log((ok ? 'ok   ' : 'FAIL ') + name + (detail ? '  ' + detail : ''));
   if (!ok) failures += 1;
 }
 
-async function findTarget() {
-  for (let i = 0; i < 120; i += 1) {
-    try {
-      const list = await fetch('http://127.0.0.1:' + port + '/json/list').then((r) => r.json());
-      const page = list.find((target) => target.type === 'page' && target.url.includes('index.html'));
-      if (page) return page;
-    } catch (_) {
-      /* Chrome is still starting. */
-    }
-    await sleep(200);
-  }
-  throw new Error('Chrome did not expose the app page');
-}
-
-function connect(url) {
-  return new Promise((resolvePromise, rejectPromise) => {
-    const socket = new WebSocket(url);
-    socket.onopen = () => resolvePromise(socket);
-    socket.onerror = () => rejectPromise(new Error('CDP websocket failed'));
-  });
-}
-
-const target = await findTarget();
-const socket = await connect(target.webSocketDebuggerUrl);
-let messageId = 1;
-const pending = new Map();
-const pageErrors = [];
-socket.onmessage = (event) => {
-  const message = JSON.parse(event.data);
-  if (message.id && pending.has(message.id)) {
-    const entry = pending.get(message.id);
-    pending.delete(message.id);
-    if (message.error) entry.reject(new Error(JSON.stringify(message.error)));
-    else entry.resolve(message.result);
-  }
-  if (message.method === 'Runtime.exceptionThrown') {
-    pageErrors.push(message.params.exceptionDetails.text || 'exception');
-  }
-  if (message.method === 'Runtime.consoleAPICalled' && message.params.type === 'error') {
-    pageErrors.push(message.params.args.map((arg) => arg.value || arg.description || '').join(' '));
-  }
-};
-
-function send(method, params = {}) {
-  return new Promise((resolvePromise, rejectPromise) => {
-    const id = messageId;
-    messageId += 1;
-    pending.set(id, { resolve: resolvePromise, reject: rejectPromise });
-    socket.send(JSON.stringify({ id, method, params }));
-  });
-}
-
-async function evaluate(expression) {
-  const result = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
-  if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails.exception));
-  return result.result.value;
-}
-
-async function evaluateJson(expression) {
-  return JSON.parse(await evaluate('JSON.stringify(' + expression + ')'));
-}
-
 const snapshot = () => evaluateJson('window.FSApp.getSnapshot()');
 
+function sceneWheelbase(scene) {
+  if (!scene || !Array.isArray(scene.wheelPos) || scene.wheelPos.length < 4) return NaN;
+  const frontX = (scene.wheelPos[0][0] + scene.wheelPos[1][0]) / 2;
+  const rearX = (scene.wheelPos[2][0] + scene.wheelPos[3][0]) / 2;
+  return Math.abs(rearX - frontX);
+}
+
+async function waitForGeometryCommit(target, before, timeoutMs = 20000) {
+  const deadline = Date.now() + timeoutMs;
+  let latest = null;
+  while (Date.now() < deadline) {
+    latest = await snapshot();
+    const geometry = latest.geometry || {};
+    if (geometry.pending === false && geometry.commitCount > before.geometry.commitCount &&
+        Math.abs(latest.state.wheelbase - target) < 1e-9) return latest;
+    await sleep(50);
+  }
+  throw new Error('geometry rebuild did not commit ' + target.toFixed(2) + ' m: ' + JSON.stringify(latest && latest.geometry));
+}
+
+async function checkGeometryChange(target) {
+  const label = target.toFixed(2) + ' m';
+  const before = await snapshot();
+  const requested = await evaluateJson('window.FSApp.setState({ wheelbase: ' + target + ' })');
+  check(label + ' geometry change enters pending state',
+    requested.geometry.pending === true && requested.geometry.commitCount === before.geometry.commitCount,
+    JSON.stringify(requested.geometry));
+  const rebuilt = await waitForGeometryCommit(target, before);
+  const scene = await evaluateJson('window.FSApp.getSceneProbe()');
+  const geometry = rebuilt.geometry;
+  check(label + ' geometry commit clears pending',
+    geometry.pending === false && rebuilt.pendingRebuild === false && geometry.mismatch === false,
+    JSON.stringify(geometry));
+  check(label + ' scene and physics use one geometry revision',
+    Number.isFinite(geometry.sceneRevision) && geometry.sceneRevision === geometry.physicsRevision &&
+      scene.geometryRevision === geometry.sceneRevision && scene.physicsRevision === geometry.physicsRevision &&
+      scene.geometryMismatch === false,
+    'scene=' + geometry.sceneRevision + ' physics=' + geometry.physicsRevision);
+  check(label + ' geometry commit count increments once',
+    geometry.commitCount === before.geometry.commitCount + 1,
+    before.geometry.commitCount + ' -> ' + geometry.commitCount);
+  const actualWheelbase = sceneWheelbase(scene);
+  check(label + ' rendered wheelbase matches the requested geometry',
+    Math.abs(actualWheelbase - target) <= 1e-4,
+    actualWheelbase.toFixed(6) + ' m');
+  check(label + ' geometry rebuild keeps the car grounded', rebuilt.contactOk);
+}
+
 try {
+  const chromePath = browserGate('dynamic');
+  client = await launchBrowser({ chromePath, pagePath: join(root, 'index.html') });
+  ({ send, evaluate, evaluateJson, pageErrors } = client);
   await send('Runtime.enable');
   await send('Page.enable');
   await send('Page.bringToFront');
@@ -238,12 +191,51 @@ try {
   check('parameter changes keep the dynamic state finite', Boolean(damped.sim) && damped.loads.every((value) => Number.isFinite(value)));
   await evaluate('window.FSApp.setState({ dampingF: 0.35 })');
 
-  await evaluate('window.FSApp.setState({ wheelbase: 3.70 })');
-  await sleep(1800);
-  const rebuilt = await snapshot();
-  check('geometry rebuild keeps the car grounded', Math.abs(rebuilt.state.wheelbase - 3.7) < 1e-9 && rebuilt.contactOk, rebuilt.state.wheelbase.toFixed(2) + ' m');
-  await evaluate('window.FSApp.setState({ wheelbase: 3.55 })');
-  await sleep(1200);
+  // 0.3.0 P1-01/P2-04: exercise the real page command path while paused.
+  await evaluate('window.FSApp.setSimRunning(false)');
+  const cgBundle = await evaluateJson(`(function () {
+    const before = window.FSApp.getSnapshot();
+    const after = window.FSApp.setState({ cgHeight: 0.50 });
+    return { before, after, scene: window.FSApp.getSceneProbe() };
+  })()`);
+  const cgShift = Math.hypot(
+    cgBundle.after.bodyPos.x - cgBundle.before.bodyPos.x,
+    cgBundle.after.bodyPos.y - cgBundle.before.bodyPos.y,
+    cgBundle.after.bodyPos.z - cgBundle.before.bodyPos.z
+  );
+  check('cgHeight retarget preserves the reference point in the page', cgShift < 1e-9,
+    (cgShift * 1000).toExponential(2) + ' mm');
+  check('cgHeight retarget keeps loads bounded and solver healthy',
+    cgBundle.after.solverOk && !cgBundle.after.sim.solverFailed && cgBundle.scene.solverState === 'ok' &&
+      Math.max(...cgBundle.after.loads) < 2 * Math.max(...cgBundle.after.levelLoads),
+    Math.max(...cgBundle.after.loads).toFixed(3) + ' N · ' + cgBundle.scene.solverState);
+  await evaluate('window.FSApp.resetDynamics({ settle: 0 })');
+  const cgReset = await snapshot();
+  const cgResetError = Math.max(...cgReset.loads.map((value, index) => Math.abs(value - cgReset.levelLoads[index])));
+  check('reset after cgHeight change restores equilibrium', cgReset.solverOk && cgResetError < 1 &&
+    Math.abs(cgReset.bodyPos.y) < 1e-6, cgResetError.toExponential(2) + ' N');
+
+  await evaluate('window.FSApp.setState({ steer: 18, cgHeight: 0.30 })');
+  await evaluate('window.FSApp.resetDynamics({ settle: 0 })');
+  const steeredReset = await snapshot();
+  const steeredScene = await evaluateJson('window.FSApp.getSceneProbe()');
+  check('steered page reset starts at dynamic equilibrium',
+    steeredReset.forceError < 0.01 && steeredReset.momentXError < 0.01 && steeredReset.momentZError < 0.01 &&
+      Math.abs(steeredScene.rackShiftMm - 32.132963) < 0.001,
+    steeredReset.forceError.toExponential(2) + ' / ' + steeredReset.momentXError.toExponential(2) +
+      ' / ' + steeredReset.momentZError.toExponential(2) + ' N/Nm · rack ' + steeredScene.rackShiftMm.toFixed(6) + ' mm');
+
+  const beforeDefaults = await snapshot();
+  await evaluate("document.getElementById('btnResetAll').click()");
+  const restored = await waitForGeometryCommit(3.55, beforeDefaults);
+  const restoredError = Math.max(...restored.loads.map((value, index) => Math.abs(value - restored.levelLoads[index])));
+  check('restore defaults clears degradation and returns to default equilibrium',
+    Math.abs(restored.state.cgHeight - 0.30) < 1e-12 && restored.solverOk && !restored.sim.solverFailed &&
+      restoredError < 1 && Math.abs(restored.bodyPos.y) < 1e-4,
+    restoredError.toExponential(2) + ' N · solver=' + restored.solverOk);
+
+  await checkGeometryChange(3.70);
+  await checkGeometryChange(3.55);
 
   await evaluate('window.FSApp.openModel()');
   await sleep(1400);
@@ -254,17 +246,15 @@ try {
   check('no page errors', pageErrors.length === 0, pageErrors.join(' | '));
 } catch (error) {
   failures += 1;
+  if (error instanceof BrowserEnvError) envFailure = true;
   console.error('FAIL dynamic browser test:', error && error.message ? error.message : error);
 } finally {
-  try { socket.close(); } catch (_) { /* noop */ }
-  chrome.kill('SIGKILL');
-  await sleep(200);
-  try { rmSync(profile, { recursive: true, force: true }); } catch (_) { /* noop */ }
+  if (client) await client.close();
 }
 
 console.log('');
 if (failures) {
   console.log('FAIL  ' + failures + ' dynamic browser check(s) failed');
-  process.exit(1);
+  process.exit(envFailure ? 2 : 1);
 }
 console.log('PASS  dynamic browser checks');

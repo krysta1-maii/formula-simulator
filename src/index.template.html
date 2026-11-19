@@ -42,14 +42,15 @@
     </div>
 
     <div class="topbar-actions">
+      <span class="solver-badge" id="solverBadge" role="status" aria-live="polite" hidden>求解降级</span>
       <button type="button" class="icon-btn" id="btnHelp" title="模型说明与验收 (?)" aria-label="打开模型说明">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.5 2.5 0 1 1 3.5 2.3c-.8.4-1.1.9-1.1 1.8"/><circle cx="12" cy="17.1" r=".9" fill="currentColor" stroke="none"/></svg>
       </button>
-      <button type="button" class="text-btn is-active" id="btnToggleControls" aria-pressed="true">
+      <button type="button" class="text-btn is-active" id="btnToggleControls" aria-controls="panelControls" aria-expanded="true">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg>
         参数
       </button>
-      <button type="button" class="text-btn is-active" id="btnToggleTelemetry" aria-pressed="true">
+      <button type="button" class="text-btn is-active" id="btnToggleTelemetry" aria-controls="panelTelemetry" aria-expanded="true">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5M4 19h16"/><path d="M7.5 15.5l3.2-4 2.6 2.2 4.2-6"/></svg>
         遥测
       </button>
@@ -74,11 +75,11 @@
           <span class="section-hint">WORLD GRAVITY ↓</span>
         </div>
         <div class="preset-row" role="group" aria-label="路面预设">
-          <button type="button" class="chip is-active" data-road-preset="level">水平</button>
-          <button type="button" class="chip" data-road-preset="slope">纵坡 8°</button>
-          <button type="button" class="chip" data-road-preset="bank">横坡 7°</button>
-          <button type="button" class="chip" data-road-preset="mixed">复合坡</button>
-          <button type="button" class="chip" data-road-preset="lowGrip">低附着滑移</button>
+          <button type="button" class="chip is-active" data-road-preset="level" aria-pressed="true">水平</button>
+          <button type="button" class="chip" data-road-preset="slope" aria-pressed="false">纵坡 8°</button>
+          <button type="button" class="chip" data-road-preset="bank" aria-pressed="false">横坡 7°</button>
+          <button type="button" class="chip" data-road-preset="mixed" aria-pressed="false">复合坡</button>
+          <button type="button" class="chip" data-road-preset="lowGrip" aria-pressed="false">低附着滑移</button>
         </div>
 
         <div class="control">
@@ -158,7 +159,7 @@
         </summary>
         <div class="details-body">
           <label class="switch-row">
-            <span><b>轮载矢量</b><small>箭头长度正比于四轮法向力</small></span>
+            <span><b>轮载矢量</b><small>箭头长度与法向力成正比（平均轮载 0.30 m，4.5 倍封顶）</small></span>
             <span class="switch"><input type="checkbox" id="showLoads" data-param="showLoads" checked><i></i></span>
           </label>
           <label class="switch-row">
@@ -256,7 +257,7 @@
           </div>
           <div class="inline-note">
             <span class="note-dot"></span>
-            轮心率是设计位置的轮心刚度；运动比由四角机构实时反解得到，页面据此换算弹簧刚度 k<sub>s</sub> = k<sub>w</sub>/i² 与阻尼器轴端阻尼。阻尼滑块给出轮心阻尼比 ζ，0.35 对应欠阻尼衰减。
+            前推杆、后拉杆驱动车内摇臂与纵向卧式弹簧—减振器。轮心率是设计位置的轮心刚度；运动比由四角机构实时反解得到，页面据此换算弹簧刚度 k<sub>s</sub> = k<sub>w</sub>/i² 与阻尼器轴端阻尼。阻尼滑块给出轮心阻尼比 ζ，0.35 对应欠阻尼衰减。
           </div>
           <div class="control">
             <div class="control-head">
@@ -292,7 +293,7 @@
         </div>
         <div class="inline-note">
           <span class="note-dot"></span>
-          物理步长固定为 2 ms，渲染帧率只决定每帧执行多少子步。脉冲在 0.12 s 内作用，用于观察弹簧—阻尼器与防倾杆的瞬态响应。
+          物理步长固定为 2 ms；帧率决定每帧子步数，单帧接受上限 0.5 s、最多 128 子步，积压上限 0.5 s 且跨帧排空，超出计入 droppedTime，低于 4 Hz 为慢动作。脉冲在 0.12 s 内作用，用于观察弹簧—阻尼器与防倾杆的瞬态响应。
         </div>
       </section>
 
@@ -313,8 +314,8 @@
       </div>
       <div class="panel-head-right">
         <div class="unit-toggle" role="group" aria-label="载荷单位">
-          <button type="button" class="is-active" data-units="N">N</button>
-          <button type="button" data-units="kg">kg</button>
+          <button type="button" class="is-active" data-units="N" aria-pressed="true">N</button>
+          <button type="button" data-units="kg" aria-pressed="false">kg</button>
         </div>
         <button type="button" class="panel-close" data-close-panel="panelTelemetry" aria-label="收起遥测面板">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
@@ -382,7 +383,7 @@
         <div><span>坡面附着需求</span><b id="frictionDemand">—</b><small>tanβ</small></div>
       </div>
 
-      <div class="checks" id="checkList" aria-label="静态校核"></div>
+      <div class="checks" id="checkList" aria-label="模型校核"></div>
 
       <details class="telemetry-details">
         <summary><span>详细状态</span><span class="summary-chevron" aria-hidden="true"></span></summary>
@@ -391,6 +392,7 @@
           <div><dt>质心纵向 x<sub>CG</sub></dt><dd id="cgLong">—</dd></div>
           <div><dt>质心竖直投影偏移</dt><dd id="cgProjection">—</dd></div>
           <div><dt>仿真状态</dt><dd id="simDetail">—</dd></div>
+          <div><dt>角点求解残差</dt><dd class="mono" id="cornerSolveStatus">—</dd></div>
           <div><dt>车身位置 x / y / z</dt><dd class="mono" id="bodyPosition">—</dd></div>
           <div><dt>车体升沉 h / 俯仰 / 侧倾</dt><dd id="bodyAttitude">—</dd></div>
           <div><dt>车体角速度</dt><dd class="mono" id="bodyRates">—</dd></div>
@@ -422,12 +424,12 @@
 
   <div class="bottom-bar" role="toolbar" aria-label="视角与显示工具">
     <div class="tool-group camera-group" role="group" aria-label="相机预设">
-      <button type="button" class="tool-btn is-active" data-camera="threeQuarter">三分之四</button>
-      <button type="button" class="tool-btn" data-camera="side">侧视</button>
-      <button type="button" class="tool-btn" data-camera="front">前视</button>
-      <button type="button" class="tool-btn" data-camera="rear">后视</button>
-      <button type="button" class="tool-btn" data-camera="top">顶视</button>
-      <button type="button" class="tool-btn" id="btnInspect" title="机构剖视 (M)"><span class="tool-glyph">⌬</span>机构</button>
+      <button type="button" class="tool-btn is-active" data-camera="threeQuarter" aria-pressed="true">三分之四</button>
+      <button type="button" class="tool-btn" data-camera="side" aria-pressed="false">侧视</button>
+      <button type="button" class="tool-btn" data-camera="front" aria-pressed="false">前视</button>
+      <button type="button" class="tool-btn" data-camera="rear" aria-pressed="false">后视</button>
+      <button type="button" class="tool-btn" data-camera="top" aria-pressed="false">顶视</button>
+      <button type="button" class="tool-btn" id="btnInspect" title="机构剖视 (M)" aria-pressed="false"><span class="tool-glyph">⌬</span>机构</button>
     </div>
     <span class="tool-sep"></span>
     <div class="tool-group">
@@ -443,7 +445,7 @@
   </div>
 
   <div class="viewport-hint">
-    <span>拖动旋转</span><span>滚轮缩放至光标</span><span>右键平移</span><span>双击重置 · O 正交 · H 水平 · 空格 暂停</span>
+    <span>拖动旋转</span><span>滚轮缩放至光标</span><span>右键平移</span><span>双击重置 · O 正交 · H 水平 · 空格暂停（焦点不在控件上时）</span>
   </div>
 
   <div class="loading" id="loading" aria-live="polite">
@@ -491,12 +493,12 @@
             <p>本页面是 <b>DESIGN.md</b> 阶段二的交互演示：在阶段一的外观、倾斜路面和静态四角载荷之上，加入车体六自由度、四角机构反解的弹簧—阻尼器和前后防倾杆动态。车体不再直接贴合路面，而是在悬挂力、重力和接触摩擦作用下积分升沉、俯仰、侧倾、纵移、横移与横摆。</p>
             <ul class="check-list-static">
               <li>六自由度刚体：三轴平动、三轴转动，四元数姿态，固定步长 2 ms 半隐式积分</li>
-              <li>四角双横臂、推杆、摇臂与弹簧—阻尼器按硬点实时反解，线圈长度直接产生弹簧力与阻尼力</li>
+              <li>四角双横臂、前推杆/后拉杆、车内摇臂与卧式弹簧—阻尼器按硬点实时反解，线圈长度直接产生弹簧力与阻尼力</li>
               <li>前后横向扭杆式防倾杆按左右行程差产生等大反向作用力</li>
               <li>四轮接地点保持在倾斜平面内，切向库仑摩擦承担坡面驻车与滑移</li>
-              <li>车身、车轮、摇臂、推杆、弹簧—阻尼器与载荷箭头共享同一动态姿态</li>
+              <li>车身、车轮、车内摇臂、推/拉杆、卧式弹簧—阻尼器与载荷箭头共享同一动态姿态；内部件通过车体包络检查</li>
             </ul>
-            <p class="muted-note">阶段三、四（轮胎侧偏/纵滑、后轴驱动、空气动力学）尚未接入。当前悬架仍为等效轮心力学加端点绑定的视觉运动学；横臂不参与载荷计算，轮胎切向力只用于驻车/滑移，不产生侧偏力。转向只驱动前轮和拉杆，不产生侧向力。</p>
+            <p class="muted-note">阶段三、四（轮胎侧偏/纵滑、后轴驱动、空气动力学）尚未接入。当前悬架仍为等效轮心力学与共享硬点运动学；横臂不参与载荷计算，轮胎切向力只用于驻车/滑移，不产生侧偏力。转向只驱动前轮和拉杆，不产生侧向力。</p>
           </section>
 
           <section>
@@ -517,7 +519,7 @@
             <div class="acceptance-item"><span class="acc-num">A</span><div><b>六自由度车体</b><p>位置、速度、四元数姿态与角速度完整积分；水平路面收敛到设计姿态，倾斜路面收敛到与静力解一致的载荷。</p></div></div>
             <div class="acceptance-item"><span class="acc-num">B</span><div><b>四角弹簧—阻尼器</b><p>设计位置轮心刚度与阻尼比可调；运动比由机构反解并随行程变化；脉冲后按阻尼比衰减，不出现非预期持续振荡或发散。</p></div></div>
             <div class="acceptance-item"><span class="acc-num">C</span><div><b>防倾杆动态</b><p>左右同向行程不产生扭转；反向行程产生等大反向力；提高硬度抑制侧倾，并改变前后轴侧倾载荷转移。</p></div></div>
-            <div class="acceptance-item"><span class="acc-num">D</span><div><b>机构与视觉同步</b><p>车身六自由度带动车轮平面位置与横摆；杆件端点跟随车体与立柱；弹簧、摇臂、推杆与载荷箭头使用同一次求解结果。</p></div></div>
+            <div class="acceptance-item"><span class="acc-num">D</span><div><b>机构与视觉同步</b><p>车身六自由度带动车轮平面位置与横摆；杆件端点跟随车体与立柱；弹簧、摇臂、推/拉杆与载荷箭头使用同一次求解结果；摇臂、弹簧和防倾杆置于车体内。</p></div></div>
             <div class="acceptance-item"><span class="acc-num">E</span><div><b>数值与交互</b><p>固定步长 500 Hz，渲染帧率不改变结果；暂停、重置、三种脉冲可复现；低附着时六自由度滑移并给出警告。</p></div></div>
           </div>
         </section>
@@ -526,16 +528,18 @@
           <section>
             <h3><span>04</span>模型自检</h3>
             <div class="selftest-summary" id="selfTestSummary">未运行</div>
+            <p class="muted-note">动态自检在首次打开或参数 revision 变化后按需分片执行；参数不变时复用缓存，旧 revision 的运行结果会取消或丢弃。</p>
             <ul class="selftest-list" id="selfTestList"></ul>
           </section>
           <section>
             <h3><span>05</span>操作与约定</h3>
             <ul class="key-list">
               <li><span>拖动</span> 环绕观察（场景跟随指针），滚轮以光标为中心缩放，右键/中键或 Shift+拖动平移，双击重置</li>
+              <li><span>画布键盘</span> 聚焦画布后，方向键旋转，Shift+方向键平移，+ / − 或 PageUp / PageDown 缩放</li>
               <li><span>1 – 5</span> 切换三分之四、侧视、前视、后视、顶视；三视使用水平正交投影，顶视为正交俯视，<span>O</span> 切换投影，<span>R</span> 重置视角</li>
               <li><span>取景</span> 视线不滚转，相机不低于台面水平面；手动缩放范围 0.9 – 14 m 可视高度，窄屏按车宽自动退距</li>
               <li><span>X</span> 切换车身剖视，<span>M</span> 机构剖视（转向 → 传动 → 前/后防倾杆），<span>R</span> 返回总览</li>
-              <li><span>F</span> 轮载矢量，<span>G</span> 质心，<span>H</span> 水平路面，<span>空格</span> 暂停/继续仿真</li>
+              <li><span>F</span> 轮载矢量，<span>G</span> 质心，<span>H</span> 水平路面，<span>空格</span> 暂停/继续（焦点不在控件上时）</li>
               <li><span>动态</span> 参数面板底部可暂停、重置姿态，或施加垂向、侧倾、俯仰脉冲</li>
               <li><span>单位</span> 遥测面板可在 N 与 kg 等效之间切换；kg 值按 g = 9.80665 m/s² 换算</li>
               <li><span>保存</span> 参数会写入浏览器本地存储；“复制参数”输出当前状态的 JSON</li>
@@ -544,7 +548,7 @@
           </section>
         </div>
         <div class="modal-foot">
-          <span>Formula Simulator · 阶段二演示 v0.2.0 · <a href="DESIGN.md" target="_blank" rel="noopener">DESIGN.md</a></span>
+          <span>Formula Simulator · 阶段二演示 v0.4.1 · <a href="DESIGN.md" target="_blank" rel="noopener">DESIGN.md</a></span>
           <span>六自由度 / 弹簧阻尼器 / 扭杆防倾杆 / 固定步长</span>
         </div>
       </div>

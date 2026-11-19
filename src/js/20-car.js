@@ -6,6 +6,7 @@ const CAR = {
   dynamicGroup: null,
   bodyworkGroup: null,
   internalGroup: null,
+  skinMountGroup: null,
   shellMeshes: [],
   wheels: [],
   corners: [],
@@ -30,6 +31,20 @@ const CAR = {
   },
   decalCache: new Map(),
   shared: {},
+  assets: {
+    instanceMaterials: new Set(),
+    totals: {
+      instanceMaterialCreated: 0,
+      instanceMaterialDisposed: 0,
+      sceneMaterialsDisposed: 0,
+      sharedMaterialDisposed: 0,
+      cachedMaterialDisposed: 0,
+      geometryDisposed: 0,
+      textureDisposed: 0
+    },
+    lastBuild: null,
+    lastTeardown: null
+  },
   diag: {
     linkCount: 0,
     jointCount: 0,
@@ -54,8 +69,11 @@ const CAR = {
     differential: false,
     arbFront: false,
     arbRear: false,
-    mechanicalOk: false
+    mechanicalOk: false,
+    geometryRevision: 0,
+    geometryMismatch: false
   },
+  geometryRevision: 0,
   built: false,
   dims: null
 };
@@ -144,17 +162,17 @@ function initCarAssets() {
   MAT.rubber.side = THREE.DoubleSide;
   MAT.rubber.reflectivity = 0.0;
 
-  // Helical spring: unit length along Y, radius in XZ, shared by all corners.
+  // Compact horizontal coilover: 40 mm outer radius, unit length along Y.
   const springPoints = [];
   const coilTurns = 8;
   const coilSegments = 280;
   for (let i = 0; i <= coilSegments; i += 1) {
     const t = i / coilSegments;
     const angle = t * coilTurns * TAU;
-    springPoints.push(new THREE.Vector3(Math.cos(angle) * 0.055, t - 0.5, Math.sin(angle) * 0.055));
+    springPoints.push(new THREE.Vector3(Math.cos(angle) * 0.034, t - 0.5, Math.sin(angle) * 0.034));
   }
   const springCurve = new THREE.CatmullRomCurve3(springPoints);
-  const springGeo = new THREE.TubeGeometry(springCurve, 300, 0.0095, 5, false);
+  const springGeo = new THREE.TubeGeometry(springCurve, 300, 0.006, 5, false);
   springGeo.userData.shared = true;
   CAR.shared.spring = springGeo;
 
@@ -166,24 +184,146 @@ function markShared(mesh) {
   return mesh;
 }
 
-function createDefaultBodyMaterialSet() {
-  // Present so car.js can be loaded before scene materials are touched; not used.
-}
 
 /* ------------------------------ scene-graph helpers ------------------------------ */
 
-function disposeGroupChildren(group) {
-  if (!group) return;
+function instanceMaterial(material) {
+  if (!material) return material;
+  CAR.assets.instanceMaterials.add(material);
+  CAR.assets.totals.instanceMaterialCreated += 1;
+  if (CAR.assets.lastBuild) CAR.assets.lastBuild.instanceMaterialCreated += 1;
+  return material;
+}
+
+function beginCarBuild() {
+  CAR.assets.lastBuild = {
+    instanceMaterialCreated: 0,
+    instanceMaterialDisposed: 0,
+    geometryDisposed: 0,
+    textureDisposed: 0,
+    at: typeof performance !== 'undefined' ? performance.now() : Date.now()
+  };
+}
+
+function finishCarBuild(model) {
+  CAR.geometryRevision = model.geometryRevision;
+  CAR.diag.geometryRevision = model.geometryRevision;
+  CAR.diag.geometryMismatch = false;
+  if (CAR.assets.lastBuild) {
+    CAR.assets.lastBuild.at = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  }
+}
+
+function clearCarReferences() {
+  CAR.dynamicGroup = null;
+  CAR.bodyworkGroup = null;
+  CAR.internalGroup = null;
+  CAR.skinMountGroup = null;
+  CAR.shellMeshes = [];
+  CAR.wheels = [];
+  CAR.corners = [];
+  CAR.links = [];
+  CAR.joints = [];
+  CAR.driveshafts = [];
+  CAR.springs = [];
+  CAR.rockers = [];
+  CAR.arbs = [];
+  CAR.bodyHardpoints = [];
+  CAR.steeringWheel = null;
+  CAR.mechanics = {
+    steeringRack: false,
+    steeringColumn: false,
+    differential: false,
+    arbFront: false,
+    arbRear: false,
+    rackGroup: null,
+    steeringPoint: null,
+    columnPoint: null,
+    diffPoint: null,
+    arbPoints: {}
+  };
+  CAR.dims = null;
+  CAR.geometryRevision = 0;
+  CAR.diag.geometryRevision = 0;
+  CAR.built = false;
+}
+
+function disposeResourceOnce(resource) {
+  if (!resource) return false;
+  if (!resource.userData) resource.userData = {};
+  if (resource.userData.__disposed) return false;
+  resource.userData.__disposed = true;
+  if (typeof resource.dispose === 'function') resource.dispose();
+  return true;
+}
+
+function disposeMaterialMaps(material) {
+  if (!material) return 0;
+  let disposed = 0;
+  const keys = ['map', 'alphaMap', 'emissiveMap', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'envMap'];
+  for (const key of keys) {
+    const texture = material[key];
+    if (!texture || !texture.isTexture) continue;
+    if (texture.userData && texture.userData.shared) continue;
+    if (disposeResourceOnce(texture)) disposed += 1;
+  }
+  return disposed;
+}
+
+function disposeGroupChildren(group, options = {}) {
+  const materials = options.materials !== false;
+  const textures = options.textures !== false;
+  if (!group) {
+    return { geometryDisposed: 0, materialDisposed: 0, sceneMaterialsDisposed: 0, textureDisposed: 0, skipped: 0 };
+  }
   const geometries = new Set();
+  const materialSet = new Set();
   group.traverse((object) => {
-    if ((object.isMesh || object.isLine || object.isLineSegments) && object.geometry) {
-      geometries.add(object.geometry);
-    }
+    if (object.geometry) geometries.add(object.geometry);
+    const material = object.material;
+    if (Array.isArray(material)) material.forEach((item) => { if (item) materialSet.add(item); });
+    else if (material) materialSet.add(material);
   });
+  let geometryDisposed = 0;
+  let materialDisposed = 0;
+  let sceneMaterialsDisposed = 0;
+  let textureDisposed = 0;
+  let skipped = 0;
   geometries.forEach((geometry) => {
-    if (!geometry.userData || !geometry.userData.shared) geometry.dispose();
+    if (geometry.userData && geometry.userData.shared) { skipped += 1; return; }
+    if (disposeResourceOnce(geometry)) geometryDisposed += 1;
   });
+  if (materials) {
+    const sharedMaterials = new Set(typeof MAT !== 'undefined' ? Object.values(MAT) : []);
+    const cachedMaterials = new Set(CAR.decalCache.values());
+    materialSet.forEach((material) => {
+      if (!material) return;
+      if ((material.userData && material.userData.shared) || sharedMaterials.has(material) || cachedMaterials.has(material)) {
+        skipped += 1;
+        return;
+      }
+      if (textures) textureDisposed += disposeMaterialMaps(material);
+      const registered = CAR.assets.instanceMaterials.has(material);
+      if (!disposeResourceOnce(material)) return;
+      if (registered) {
+        CAR.assets.instanceMaterials.delete(material);
+        materialDisposed += 1;
+      } else {
+        sceneMaterialsDisposed += 1;
+      }
+    });
+  }
   while (group.children.length) group.remove(group.children[0]);
+  CAR.assets.totals.geometryDisposed += geometryDisposed;
+  CAR.assets.totals.instanceMaterialDisposed += materialDisposed;
+  CAR.assets.totals.sceneMaterialsDisposed += sceneMaterialsDisposed;
+  CAR.assets.totals.textureDisposed += textureDisposed;
+  if (options.updateLastBuild !== false && CAR.assets.lastBuild) {
+    CAR.assets.lastBuild.geometryDisposed += geometryDisposed;
+    CAR.assets.lastBuild.textureDisposed += textureDisposed;
+    CAR.assets.lastBuild.instanceMaterialDisposed += materialDisposed;
+  }
+  return { geometryDisposed, materialDisposed, sceneMaterialsDisposed, textureDisposed, skipped };
 }
 
 function registerShellGroup(group) {
@@ -198,7 +338,11 @@ function registerShellGroup(group) {
 function applyXray() {
   const enabled = Boolean(state.xray);
   if (CAR.internalGroup) CAR.internalGroup.visible = enabled;
-  for (const spring of CAR.springs) spring.assembly.visible = enabled;
+  for (const spring of CAR.springs) {
+    spring.assembly.visible = enabled;
+    spring.jointDamper.visible = enabled;
+    spring.jointMount.visible = enabled;
+  }
   for (const mesh of CAR.shellMeshes) {
     if (mesh.userData.isDecal) {
       mesh.visible = !enabled;
@@ -626,42 +770,17 @@ function buildBodywork(model) {
     }
 
     // Central skid block.
-    const skid = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.014, 0.20), new THREE.MeshStandardMaterial({ color: 0x6d5a43, roughness: 0.8, metalness: 0.1 }));
+    const skid = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.014, 0.20), instanceMaterial(new THREE.MeshStandardMaterial({ color: 0x6d5a43, roughness: 0.8, metalness: 0.1 })));
     skid.position.set(0.18, 0.044, 0);
     addBodyMesh(skid);
   }
 
   /* ----------------------------- monocoque ----------------------------- */
-  const monoTopSamples = [
-    { x: xF + 0.83, y: 0.278 },
-    { x: xF + 0.63, y: 0.315 },
-    { x: xF + 0.38, y: 0.365 },
-    { x: xF + 0.13, y: 0.425 },
-    { x: xF - 0.15, y: 0.492 },
-    { x: xF - 0.45, y: 0.555 },
-    { x: xF - 0.80, y: 0.600 },
-    { x: xF - 1.15, y: 0.625 },
-    { x: xF - 1.45, y: 0.645 },
-    { x: xF - 1.75, y: 0.650 },
-    { x: xF - 2.10, y: 0.620 }
-  ];
-  const monoSections = [
-    { x: xF + 0.83, w: 0.075, y0: 0.190, y1: 0.278, e: 0.82 },
-    { x: xF + 0.62, w: 0.11, y0: 0.165, y1: 0.315, e: 0.8 },
-    { x: xF + 0.38, w: 0.17, y0: 0.140, y1: 0.365, e: 0.76 },
-    { x: xF + 0.13, w: 0.245, y0: 0.115, y1: 0.425, e: 0.73 },
-    { x: xF - 0.15, w: 0.32, y0: 0.096, y1: 0.492, e: 0.7 },
-    { x: xF - 0.45, w: 0.40, y0: 0.082, y1: 0.555, e: 0.68 },
-    { x: xF - 0.80, w: 0.47, y0: 0.074, y1: 0.600, e: 0.66 },
-    { x: xF - 1.15, w: 0.53, y0: 0.068, y1: 0.625, e: 0.64 },
-    { x: xF - 1.45, w: 0.56, y0: 0.064, y1: 0.645, e: 0.64 },
-    { x: xF - 1.75, w: 0.54, y0: 0.063, y1: 0.650, e: 0.66 },
-    { x: xF - 2.10, w: 0.45, y0: 0.070, y1: 0.620, e: 0.7 },
-    { x: xF - 2.45, w: 0.34, y0: 0.083, y1: 0.545, e: 0.74 },
-    { x: xF - 2.80, w: 0.22, y0: 0.110, y1: 0.430, e: 0.8 },
-    { x: xF - 3.08, w: 0.12, y0: 0.150, y1: 0.320, e: 0.88 }
-  ];
+  const bodyProfiles = buildBodyworkProfiles(dims);
+  const monoSections = bodyProfiles.monocoque;
+  const monoTopSamples = monoSections.slice(0, 11).map((section) => ({ x: section.x, y: section.y1 }));
   const monocoque = makeLoftMesh(monoSections, MAT.paint, { segments: 36, exponent: 0.7 });
+  monocoque.name = 'envelope-monocoque';
   addBodyMesh(monocoque);
 
   // Accent stripe running the length of the nose and through the cockpit.
@@ -682,7 +801,7 @@ function buildBodywork(model) {
   {
     const openingShape = roundedRectShape(0.82, 0.40, 0.18);
     const openingGeo = new THREE.ShapeGeometry(openingShape, 24);
-    const opening = new THREE.Mesh(openingGeo, new THREE.MeshStandardMaterial({ color: 0x06080a, roughness: 0.9, metalness: 0.05 }));
+    const opening = new THREE.Mesh(openingGeo, instanceMaterial(new THREE.MeshStandardMaterial({ color: 0x06080a, roughness: 0.9, metalness: 0.05 })));
     opening.rotation.x = -Math.PI / 2;
     opening.position.set(cockpitCenterX, cockpitY, 0);
     addBodyMesh(opening, { cast: false });
@@ -744,7 +863,7 @@ function buildBodywork(model) {
     steering.add(rimWheel);
     const wheelPlate = new THREE.Mesh(new THREE.BoxGeometry(0.024, 0.10, 0.15), MAT.darkMetal);
     steering.add(wheelPlate);
-    const screen = new THREE.Mesh(new THREE.BoxGeometry(0.004, 0.032, 0.072), new THREE.MeshBasicMaterial({ color: 0x6cffd4, toneMapped: false }));
+    const screen = new THREE.Mesh(new THREE.BoxGeometry(0.004, 0.032, 0.072), instanceMaterial(new THREE.MeshBasicMaterial({ color: 0x6cffd4, toneMapped: false })));
     screen.position.set(-0.018, 0.03, 0);
     steering.add(screen);
     const column = new THREE.Mesh(new THREE.CylinderGeometry(0.017, 0.017, 0.42, 10), MAT.carbonMatte);
@@ -809,17 +928,10 @@ function buildBodywork(model) {
 
   /* ----------------------------- engine cover + airbox + fin ----------------------------- */
   {
-    const coverSections = [
-      { x: xF - 1.60, w: 0.245, y0: 0.58, y1: 0.700, e: 0.8 },
-      { x: xF - 1.80, w: 0.27, y0: 0.55, y1: 0.755, e: 0.75 },
-      { x: xF - 2.02, w: 0.27, y0: 0.50, y1: 0.815, e: 0.72 },
-      { x: xF - 2.30, w: 0.24, y0: 0.43, y1: 0.800, e: 0.7 },
-      { x: xF - 2.60, w: 0.20, y0: 0.36, y1: 0.735, e: 0.7 },
-      { x: xF - 2.95, w: 0.14, y0: 0.29, y1: 0.620, e: 0.74 },
-      { x: xF - 3.25, w: 0.085, y0: 0.24, y1: 0.470, e: 0.82 },
-      { x: xF - 3.48, w: 0.045, y0: 0.22, y1: 0.335, e: 0.9 }
-    ];
-    addBodyMesh(makeLoftMesh(coverSections, MAT.paintDeep, { segments: 28, exponent: 0.72 }));
+    const coverSections = bodyProfiles.engineCover;
+    const engineCover = makeLoftMesh(coverSections, MAT.paintDeep, { segments: 28, exponent: 0.72 });
+    engineCover.name = 'envelope-engine-cover';
+    addBodyMesh(engineCover);
 
     // Shark fin livery element.
     const finShape = new THREE.Shape();
@@ -840,7 +952,7 @@ function buildBodywork(model) {
     airbox.rotation.y = Math.PI / 2;
     airbox.position.set(xF - 2.28, 0.795, 0);
     addBodyMesh(airbox);
-    const intake = new THREE.Mesh(new THREE.CircleGeometry(0.135, 32), new THREE.MeshStandardMaterial({ color: 0x030405, roughness: 1, metalness: 0 }));
+    const intake = new THREE.Mesh(new THREE.CircleGeometry(0.135, 32), instanceMaterial(new THREE.MeshStandardMaterial({ color: 0x030405, roughness: 1, metalness: 0 })));
     intake.scale.set(1.0, 1.35, 1);
     intake.rotation.y = Math.PI / 2;
     intake.position.set(xF - 2.105, 0.805, 0);
@@ -906,7 +1018,7 @@ function buildBodywork(model) {
       addBodyMesh(makeLoftMesh(sections, MAT.paintDeep, { segments: 30, exponent: 0.7 }));
 
       // Sidepod intake.
-      const intake = new THREE.Mesh(new THREE.CircleGeometry(0.155, 32), new THREE.MeshStandardMaterial({ color: 0x030506, roughness: 0.95, metalness: 0.05 }));
+      const intake = new THREE.Mesh(new THREE.CircleGeometry(0.155, 32), instanceMaterial(new THREE.MeshStandardMaterial({ color: 0x030506, roughness: 0.95, metalness: 0.05 })));
       intake.scale.set(1.0, 1.28, 1);
       intake.rotation.y = Math.PI / 2;
       intake.position.set(xF - 1.44, 0.31, sign * 0.415);
@@ -1077,13 +1189,19 @@ function buildBodywork(model) {
 
   /* ----------------------------- rear structures ----------------------------- */
   {
-    const gearbox = makeRoundedBox(0.44, 0.29, 0.34, 0.06, MAT.darkMetal);
-    gearbox.position.set(xR + 0.24, 0.29, 0);
+    // Keep the default silhouette unchanged. Other wheelbases need a longer
+    // bellhousing/suspension carrier because the rear axle moves relative to
+    // the engine-cover loft; its front extension encloses the same inboard unit.
+    const rearPackageExtension = Math.abs(dims.L - 3.55) * 1.20;
+    const gearbox = makeRoundedBox(0.44 + rearPackageExtension, 0.29, 0.34, 0.06, MAT.darkMetal);
+    gearbox.name = 'envelope-gearbox';
+    gearbox.position.set(xR + 0.24 + rearPackageExtension * 0.5, 0.29, 0);
     addBodyMesh(gearbox);
 
     // Rear suspension carrier: the wishbones and pullrods attach to this
     // carbon/metal structure rather than to thin bodywork.
     const rearCarrier = makeRoundedBox(0.58, 0.36, 0.30, 0.055, MAT.darkMetal);
+    rearCarrier.name = 'envelope-rear-carrier';
     rearCarrier.position.set(xR - 0.15, 0.31, 0);
     addBodyMesh(rearCarrier);
     for (const sign of [-1, 1]) {
@@ -1105,7 +1223,7 @@ function buildBodywork(model) {
     exhaust.rotation.z = Math.PI / 2;
     exhaust.position.set(xR - 0.46, 0.49, 0);
     addBodyMesh(exhaust);
-    const exhaustInner = new THREE.Mesh(new THREE.CircleGeometry(0.034, 16), new THREE.MeshBasicMaterial({ color: 0x050505, side: THREE.DoubleSide }));
+    const exhaustInner = new THREE.Mesh(new THREE.CircleGeometry(0.034, 16), instanceMaterial(new THREE.MeshBasicMaterial({ color: 0x050505, side: THREE.DoubleSide })));
     exhaustInner.rotation.y = Math.PI / 2;
     exhaustInner.position.set(xR - 0.525, 0.49, 0);
     addBodyMesh(exhaustInner, { cast: false });

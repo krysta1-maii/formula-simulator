@@ -10,11 +10,8 @@ const _vecE = new THREE.Vector3();
 const _dir = new THREE.Vector3();
 const _mid = new THREE.Vector3();
 const _qSteer = new THREE.Quaternion();
-const _qPitch = new THREE.Quaternion();
-const _qRoll = new THREE.Quaternion();
 const _qYaw = new THREE.Quaternion();
 const _axisY = new THREE.Vector3(0, 1, 0);
-const _axisX = new THREE.Vector3(1, 0, 0);
 const _axisZ = new THREE.Vector3(0, 0, 1);
 
 function initCarSceneGroups() {
@@ -25,6 +22,28 @@ function initCarSceneGroups() {
     S.carRoot.add(CAR.dynamicGroup);
   }
   if (!S.bodyPivot) throw new Error('bodyPivot not created by initScene');
+}
+
+/** A torus whose hole faces along local Z, used for every visible joint eye. */
+function addEyeRing(parent, position, radius, tube = 0.005, material = MAT.titanium) {
+  const eye = new THREE.Mesh(new THREE.TorusGeometry(radius, tube, 6, 18), material);
+  eye.position.copy(position);
+  eye.castShadow = true;
+  parent.add(eye);
+  return eye;
+}
+
+/** A cylindrical boss between two Z stations at fixed X/Y (wheel carrier). */
+function addBossAlongZ(parent, x, y, zFrom, zTo, radius, material = MAT.titanium) {
+  const length = Math.abs(zTo - zFrom);
+  if (!(length > 1e-4)) return null;
+  const boss = new THREE.Mesh(CAR.shared.cylinder, material);
+  boss.scale.set(radius, length, radius);
+  boss.quaternion.setFromUnitVectors(_axisY, _axisZ);
+  boss.position.set(x, y, (zFrom + zTo) * 0.5);
+  boss.castShadow = true;
+  parent.add(boss);
+  return boss;
 }
 
 
@@ -145,17 +164,36 @@ function buildWheelAssembly(corner, model) {
   discHat.position.z = discZ;
   addWheelMesh(discHat);
 
-  // Non-rotating upright and caliper.
+  // Non-rotating upright, built from the wheel-local joints that the links and
+  // the push/pull rod actually use. Every boss reaches the real ball-joint
+  // plane so the visible arms are attached instead of floating near the wheel.
   const upright = new THREE.Group();
   root.add(upright);
-  const plate = makeRoundedBox(0.095, 0.40, 0.052, 0.025, MAT.darkMetal);
-  plate.position.set(-0.005, 0, -zSign * width * 0.10);
+  const joints = [
+    { point: corner.wheelLocal.lower, boss: 0.030, eye: 0.020 },
+    { point: corner.wheelLocal.upper, boss: 0.030, eye: 0.020 },
+    { point: corner.wheelLocal.push, boss: 0.026, eye: 0.016, rod: true },
+    { point: corner.wheelLocal.track, boss: 0.024, eye: 0.014, track: true }
+  ];
+  const plateZ = -zSign * width * 0.10;
+  const plateDepth = 0.052;
+  const plateHalfHeight = Math.min(0.214, Math.max(...joints.map((joint) => Math.abs(joint.point.y))) + 0.012);
+  const plate = makeRoundedBox(0.095, plateHalfHeight * 2, plateDepth, 0.025, MAT.darkMetal);
+  plate.position.set(-0.005, 0, plateZ);
   upright.add(plate);
-  for (const y of [-0.215, 0.215]) {
-    const boss = new THREE.Mesh(new THREE.CylinderGeometry(0.034, 0.034, 0.06, 14), MAT.titanium);
-    boss.rotation.x = Math.PI / 2;
-    boss.position.set(0, y, -zSign * width * 0.15);
-    upright.add(boss);
+  const plateOuterZ = plateZ - zSign * plateDepth * 0.5;
+  for (const joint of joints) {
+    const point = joint.point;
+    if (joint.track) {
+      // The steering arm runs behind the brake disc: a boss leaves the carrier
+      // below the disc radius, then an arm carries the ball joint outboard.
+      const armRootY = -0.180;
+      addBossAlongZ(upright, 0, armRootY, plateOuterZ, point.z, joint.boss, MAT.titanium);
+      addStaticRod(upright, V(0, armRootY, point.z), point.clone(), 0.014, MAT.titanium);
+    } else {
+      addBossAlongZ(upright, point.x, point.y, plateOuterZ, point.z, joint.boss, MAT.titanium);
+    }
+    addEyeRing(upright, point, joint.eye, 0.0055, MAT.titanium);
   }
   const caliper = makeRoundedBox(0.12, 0.17, 0.055, 0.025, MAT.brakeCaliper);
   caliper.position.set(0.09, -0.145, -zSign * width * 0.34);
@@ -169,24 +207,18 @@ function buildWheelAssembly(corner, model) {
   brakeDuct.position.set(-0.02, -0.07, -zSign * (width * 0.48));
   upright.add(brakeDuct);
 
-  // Steering arm / rear toe arm: the visible lever that the tie rod connects to.
-  const trackArm = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.030, 0.018), MAT.titanium);
-  trackArm.position.set(corner.wheelLocal.track.x * 0.5, corner.wheelLocal.track.y * 0.5, corner.wheelLocal.track.z);
-  trackArm.rotation.z = corner.front ? -0.08 : 0.08;
-  trackArm.castShadow = true;
-  upright.add(trackArm);
-
   if (!corner.front) {
+    const drive = corner.wheelLocal.drive;
     const driveFlange = new THREE.Mesh(CAR.shared.cylinder, MAT.steel);
     driveFlange.scale.set(0.058, 0.036, 0.058);
     driveFlange.rotation.x = Math.PI / 2;
-    driveFlange.position.set(0, 0, -zSign * 0.045);
+    driveFlange.position.set(drive.x, drive.y, drive.z);
     driveFlange.castShadow = true;
     spinner.add(driveFlange);
     const flangeRing = new THREE.Mesh(CAR.shared.torus, MAT.titanium);
     flangeRing.scale.setScalar(0.062);
     flangeRing.rotation.x = Math.PI / 2;
-    flangeRing.position.set(0, 0, -zSign * 0.06);
+    flangeRing.position.set(drive.x, drive.y, drive.z - zSign * 0.015);
     flangeRing.castShadow = true;
     spinner.add(flangeRing);
   }
@@ -204,56 +236,310 @@ function buildWheelAssembly(corner, model) {
   return root;
 }
 
-/* ------------------------------ internal rockers and ARBs ------------------------------ */
+/* ------------------------------ bodywork probes ------------------------------ */
 
-function makeRockerPlateShape(pushArm, damperArm) {
-  const shape = new THREE.Shape();
-  shape.moveTo(0, 0);
-  shape.lineTo(pushArm.x, pushArm.y);
-  shape.lineTo(pushArm.x * 0.78, pushArm.y + 0.035);
-  shape.lineTo(0.0, 0.035);
-  shape.lineTo(damperArm.x, damperArm.y);
-  shape.closePath();
-  return shape;
+/**
+ * Ray probes against the real bodywork meshes. The shell is a closed loft, so a
+ * normal front-face ray cannot be cast from inside. For internal brackets the
+ * probe temporarily makes the shell double-sided and casts outward from the
+ * hardpoint (first hit = nearest interior wall); for skin penetrations it casts
+ * inward from the outside (first hit = outer skin). This avoids duplicating the
+ * body envelope in this file and follows any later bodywork change.
+ */
+function bodyworkRayMaterials() {
+  const materials = new Set();
+  if (!CAR.bodyworkGroup) return materials;
+  CAR.bodyworkGroup.traverse((object) => {
+    if (!object.isMesh) return;
+    const material = object.material;
+    if (Array.isArray(material)) material.forEach((item) => { if (item) materials.add(item); });
+    else if (material) materials.add(material);
+  });
+  return materials;
+}
+
+function probeBodySurface(origin, direction, maxDistance, inside) {
+  if (!CAR.bodyworkGroup || !S.bodyPivot) return null;
+  const dir = direction.clone().normalize();
+  S.bodyPivot.updateMatrixWorld(true);
+  const originWorld = origin.clone().applyMatrix4(S.bodyPivot.matrixWorld);
+  const dirWorld = dir.clone().transformDirection(S.bodyPivot.matrixWorld);
+  const materials = bodyworkRayMaterials();
+  const savedSides = new Map();
+  materials.forEach((material) => {
+    savedSides.set(material, material.side);
+    material.side = THREE.DoubleSide;
+  });
+  let hit = null;
+  try {
+    const raycaster = new THREE.Raycaster(originWorld, dirWorld, 1e-4, maxDistance);
+    const hits = raycaster.intersectObject(CAR.bodyworkGroup, true);
+    for (const candidate of hits) {
+      if (!candidate.object.isMesh) continue;
+      if (candidate.object.userData.isDecal) continue;
+      hit = candidate;
+      break;
+    }
+  } finally {
+    savedSides.forEach((side, material) => { material.side = side; });
+  }
+  if (!hit) return null;
+  const point = S.bodyPivot.worldToLocal(hit.point.clone());
+  const normal = hit.face
+    ? hit.face.normal.clone()
+      .transformDirection(hit.object.matrixWorld)
+      .applyQuaternion(S.bodyPivot.quaternion.clone().invert())
+      .normalize()
+    : dir.clone().negate();
+  const outwardHint = inside ? dir : dir.clone().negate();
+  if (normal.dot(outwardHint) < 0) normal.negate();
+  return { point, normal, distance: hit.distance, object: hit.object };
+}
+
+function addSkinPad(parent, hit, width = 0.065, height = 0.065, material = MAT.carbonMatte) {
+  // A shallow disc parallel to the local surface; the flat face is placed just
+  // inside the skin so no vertex of the internal group pokes through.
+  const radius = Math.max(0.018, Math.min(width, height) * 0.5);
+  const pad = new THREE.Mesh(CAR.shared.cylinder, material);
+  pad.scale.set(radius, 0.010, radius);
+  pad.quaternion.setFromUnitVectors(_axisY, hit.normal);
+  pad.position.copy(hit.point).addScaledVector(hit.normal, -0.009);
+  pad.castShadow = true;
+  parent.add(pad);
+  return pad;
+}
+
+/* ------------------------------ internal rockers ------------------------------ */
+
+const ROCKER_THICKNESS = 0.014;
+const ROCKER_BOSS_RADIUS = 0.031;
+
+function rockerArmSpecs(corner) {
+  return [
+    { arm: corner.rocker.pushArm, hole: 0.0085, rim: 0.0065, tube: 0.0040 },
+    { arm: corner.rocker.damperArm, hole: 0.0100, rim: 0.0070, tube: 0.0046 },
+    { arm: corner.rocker.arbArm, hole: 0.0068, rim: 0.0058, tube: 0.0036 }
+  ];
+}
+
+function convexHull2D(points) {
+  const sorted = points.slice().sort((a, b) => (a[0] - b[0]) || (a[1] - b[1]));
+  if (sorted.length < 3) return sorted;
+  const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lower = [];
+  for (const point of sorted) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], point) <= 0) lower.pop();
+    lower.push(point);
+  }
+  const upper = [];
+  for (let i = sorted.length - 1; i >= 0; i -= 1) {
+    const point = sorted[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], point) <= 0) upper.pop();
+    upper.push(point);
+  }
+  lower.pop();
+  upper.pop();
+  return lower.concat(upper);
+}
+
+/**
+ * The rocker plate is the convex envelope of the three real arm eyes plus the
+ * bearing boss. Its arm lengths therefore come from the shared hardpoints, and
+ * the pivot and all three eyes are cut as bearing holes instead of painted on.
+ */
+function buildRockerPlateGeometry(corner) {
+  const specs = rockerArmSpecs(corner);
+  const points = [];
+  for (let i = 0; i < 18; i += 1) {
+    const angle = (i / 18) * TAU;
+    points.push([Math.cos(angle) * ROCKER_BOSS_RADIUS, Math.sin(angle) * ROCKER_BOSS_RADIUS]);
+  }
+  for (const spec of specs) {
+    const outer = spec.hole + spec.rim;
+    for (let i = 0; i < 18; i += 1) {
+      const angle = (i / 18) * TAU;
+      points.push([spec.arm.x + Math.cos(angle) * outer, spec.arm.y + Math.sin(angle) * outer]);
+    }
+  }
+  const hull = convexHull2D(points);
+  const shape = new THREE.Shape(hull.map(([x, y]) => new THREE.Vector2(x, y)));
+  const pivotHole = new THREE.Path();
+  pivotHole.absarc(0, 0, 0.013, 0, TAU, true);
+  shape.holes.push(pivotHole);
+  for (const spec of specs) {
+    if (Math.hypot(spec.arm.x, spec.arm.y) < 0.02) continue;
+    const eyeHole = new THREE.Path();
+    eyeHole.absarc(spec.arm.x, spec.arm.y, spec.hole, 0, TAU, true);
+    shape.holes.push(eyeHole);
+  }
+  const geometry = new THREE.ExtrudeGeometry(shape, {
+    depth: ROCKER_THICKNESS,
+    bevelEnabled: true,
+    bevelSize: 0.0015,
+    bevelThickness: 0.0015,
+    bevelSegments: 1,
+    curveSegments: 10
+  });
+  geometry.translate(0, 0, -ROCKER_THICKNESS * 0.5);
+  return geometry;
+}
+
+function buildRockerAssembly(corner, group) {
+  const rockerGroup = new THREE.Group();
+  rockerGroup.name = 'rocker-' + corner.key;
+  rockerGroup.position.copy(corner.rocker.pivot);
+  rockerGroup.rotation.z = corner.rocker.baseAngle;
+  group.add(rockerGroup);
+
+  const plate = new THREE.Mesh(buildRockerPlateGeometry(corner), MAT.carbon);
+  plate.castShadow = true;
+  plate.receiveShadow = true;
+  rockerGroup.add(plate);
+
+  for (const spec of rockerArmSpecs(corner)) {
+    addEyeRing(rockerGroup, V(spec.arm.x, spec.arm.y, 0), spec.hole + 0.002, spec.tube, MAT.titanium);
+  }
+  for (const side of [-1, 1]) {
+    const bearing = new THREE.Mesh(new THREE.TorusGeometry(0.017, 0.0048, 5, 20), MAT.titanium);
+    bearing.position.set(0, 0, side * (ROCKER_THICKNESS * 0.5 + 0.0035));
+    bearing.castShadow = true;
+    rockerGroup.add(bearing);
+  }
+  corner.rocker.mesh = rockerGroup;
+  corner.rocker.plate = plate;
+}
+
+/**
+ * Bearing pedestal for the rocker axle. The front rockers hang from the
+ * monocoque roof on a two-plate clevis; the rear rockers are cantilevered from
+ * the casing side wall. Both anchors are found by probing the built bodywork.
+ */
+function buildRockerBearing(corner, group) {
+  const pivot = corner.rocker.pivot;
+  const zSign = corner.zSign;
+  const axle = new THREE.Mesh(CAR.shared.cylinder, MAT.titanium);
+  axle.scale.set(0.011, ROCKER_THICKNESS + 0.060, 0.011);
+  axle.quaternion.setFromUnitVectors(_axisY, _axisZ);
+  axle.position.copy(pivot);
+  axle.castShadow = true;
+  group.add(axle);
+  corner.rocker.axle = axle;
+
+  for (const side of [-1, 1]) {
+    const collar = new THREE.Mesh(CAR.shared.cylinder, MAT.darkMetal);
+    collar.scale.set(0.019, 0.008, 0.019);
+    collar.quaternion.setFromUnitVectors(_axisY, _axisZ);
+    collar.position.set(pivot.x, pivot.y, pivot.z + side * (ROCKER_THICKNESS * 0.5 + 0.004));
+    collar.castShadow = true;
+    group.add(collar);
+  }
+
+  let anchored = false;
+  if (corner.front) {
+    const zOffset = ROCKER_THICKNESS * 0.5 + 0.010;
+    for (const side of [-1, 1]) {
+      const z = pivot.z + side * zOffset;
+      const base = V(pivot.x, pivot.y, z);
+      const hit = probeBodySurface(base, V(0, 1, 0), 0.25, true);
+      if (!hit) continue;
+      const foot = V(pivot.x, hit.point.y - 0.004, z);
+      addStaticRod(group, base, foot, 0.0075, MAT.carbonMatte);
+      addSkinPad(group, hit, 0.055, 0.040);
+      anchored = true;
+    }
+  } else {
+    const axis = V(0, 0, zSign);
+    const hit = probeBodySurface(pivot, axis, 0.22, true);
+    if (hit) {
+      const foot = hit.point.clone().addScaledVector(hit.normal, -0.004);
+      addStaticRod(group, pivot, foot, 0.011, MAT.titanium);
+      addSkinPad(group, hit, 0.050, 0.050);
+      anchored = true;
+    }
+  }
+  if (anchored) CAR.diag.rockerBearingHits += 1;
+  else {
+    CAR.diag.rockerBearingMisses += 1;
+    CAR.diag.rockerBearingMissing.push(corner.key);
+  }
+}
+
+/**
+ * Body-side damper mount. The eye is represented by a transverse pin and a
+ * bush at the shared body.damper point; a probe-placed pedestal ties it to the
+ * nearest interior surface (front: monocoque roof; rear: engine-cover floor).
+ */
+function buildDamperMount(corner, group) {
+  const mount = corner.body.damper;
+  addBossAlongZ(group, mount.x, mount.y, mount.z - 0.026, mount.z + 0.026, 0.019, MAT.darkMetal);
+  addEyeRing(group, mount, 0.017, 0.005, MAT.titanium);
+  const pin = new THREE.Mesh(CAR.shared.cylinder, MAT.titanium);
+  pin.scale.set(0.008, 0.064, 0.008);
+  pin.quaternion.setFromUnitVectors(_axisY, _axisZ);
+  pin.position.copy(mount);
+  pin.castShadow = true;
+  group.add(pin);
+
+  let best = null;
+  for (const up of [1, -1]) {
+    const hit = probeBodySurface(mount, V(0, up, 0), 0.30, true);
+    if (!hit) continue;
+    if (!best || hit.distance < best.distance) best = hit;
+  }
+  if (!best) {
+    CAR.diag.damperMountMisses += 1;
+    CAR.diag.damperMountMissing.push(corner.key);
+    return;
+  }
+  const foot = best.point.clone().addScaledVector(best.normal, -0.004);
+  addStaticRod(group, mount, foot, 0.012, MAT.carbon);
+  addSkinPad(group, best, 0.060, 0.050);
+  if (best.distance > 0.12) {
+    const offsetX = Math.sign(mount.x) * 0.065;
+    const braceBase = V(mount.x + offsetX, mount.y, mount.z);
+    const braceHit = probeBodySurface(braceBase, V(0, Math.sign(best.point.y - mount.y), 0), 0.30, true);
+    if (braceHit) {
+      const braceFoot = braceHit.point.clone().addScaledVector(braceHit.normal, -0.004);
+      addStaticRod(group, mount, braceFoot, 0.008, MAT.carbonMatte);
+      addSkinPad(group, braceHit, 0.045, 0.035);
+    }
+  }
+  CAR.diag.damperMountHits += 1;
 }
 
 function buildInternalSuspension(corners) {
+  const skinMounts = new THREE.Group();
+  skinMounts.name = 'suspensionSkinMounts';
+  S.bodyPivot.add(skinMounts);
+  CAR.skinMountGroup = skinMounts;
   const group = new THREE.Group();
   group.name = 'internalSuspension';
   S.bodyPivot.add(group);
   CAR.internalGroup = group;
 
+  CAR.diag.rockerBearingHits = 0;
+  CAR.diag.rockerBearingMisses = 0;
+  CAR.diag.rockerBearingMissing = [];
+  CAR.diag.damperMountHits = 0;
+  CAR.diag.damperMountMisses = 0;
+  CAR.diag.damperMountMissing = [];
+  CAR.diag.rodBushingHits = 0;
+  CAR.diag.rodBushingMisses = 0;
+  CAR.diag.rodBushingMissing = [];
+  CAR.diag.arbBracketHits = 0;
+  CAR.diag.arbBracketMisses = 0;
+  CAR.diag.rockerArmMm = corners.map((corner) => [
+    corner.rocker.pushArm.length() * 1000,
+    corner.rocker.damperArm.length() * 1000,
+    corner.rocker.arbArm.length() * 1000
+  ]);
+  CAR.diag.arbArmMm = corners.map((corner) => corner.rocker.arbArm.length() * 1000);
+
+  S.bodyPivot.updateMatrixWorld(true);
   for (const corner of corners) {
-    const shape = makeRockerPlateShape(corner.rocker.pushArm, corner.rocker.damperArm);
-    const geometry = new THREE.ExtrudeGeometry(shape, { depth: 0.014, bevelEnabled: false, curveSegments: 4 });
-    geometry.translate(0, 0, -0.007);
-    const mesh = new THREE.Mesh(geometry, MAT.carbon);
-    mesh.position.copy(corner.rocker.pivot);
-    mesh.rotation.z = corner.rocker.baseAngle;
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    group.add(mesh);
-    corner.rocker.mesh = mesh;
-
-    // Short bracket and eye for the ARB drop link. It belongs to the rocker and
-    // therefore rotates with it; the link is solved in the same body frame.
-    const arbArm = corner.rocker.arbArm;
-    const arbBracketLength = Math.hypot(arbArm.x, arbArm.y);
-    const arbBracket = new THREE.Mesh(new THREE.BoxGeometry(arbBracketLength, 0.016, 0.014), MAT.carbon);
-    arbBracket.position.set(arbArm.x / 2, arbArm.y / 2, 0);
-    arbBracket.rotation.z = Math.atan2(arbArm.y, arbArm.x);
-    arbBracket.castShadow = true;
-    mesh.add(arbBracket);
-    const arbEye = new THREE.Mesh(new THREE.TorusGeometry(0.017, 0.0055, 5, 12), MAT.titanium);
-    arbEye.position.set(arbArm.x, arbArm.y, 0);
-    mesh.add(arbEye);
-
-    const axle = new THREE.Mesh(new THREE.CylinderGeometry(0.020, 0.020, 0.055, 12), MAT.titanium);
-    axle.rotation.x = Math.PI / 2;
-    axle.position.copy(corner.rocker.pivot);
-    axle.castShadow = true;
-    group.add(axle);
-    corner.rocker.axle = axle;
+    buildRockerAssembly(corner, group);
+    buildRockerBearing(corner, group);
+    buildDamperMount(corner, group);
   }
 
   buildAntiRollBars(corners, group);
@@ -264,8 +550,25 @@ function buildInternalSuspension(corners) {
 /* ------------------------------ anti-roll bars ------------------------------ */
 
 const ARB_ARM_LENGTH = 0.16;
+const ARB_REAR_ARM_LENGTH = 0.20;
 const ARB_BLADE_WIDTH = 0.052;
 const ARB_BLADE_THICKNESS = 0.009;
+const ARB_REST_ANGLE = Math.PI + 0.15;
+
+/**
+ * ARB centre positions relative to the shared rocker pivot. Both levers point
+ * to -X, so heave moves them together (no torsion) and roll twists the bar.
+ * The rear bar is lowered from the nominal +0.140 m to +0.080 m: at +0.140 m
+ * the transverse bar passes through the rear horizontal spring-damper, which
+ * runs from the rocker eye to the engine-cover mount at y≈0.363 m. The lower
+ * position clears that unit by 63 mm and still closes over the full rocker
+ * travel with a 0.20 m lever.
+ */
+const ARB_LAYOUT = {
+  front: { xOffset: 0.105, yOffset: -0.045, armLength: ARB_ARM_LENGTH, armInset: 0.045 },
+  rear: { xOffset: 0.250, yOffset: 0.080, armLength: ARB_REAR_ARM_LENGTH, armInset: 0.032 }
+};
+const ARB_ARM_DIR = -1;
 
 function rockerBodyPoint(corner, local, angle) {
   const cos = Math.cos(angle);
@@ -281,6 +584,14 @@ function shortestAngleDelta(a, b) {
   return Math.atan2(Math.sin(a - b), Math.cos(a - b));
 }
 
+/** Distance between two infinite lines, used for the bar/damper packaging check. */
+function lineDistance(p1, d1, p2, d2) {
+  const cross = new THREE.Vector3().crossVectors(d1, d2);
+  const length = cross.length();
+  if (length < 1e-9) return new THREE.Vector3().subVectors(p2, p1).length();
+  return Math.abs(new THREE.Vector3().subVectors(p2, p1).dot(cross.divideScalar(length)));
+}
+
 /**
  * Formula-car anti-roll bar, built as a transverse torsion bar with one lever
  * arm at each end. Both arms point to the same side of the bar (a shallow U in
@@ -293,6 +604,10 @@ function shortestAngleDelta(a, b) {
  * rockers.
  */
 function buildAntiRollBars(corners, group) {
+  CAR.diag.arbLayout = {};
+  CAR.diag.arbStemGapMm = 0;
+  CAR.diag.arbBracketHits = 0;
+  CAR.diag.arbBracketMisses = 0;
   for (const axleName of ['front', 'rear']) {
     const pair = corners.filter((corner) => (axleName === 'front' ? corner.front : !corner.front));
     if (pair.length < 2) continue;
@@ -300,18 +615,17 @@ function buildAntiRollBars(corners, group) {
     const right = pair.find((corner) => corner.zSign > 0);
     if (!left || !right) continue;
     const rocker = left.rocker;
+    const layout = ARB_LAYOUT[axleName];
     const zEnd = Math.abs(rocker.pivot.z);
-    const armInset = axleName === 'front' ? 0.085 : 0.055;
-    const armZ = Math.max(0.075, zEnd - armInset);
+    const armZ = Math.max(0.055, zEnd - layout.armInset);
     const linkZSpan = zEnd - armZ;
-    const armDir = axleName === 'front' ? -1 : 1;
-    const barX = rocker.pivot.x - armDir * 0.105;
-    const barY = rocker.pivot.y + 0.155;
-    const restAngle = armDir < 0 ? Math.PI + 0.15 : -0.15;
+    const barX = rocker.pivot.x + layout.xOffset;
+    const barY = rocker.pivot.y + layout.yOffset;
+    const restAngle = ARB_REST_ANGLE;
 
     const anchorRest = rockerBodyPoint(left, rocker.arbArm, rocker.baseAngle);
-    const tipRestX = barX + ARB_ARM_LENGTH * Math.cos(restAngle);
-    const tipRestY = barY + ARB_ARM_LENGTH * Math.sin(restAngle);
+    const tipRestX = barX + layout.armLength * Math.cos(restAngle);
+    const tipRestY = barY + layout.armLength * Math.sin(restAngle);
     const linkLength = Math.hypot(tipRestX - anchorRest.x, tipRestY - anchorRest.y, linkZSpan);
     const planarLinkLength = Math.sqrt(Math.max(1e-8, linkLength * linkLength - linkZSpan * linkZSpan));
 
@@ -321,7 +635,7 @@ function buildAntiRollBars(corners, group) {
     group.add(barRoot);
 
     // Centre clamp and outboard bearings. The bar rotates inside these; the
-    // bearings and their feet stay fixed to the chassis.
+    // bearings stay fixed to the chassis through short probe-placed brackets.
     const sleeve = new THREE.Mesh(CAR.shared.cylinder, MAT.darkMetal);
     sleeve.scale.set(0.027, 0.078, 0.027);
     sleeve.rotation.x = Math.PI / 2;
@@ -329,22 +643,29 @@ function buildAntiRollBars(corners, group) {
     barRoot.add(sleeve);
 
     for (const sign of [-1, 1]) {
+      const bearingZ = sign * armZ * 0.58;
       const bearing = new THREE.Mesh(CAR.shared.cylinder, MAT.darkMetal);
       bearing.scale.set(0.031, 0.044, 0.031);
       bearing.rotation.x = Math.PI / 2;
-      bearing.position.z = sign * armZ * 0.58;
+      bearing.position.z = bearingZ;
       bearing.castShadow = true;
       barRoot.add(bearing);
 
-      const bracket = makeRoundedBox(0.075, 0.075, 0.045, 0.012, MAT.carbonMatte);
-      bracket.position.set(0, -0.056, sign * armZ * 0.58);
-      bracket.castShadow = true;
-      barRoot.add(bracket);
-
-      const foot = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.018, 0.07), MAT.darkMetal);
-      foot.position.set(0, -0.096, sign * armZ * 0.58);
-      foot.castShadow = true;
-      barRoot.add(foot);
+      const center = V(barX, barY, bearingZ);
+      let best = null;
+      for (const up of [1, -1]) {
+        const hit = probeBodySurface(center, V(0, up, 0), 0.12, true);
+        if (!hit) continue;
+        if (!best || hit.distance < best.distance) best = hit;
+      }
+      if (best) {
+        const foot = best.point.clone().addScaledVector(best.normal, -0.004);
+        addStaticRod(group, center, foot, 0.009, MAT.carbonMatte);
+        addSkinPad(group, best, 0.055, 0.045);
+        CAR.diag.arbBracketHits += 1;
+      } else {
+        CAR.diag.arbBracketMisses += 1;
+      }
     }
 
     // Two half-shafts meet at the centre clamp. A bright stripe records the
@@ -354,15 +675,20 @@ function buildAntiRollBars(corners, group) {
       const half = new THREE.Group();
       half.position.z = sign * armZ / 2;
       const tube = new THREE.Mesh(CAR.shared.cylinder, MAT.arbBar);
-      tube.scale.set(0.0145, armZ / 2, 0.0145);
+      tube.scale.set(0.0145, armZ, 0.0145);
       tube.rotation.x = Math.PI / 2;
       tube.castShadow = true;
       half.add(tube);
-      const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.0035, 0.0035, armZ / 2 - 0.012), MAT.arbBlade);
+      const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.0035, 0.0035, Math.max(0.01, armZ - 0.012)), MAT.arbBlade);
       stripe.position.set(0.0145, 0, 0);
       half.add(stripe);
       barRoot.add(half);
       halves[sign] = half;
+      // The half shaft reaches the lever plane. Measure the residual clearance
+      // to the root collar instead of relying on drop-link closure alone.
+      const stemOuterZ = Math.abs(half.position.z) + tube.scale.y * 0.5;
+      const stemGapMm = Math.max(0, armZ - 0.024 - stemOuterZ) * 1000;
+      CAR.diag.arbStemGapMm = Math.max(CAR.diag.arbStemGapMm, stemGapMm);
     }
 
     const sides = {};
@@ -385,10 +711,10 @@ function buildAntiRollBars(corners, group) {
         bladeRoll = new THREE.Group();
         armGroup.add(bladeRoll);
         const blade = new THREE.Mesh(
-          new THREE.BoxGeometry(ARB_ARM_LENGTH - 0.04, ARB_BLADE_WIDTH, ARB_BLADE_THICKNESS),
+          new THREE.BoxGeometry(layout.armLength - 0.04, ARB_BLADE_WIDTH, ARB_BLADE_THICKNESS),
           MAT.arbBlade
         );
-        blade.position.x = 0.02 + (ARB_ARM_LENGTH - 0.04) / 2;
+        blade.position.x = 0.02 + (layout.armLength - 0.04) / 2;
         blade.castShadow = true;
         blade.receiveShadow = true;
         bladeRoll.add(blade);
@@ -396,7 +722,7 @@ function buildAntiRollBars(corners, group) {
           new THREE.BoxGeometry(0.018, ARB_BLADE_WIDTH * 0.82, ARB_BLADE_THICKNESS * 1.25),
           MAT.darkMetal
         );
-        tipBlock.position.x = ARB_ARM_LENGTH - 0.012;
+        tipBlock.position.x = layout.armLength - 0.012;
         tipBlock.castShadow = true;
         bladeRoll.add(tipBlock);
 
@@ -407,19 +733,19 @@ function buildAntiRollBars(corners, group) {
         adjuster.position.x = 0.020;
         armGroup.add(adjuster);
       } else {
-        const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.0125, 0.015, ARB_ARM_LENGTH, 10), MAT.arbBar);
+        const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.0125, 0.015, layout.armLength, 10), MAT.arbBar);
         arm.rotation.z = -Math.PI / 2;
-        arm.position.x = ARB_ARM_LENGTH / 2;
+        arm.position.x = layout.armLength / 2;
         arm.castShadow = true;
         armGroup.add(arm);
       }
 
       const eye = new THREE.Mesh(new THREE.TorusGeometry(0.018, 0.0055, 5, 12), MAT.titanium);
-      eye.position.x = ARB_ARM_LENGTH;
+      eye.position.x = layout.armLength;
       armGroup.add(eye);
       const tipJoint = new THREE.Mesh(CAR.shared.joint, MAT.titanium);
       tipJoint.scale.setScalar(0.012);
-      tipJoint.position.x = ARB_ARM_LENGTH;
+      tipJoint.position.x = layout.armLength;
       armGroup.add(tipJoint);
 
       const link = new THREE.Mesh(CAR.shared.rod, MAT.titanium);
@@ -437,7 +763,7 @@ function buildAntiRollBars(corners, group) {
         sign,
         armGroup,
         bladeRoll,
-        armLength: ARB_ARM_LENGTH,
+        armLength: layout.armLength,
         restAngle,
         angle: restAngle,
         link,
@@ -445,13 +771,23 @@ function buildAntiRollBars(corners, group) {
         linkB,
         linkLength,
         planarLinkLength,
+        linkZSpan,
         armZ,
         stretchMm: 0,
+        closurePlusMm: (layout.armLength + planarLinkLength -
+          Math.hypot(anchorRest.x - barX, anchorRest.y - barY)) * 1000,
+        closureMinusMm: (Math.hypot(anchorRest.x - barX, anchorRest.y - barY) -
+          Math.abs(layout.armLength - planarLinkLength)) * 1000,
         tip: new THREE.Vector3(),
         anchor: new THREE.Vector3(),
         barHalf: halves[sign]
       };
     }
+
+    const damperTip = suspRockerPoint(left, left.rocker.damperArm, left.rocker.baseAngle);
+    const damperAxis = left.body.damper.clone().sub(damperTip);
+    const barAxis = V(0, 0, 1);
+    const clearanceMm = lineDistance(V(barX, barY, 0), barAxis, damperTip, damperAxis) * 1000;
 
     CAR.arbs.push({
       axle: axleName,
@@ -460,8 +796,10 @@ function buildAntiRollBars(corners, group) {
       barY,
       zEnd,
       armZ,
-      armDir,
+      armDir: ARB_ARM_DIR,
       restAngle,
+      armLength: layout.armLength,
+      clearanceToDamperMm: clearanceMm,
       sides,
       bladeAngle: 0,
       twistDeg: 0,
@@ -469,9 +807,18 @@ function buildAntiRollBars(corners, group) {
       point: V(barX, barY + 0.055, 0)
     });
     CAR.mechanics.arbPoints[axleName] = V(barX, barY + 0.055, 0);
+    CAR.diag.arbLayout[axleName] = {
+      x: barX,
+      y: barY,
+      armLength: layout.armLength,
+      armHalfZ: armZ,
+      restAngleDeg: restAngle * RAD,
+      clearanceToDamperMm: clearanceMm
+    };
   }
   CAR.mechanics.arbFront = CAR.arbs.some((arb) => arb.axle === 'front');
   CAR.mechanics.arbRear = CAR.arbs.some((arb) => arb.axle === 'rear');
+  CAR.diag.arbArmLengthMm = CAR.arbs.map((arb) => arb.armLength * 1000);
 }
 
 function solveArbAngle(arb, side, anchor) {
@@ -499,6 +846,8 @@ function solveArbAngle(arb, side, anchor) {
 function updateAntiRollBars(model) {
   let maxStretchAll = 0;
   let maxTwist = 0;
+  let minClosurePlus = Infinity;
+  let minClosureMinus = Infinity;
   for (const arb of CAR.arbs) {
     arb.bladeAngle = (model.arbBladeAngleDeg[arb.axle] || 0) * DEG;
     let axleStretch = 0;
@@ -524,6 +873,12 @@ function updateAntiRollBars(model) {
       side.stretchMm = Math.abs(actual - side.linkLength) * 1000;
       axleStretch = Math.max(axleStretch, side.stretchMm);
       maxStretchAll = Math.max(maxStretchAll, side.stretchMm);
+      const planarDistance = Math.hypot(anchor.x - arb.barX, anchor.y - arb.barY);
+      const planarLink = side.planarLinkLength;
+      side.closurePlusMm = (side.armLength + planarLink - planarDistance) * 1000;
+      side.closureMinusMm = (planarDistance - Math.abs(side.armLength - planarLink)) * 1000;
+      minClosurePlus = Math.min(minClosurePlus, side.closurePlusMm);
+      minClosureMinus = Math.min(minClosureMinus, side.closureMinusMm);
       if (side.bladeRoll) side.bladeRoll.rotation.x = arb.bladeAngle;
       if (side.barHalf) side.barHalf.rotation.z = shortestAngleDelta(angle, side.restAngle);
       angles[sign] = angle;
@@ -540,6 +895,9 @@ function updateAntiRollBars(model) {
   CAR.diag.arbCount = CAR.arbs.length;
   CAR.diag.arbTwistDeg = maxTwist;
   CAR.diag.arbStretchMm = maxStretchAll;
+  CAR.diag.arbClosurePlusMinMm = Number.isFinite(minClosurePlus) ? minClosurePlus : 0;
+  CAR.diag.arbClosureMinusMinMm = Number.isFinite(minClosureMinus) ? minClosureMinus : 0;
+  CAR.diag.arbClosureOk = CAR.diag.arbClosurePlusMinMm > 0 && CAR.diag.arbClosureMinusMinMm > 0;
   CAR.diag.arbBladeFrontDeg = CAR.arbs.find((arb) => arb.axle === 'front')?.bladeAngle * RAD || 0;
   CAR.diag.arbBladeRearDeg = CAR.arbs.find((arb) => arb.axle === 'rear')?.bladeAngle * RAD || 0;
 }
@@ -599,9 +957,12 @@ function buildSteeringMechanics(corners, group) {
   const front = corners.find((corner) => corner.front);
   if (!front) return;
   const xF = front.wheel.x;
-  const rackX = xF - 0.44;
-  const rackY = 0.315;
-  const rackHalf = 0.26;
+  // The rack axis and its inner tie-rod points are the shared front body.track
+  // hardpoints. No rack position constant is duplicated here.
+  const trackBase = front.body.trackBase;
+  const rackX = trackBase.x;
+  const rackY = trackBase.y;
+  const rackHalf = Math.abs(trackBase.z);
 
   const rackGroup = new THREE.Group();
   rackGroup.name = 'steeringRack';
@@ -615,7 +976,7 @@ function buildSteeringMechanics(corners, group) {
   for (const sign of [-1, 1]) {
     const socket = new THREE.Mesh(CAR.shared.joint, MAT.steel);
     socket.scale.setScalar(0.018);
-    socket.position.set(0, 0, sign * 0.315);
+    socket.position.set(0, 0, sign * rackHalf);
     socket.castShadow = true;
     rackGroup.add(socket);
   }
@@ -626,12 +987,11 @@ function buildSteeringMechanics(corners, group) {
   pinion.position.set(rackX, rackY + 0.055, 0);
   pinion.castShadow = true;
   group.add(pinion);
-  addStaticRod(group, V(rackX, rackY + 0.105, 0), V(rackX, rackY + 0.20, 0), 0.013, MAT.titanium);
 
   const steeringX = xF - 1.88 + 0.42;
   const steeringY = 0.658 - 0.07;
   const columnA = V(steeringX, steeringY, 0);
-  const columnB = V(rackX, rackY + 0.135, 0);
+  const columnB = V(rackX, rackY + 0.085, 0);
   CAR.mechanics.columnPoint = columnA.clone().lerp(columnB, 0.38);
   addStaticRod(group, columnA, columnB, 0.014, MAT.darkMetal);
   addStaticJoint(group, columnA, 0.022, MAT.steel);
@@ -643,18 +1003,40 @@ function buildSteeringMechanics(corners, group) {
   columnCollar.position.copy(columnA).lerp(columnB, 0.56);
   group.add(columnCollar);
 
-  // Rack boots / bellows and inner tie-rod sockets at both ends.
+  // Rack boots and housing saddles, all derived from the same half-length.
+  const bootLength = clamp(rackHalf * 0.52, 0.08, 0.13);
+  const bootZ = rackHalf - bootLength * 0.5 - 0.008;
+  const mountZ = rackHalf * 0.62;
   for (const sign of [-1, 1]) {
-    const boot = createBellows(0.13, 0.034);
-    boot.position.set(rackX, rackY, sign * 0.315);
+    const boot = createBellows(bootLength, 0.034);
+    boot.position.set(rackX, rackY, sign * bootZ);
     boot.quaternion.setFromUnitVectors(_axisY, _axisZ);
     group.add(boot);
-    const mount = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.035, 0.05), MAT.darkMetal);
-    mount.position.set(rackX, rackY - 0.045, sign * 0.16);
-    mount.castShadow = true;
-    group.add(mount);
+    const saddle = makeRoundedBox(0.060, 0.060, 0.045, 0.012, MAT.darkMetal);
+    saddle.position.set(rackX, rackY - 0.030, sign * mountZ);
+    saddle.castShadow = true;
+    group.add(saddle);
+    const mountFoot = makeRoundedBox(0.080, 0.014, 0.060, 0.008, MAT.carbonMatte);
+    mountFoot.position.set(rackX, rackY - 0.064, sign * mountZ);
+    mountFoot.castShadow = true;
+    group.add(mountFoot);
   }
 
+  const left = corners.find((corner) => corner.front && corner.zSign < 0);
+  const right = corners.find((corner) => corner.front && corner.zSign > 0);
+  let socketErrorMm = 0;
+  if (left && right) {
+    const socketL = V(rackX, rackY, -rackHalf);
+    const socketR = V(rackX, rackY, rackHalf);
+    socketErrorMm = Math.max(
+      socketL.distanceTo(left.body.trackBase),
+      socketR.distanceTo(right.body.trackBase)
+    ) * 1000;
+  }
+  CAR.diag.rackX = rackX;
+  CAR.diag.rackY = rackY;
+  CAR.diag.rackHalf = rackHalf;
+  CAR.diag.rackSocketErrorMm = socketErrorMm;
   CAR.mechanics.steeringRack = true;
   CAR.mechanics.steeringColumn = true;
   CAR.mechanics.steeringPoint = V(rackX, rackY + 0.06, 0);
@@ -667,48 +1049,53 @@ function buildSteeringMechanics(corners, group) {
 function buildDifferentialMechanics(corners, group) {
   const rear = corners.find((corner) => !corner.front);
   if (!rear) return;
-  const xR = rear.wheel.x;
-  const diffX = xR + 0.08;
-  const diffY = 0.30;
+  const diff = rear.body.diff;
+  const diffX = diff.x;
+  const diffY = diff.y;
+  const diffHalfZ = Math.abs(diff.z);
+  const casingY = diffY + 0.01;
 
   const casing = makeRoundedBox(0.30, 0.24, 0.27, 0.055, MAT.darkMetal);
-  casing.position.set(diffX, 0.31, 0);
+  casing.position.set(diffX, casingY, 0);
   casing.castShadow = true;
   casing.receiveShadow = true;
   group.add(casing);
   const cover = makeRoundedBox(0.15, 0.17, 0.22, 0.035, MAT.steel);
-  cover.position.set(diffX + 0.13, 0.31, 0);
+  cover.position.set(diffX + 0.13, casingY, 0);
   cover.castShadow = true;
   group.add(cover);
-  addStaticRod(group, V(diffX, diffY, -0.21), V(diffX, diffY, 0.21), 0.036, MAT.steel);
+  addStaticRod(group, V(diffX, diffY, -diffHalfZ), V(diffX, diffY, diffHalfZ), 0.036, MAT.steel);
 
   for (const sign of [-1, 1]) {
     const flange = new THREE.Mesh(CAR.shared.cylinder, MAT.titanium);
-    flange.scale.set(0.060, 0.035, 0.060);
+    flange.scale.set(0.055, 0.035, 0.055);
     flange.rotation.x = Math.PI / 2;
-    flange.position.set(diffX, diffY, sign * 0.21);
+    flange.position.set(diffX, diffY, sign * (diffHalfZ - 0.018));
     flange.castShadow = true;
     group.add(flange);
+    // The output ring is coaxial with the halfshaft (axis Z); no extra rotation.
     const ring = new THREE.Mesh(CAR.shared.torus, MAT.darkMetal);
-    ring.scale.setScalar(0.062);
-    ring.rotation.x = Math.PI / 2;
-    ring.position.set(diffX, diffY, sign * 0.225);
+    ring.scale.setScalar(0.055);
+    ring.position.set(diffX, diffY, sign * (diffHalfZ - 0.008));
     group.add(ring);
   }
 
   // Casing ribs / bolts.
   for (let i = -1; i <= 1; i += 1) {
     const rib = new THREE.Mesh(new THREE.BoxGeometry(0.018, 0.19, 0.235), MAT.steel);
-    rib.position.set(diffX + i * 0.055, 0.31, 0);
+    rib.position.set(diffX + i * 0.055, casingY, 0);
     group.add(rib);
   }
   for (let i = 0; i < 6; i += 1) {
     const angle = (i / 6) * TAU;
     const bolt = new THREE.Mesh(new THREE.SphereGeometry(0.012, 8, 6), MAT.titanium);
-    bolt.position.set(diffX + 0.13, 0.31 + Math.cos(angle) * 0.085, Math.sin(angle) * 0.09);
+    bolt.position.set(diffX + 0.13, casingY + Math.cos(angle) * 0.085, Math.sin(angle) * 0.09);
     group.add(bolt);
   }
 
+  CAR.diag.diffX = diffX;
+  CAR.diag.diffY = diffY;
+  CAR.diag.diffHalfZ = diffHalfZ;
   CAR.mechanics.differential = true;
   CAR.mechanics.diffPoint = V(diffX, diffY + 0.12, 0);
 }
@@ -817,6 +1204,46 @@ function addDriveshaft(corner) {
   });
 }
 
+/**
+ * Pass-through seat where a push/pull rod crosses the body skin. The skin
+ * point is probed from outside along the design rod axis, so it follows the
+ * actual bodywork and stays on the outer surface. The seat belongs to the
+ * exposed rod installation, not the hidden inboard suspension; it never changes
+ * the rod pose and remains visible in both normal and x-ray views.
+ */
+function buildRodSkinBushing(corner, wheelSpec, rockerSpec) {
+  if (!CAR.skinMountGroup) return;
+  const outer = designAnchorPosition(wheelSpec, corner);
+  const inner = designAnchorPosition(rockerSpec, corner);
+  const delta = inner.clone().sub(outer);
+  const span = delta.length();
+  if (!(span > 1e-4)) {
+    CAR.diag.rodBushingMisses += 1;
+    CAR.diag.rodBushingMissing.push(corner.key);
+    return;
+  }
+  const inward = delta.divideScalar(span);
+  const hit = probeBodySurface(outer, inward, span, false);
+  if (!hit || hit.distance > span * 0.995) {
+    CAR.diag.rodBushingMisses += 1;
+    CAR.diag.rodBushingMissing.push(corner.key);
+    return;
+  }
+  // Flush reinforcement washer on the skin plus a short internal sleeve; this
+  // keeps the seat from poking through the envelope while still showing the rod
+  // passing through a bush.
+  const washer = new THREE.Mesh(new THREE.RingGeometry(0.016, 0.032, 24), MAT.titanium);
+  washer.position.copy(hit.point).addScaledVector(hit.normal, 0.001);
+  washer.quaternion.setFromUnitVectors(_axisZ, hit.normal);
+  washer.castShadow = true;
+  CAR.skinMountGroup.add(washer);
+  const sleeveA = hit.point.clone().addScaledVector(inward, 0.005);
+  const sleeveB = hit.point.clone().addScaledVector(inward, 0.035);
+  addStaticRod(CAR.skinMountGroup, sleeveA, sleeveB, 0.017, MAT.darkMetal);
+  addStaticJoint(CAR.skinMountGroup, sleeveB, 0.014, MAT.titanium);
+  CAR.diag.rodBushingHits += 1;
+}
+
 function buildSuspensionLinks(corners) {
   for (const corner of corners) {
     const isFront = corner.front;
@@ -846,17 +1273,21 @@ function buildSuspensionLinks(corners) {
       kind: isFront ? 'steer' : 'toe'
     });
     addLink(corner, push, bRockerPush, { radius: isFront ? 0.014 : 0.016, material: MAT.titanium, kind: isFront ? 'pushrod' : 'pullrod' });
+    buildRodSkinBushing(corner, push, bRockerPush);
     if (!isFront) addDriveshaft(corner);
 
-    // Spring / damper assembly (inside bodywork, visible in x-ray).
+    // Spring / damper assembly: a longitudinal, near-horizontal unit between the
+    // body mount and the rocker eye. The unit is placed and oriented from the
+    // solved endpoints every frame; only its length scales the coil, never its
+    // radius or the coil wire.
     const assembly = new THREE.Group();
     assembly.name = 'spring-damper-' + corner.key;
     const coil = new THREE.Mesh(CAR.shared.spring, MAT.springCoil);
     coil.castShadow = true;
     const damper = new THREE.Mesh(CAR.shared.cylinder, MAT.titanium);
     damper.castShadow = true;
-    const capA = new THREE.Mesh(CAR.shared.joint, MAT.darkMetal);
-    const capB = new THREE.Mesh(CAR.shared.joint, MAT.darkMetal);
+    const capA = new THREE.Mesh(CAR.shared.cylinder, MAT.darkMetal);
+    const capB = new THREE.Mesh(CAR.shared.cylinder, MAT.darkMetal);
     capA.castShadow = true;
     capB.castShadow = true;
     assembly.add(coil, damper, capA, capB);
@@ -942,7 +1373,15 @@ function solveRockerAngle(corner, bodyMatrix, wheelMatrix, fallback) {
 }
 
 function updateSuspension(model) {
+  if (!model || !Number.isFinite(model.geometryRevision) || model.geometryRevision !== CAR.geometryRevision) {
+    CAR.diag.geometryMismatch = true;
+    return;
+  }
   const bodyMatrix = S.bodyPivot.matrix;
+  CAR.diag.coilLengthMm = new Array(CAR.corners.length).fill(0);
+  CAR.diag.coilTiltDeg = new Array(CAR.corners.length).fill(0);
+  CAR.diag.coilAxis = new Array(CAR.corners.length).fill(null);
+  CAR.diag.rockerAngleDeg = new Array(CAR.corners.length).fill(0);
   applyRack(model);
   let maxLinkStretch = 0;
   let maxSuspLinkStretch = 0;
@@ -956,13 +1395,18 @@ function updateSuspension(model) {
     const travel = -model.cornerY[i];
     const fallbackAngle = corner.rocker.baseAngle + travel * corner.rocker.gain;
     const solvedCorner = model.solved && model.solved[i] ? model.solved[i] : null;
-    if (solvedCorner && Number.isFinite(solvedCorner.rockerAngle)) {
-      corner.angle = solvedCorner.rockerAngle;
-      corner.rockerSolveFailed = false;
+    if (solvedCorner && solvedCorner.rocker && Number.isFinite(solvedCorner.rocker.angle)) {
+      // Render-only display copy: the physics layer owns the seed and never
+      // reads corner.angle back (B1-4).
+      corner.angle = solvedCorner.rocker.angle;
+      corner.rockerSolveFailed = !solvedCorner.rocker.feasible;
     } else {
+      // Static rebuild before the first physics model exists: a display-only
+      // fallback. Its result is never fed back into the solver.
       corner.angle = solveRockerAngle(corner, bodyMatrix, wheelMatrix, fallbackAngle);
     }
     corner.rocker.mesh.rotation.z = corner.angle;
+    CAR.diag.rockerAngleDeg[i] = corner.angle * RAD;
     // Rocker arm tips in body-local coordinates.
     const cos = Math.cos(corner.angle);
     const sin = Math.sin(corner.angle);
@@ -1018,15 +1462,23 @@ function updateSuspension(model) {
         spring.assembly.position.copy(_mid);
         _dir.normalize();
         spring.assembly.quaternion.setFromUnitVectors(_axisY, _dir);
+        // Only the length axis scales; the lead-owned coil radius (0.040 m)
+        // and the wire stay at their authored size.
         spring.coil.scale.set(1, length, 1);
-        spring.damper.scale.set(0.016, length * 0.94, 0.016);
-        spring.capA.position.y = -length / 2;
-        spring.capB.position.y = length / 2;
-        spring.capA.scale.setScalar(0.033);
-        spring.capB.scale.setScalar(0.033);
+        spring.damper.scale.set(0.016, length * 0.88, 0.016);
+        spring.capA.position.y = -length / 2 + 0.006;
+        spring.capB.position.y = length / 2 - 0.006;
+        spring.capA.scale.set(0.042, 0.012, 0.042);
+        spring.capB.scale.set(0.042, 0.012, 0.042);
+        CAR.diag.coilLengthMm[i] = length * 1000;
+        CAR.diag.coilTiltDeg[i] = Math.asin(clamp(Math.abs(_dir.y), 0, 1)) * RAD;
+        CAR.diag.coilAxis[i] = [_dir.x, _dir.y, _dir.z];
       }
       spring.jointDamper.position.copy(b);
       spring.jointMount.position.copy(a);
+      const internalVisible = Boolean(CAR.internalGroup && CAR.internalGroup.visible);
+      spring.jointDamper.visible = internalVisible;
+      spring.jointMount.visible = internalVisible;
     }
 
     for (const shaft of CAR.driveshafts) {
@@ -1056,6 +1508,18 @@ function updateSuspension(model) {
 
   updateAntiRollBars(model);
 
+  CAR.diag.coilSource = (model.solved || []).map((solvedCorner) => (
+    solvedCorner && solvedCorner.coilSource ? solvedCorner.coilSource : 'none'
+  ));
+  CAR.diag.rockerArmMm = CAR.corners.map((corner) => [
+    corner.rocker.pushArm.length() * 1000,
+    corner.rocker.damperArm.length() * 1000,
+    corner.rocker.arbArm.length() * 1000
+  ]);
+  CAR.diag.pushRodLengthMm = CAR.corners.map((corner) => corner.pushRodLength0 * 1000);
+  CAR.diag.tieRodLengthMm = CAR.corners.map((corner) => corner.tieRodLength0 * 1000);
+  CAR.diag.springCount = CAR.springs.length;
+  CAR.diag.rodBushingCount = CAR.diag.rodBushingHits + CAR.diag.rodBushingMisses;
   CAR.diag.linkCount = CAR.links.length + CAR.driveshafts.length + CAR.arbs.length * 2;
   CAR.diag.jointCount = CAR.joints.length + CAR.driveshafts.length * 2 + CAR.arbs.length * 4;
   CAR.diag.steeringLinks = CAR.links.filter((link) => link.kind === 'steer').length;
@@ -1090,6 +1554,11 @@ function updateSuspension(model) {
 
 function updateCar(model) {
   if (!CAR.built) return;
+  if (!model || !Number.isFinite(model.geometryRevision) || model.geometryRevision !== CAR.geometryRevision) {
+    CAR.diag.geometryMismatch = true;
+    return;
+  }
+  CAR.diag.geometryMismatch = false;
   const bodyPos = model.bodyPos || { x: 0, y: model.heave || 0, z: 0 };
   const yaw = model.bodyYaw || 0;
   _qYaw.setFromAxisAngle(_axisY, yaw);
@@ -1099,9 +1568,8 @@ function updateCar(model) {
     S.bodyPivot.quaternion.set(model.bodyQuat[1], model.bodyQuat[2], model.bodyQuat[3], model.bodyQuat[0]);
   } else {
     S.bodyPivot.position.set(bodyPos.x, bodyPos.y, bodyPos.z);
-    _qPitch.setFromAxisAngle(_axisZ, model.pitch);
-    _qRoll.setFromAxisAngle(_axisX, model.roll);
-    S.bodyPivot.quaternion.copy(_qYaw).multiply(_qRoll).multiply(_qPitch);
+    const quat = simQuatFromEuler(yaw, model.pitch || 0, model.roll || 0);
+    S.bodyPivot.quaternion.set(quat[1], quat[2], quat[3], quat[0]);
   }
   S.bodyPivot.updateMatrix();
 
@@ -1120,26 +1588,24 @@ function updateCar(model) {
         solvedCorner.wheelQuat[2],
         solvedCorner.wheelQuat[3]
       );
+    } else if (corner.front) {
+      const axisLocal = _vecC.copy(corner.wheelLocal.upper).sub(corner.wheelLocal.lower).normalize();
+      const axisWorld = _vecD.copy(axisLocal).applyQuaternion(corner.restQuat);
+      const pivot = _vecE.copy(corner.wheelLocal.lower).applyQuaternion(corner.restQuat).add(corner.restCenter);
+      _qSteer.setFromAxisAngle(axisWorld, state.steer * DEG);
+      // The body's planar pose carries the wheel with it. Pitch and roll move
+      // the body relative to the contact plane and therefore load the springs,
+      // but the contact patch itself stays on the road.
+      const pivotPlan = _vecA.set(bodyPos.x, 0, bodyPos.z)
+        .add(_vecB.set(pivot.x, 0, pivot.z).applyQuaternion(_qYaw));
+      pivotPlan.y = pivot.y;
+      const offset = _vecC.copy(corner.restCenter).sub(pivot).applyQuaternion(_qSteer).applyQuaternion(_qYaw);
+      root.position.copy(pivotPlan).add(offset);
+      root.quaternion.copy(_qYaw).multiply(_qSteer).multiply(corner.restQuat);
     } else {
-          if (corner.front) {
-            const axisLocal = _vecC.copy(corner.wheelLocal.upper).sub(corner.wheelLocal.lower).normalize();
-            const axisWorld = _vecD.copy(axisLocal).applyQuaternion(corner.restQuat);
-            const pivot = _vecE.copy(corner.wheelLocal.lower).applyQuaternion(corner.restQuat).add(corner.restCenter);
-            _qSteer.setFromAxisAngle(axisWorld, state.steer * DEG);
-            // The body's planar pose carries the wheel with it. Pitch and roll move
-            // the body relative to the contact plane and therefore load the springs,
-            // but the contact patch itself stays on the road.
-            const pivotPlan = _vecA.set(bodyPos.x, 0, bodyPos.z)
-              .add(_vecB.set(pivot.x, 0, pivot.z).applyQuaternion(_qYaw));
-            pivotPlan.y = pivot.y;
-            const offset = _vecC.copy(corner.restCenter).sub(pivot).applyQuaternion(_qSteer).applyQuaternion(_qYaw);
-            root.position.copy(pivotPlan).add(offset);
-            root.quaternion.copy(_qYaw).multiply(_qSteer).multiply(corner.restQuat);
-          } else {
-            const offset = _vecA.set(corner.restCenter.x, 0, corner.restCenter.z).applyQuaternion(_qYaw);
-            root.position.set(bodyPos.x + offset.x, model.dims.R, bodyPos.z + offset.z);
-            root.quaternion.copy(_qYaw).multiply(corner.restQuat);
-          }
+      const offset = _vecA.set(corner.restCenter.x, 0, corner.restCenter.z).applyQuaternion(_qYaw);
+      root.position.set(bodyPos.x + offset.x, model.dims.R, bodyPos.z + offset.z);
+      root.quaternion.copy(_qYaw).multiply(corner.restQuat);
     }
     root.updateMatrix();
     root.updateMatrixWorld(true);
@@ -1154,6 +1620,10 @@ function updateCar(model) {
 }
 
 function buildCar(model) {
+  if (!model || !Number.isFinite(model.geometryRevision)) {
+    throw new Error('buildCar: model.geometryRevision is required');
+  }
+  beginCarBuild();
   initCarSceneGroups();
   disposeGroupChildren(S.bodyPivot);
   if (CAR.dynamicGroup) disposeGroupChildren(CAR.dynamicGroup);
@@ -1184,6 +1654,7 @@ function buildCar(model) {
   CAR.steeringWheel = null;
   CAR.bodyworkGroup = null;
   CAR.internalGroup = null;
+  CAR.skinMountGroup = null;
   CAR.dims = model.dims;
   CAR.built = false;
 
@@ -1206,6 +1677,7 @@ function buildCar(model) {
   buildInternalSuspension(CAR.corners);
   buildSuspensionLinks(CAR.corners);
 
+  finishCarBuild(model);
   CAR.built = true;
   applyXray();
   updateCar(model);

@@ -7,7 +7,7 @@ const GRAVITY = 9.80665;
 const DEG = Math.PI / 180;
 const RAD = 180 / Math.PI;
 const STORAGE_KEY = 'fs01.dynamic.setup.v1';
-const APP_VERSION = '0.2.0';
+const APP_VERSION = '0.4.1';
 
 const CORNERS = [
   { key: 'FL', zh: '左前', axle: 'front', side: 'left', zSign: -1 },
@@ -75,6 +75,46 @@ const DEFAULTS = Object.freeze({
 const state = Object.assign({}, DEFAULTS);
 let autoRotate = false;
 
+
+// B3-2: geometry generations. Six dimension keys define one immutable
+// hard-point set; the revision is allocated monotonically and the active
+// revision (the one the running sim owns) is never evicted.
+const GEOMETRY_KEYS = ['wheelbase', 'trackFront', 'trackRear', 'wheelRadius', 'tireWidthF', 'tireWidthR'];
+let GEOMETRY_SERIAL = 0;
+let ACTIVE_GEOMETRY_KEY = '';
+const GEOMETRY_REVISIONS = new Map();
+
+function geometrySignature(source = state) {
+  return GEOMETRY_KEYS.map((key) => Number(source[key]).toFixed(6)).join('|');
+}
+
+function setActiveGeometry(source = state) {
+  ACTIVE_GEOMETRY_KEY = geometrySignature(source);
+  return geometryRevisionFor(source);
+}
+
+function geometryRevisionFor(source = state) {
+  const key = geometrySignature(source);
+  let revision = GEOMETRY_REVISIONS.get(key);
+  if (!revision) {
+    GEOMETRY_SERIAL += 1;
+    revision = GEOMETRY_SERIAL;
+    GEOMETRY_REVISIONS.set(key, revision);
+    while (GEOMETRY_REVISIONS.size > 64) {
+      let evict = null;
+      for (const candidate of GEOMETRY_REVISIONS.keys()) {
+        if (candidate !== ACTIVE_GEOMETRY_KEY) {
+          evict = candidate;
+          break;
+        }
+      }
+      if (!evict) break;
+      GEOMETRY_REVISIONS.delete(evict);
+    }
+  }
+  return revision;
+}
+
 function cloneState(source = state) {
   return Object.assign({}, source);
 }
@@ -139,6 +179,43 @@ function computeDims(source = state) {
     zF: tf / 2,
     zR: tr / 2,
     xCG: (source.frontWeightPct / 100 - 0.5) * L
+  };
+}
+
+/**
+ * Bodywork stations shared by the loft renderer and suspension packaging tests.
+ * X stations are relative to the front axle so dimension changes preserve the
+ * established Formula-car silhouette. No suspension hardpoint is stored here.
+ */
+function buildBodyworkProfiles(dims) {
+  const at = (section) => Object.assign({}, section, { x: dims.xF + section.x });
+  return {
+    monocoque: [
+      { x: 0.83, w: 0.075, y0: 0.190, y1: 0.278, e: 0.82 },
+      { x: 0.62, w: 0.11, y0: 0.165, y1: 0.315, e: 0.8 },
+      { x: 0.38, w: 0.17, y0: 0.140, y1: 0.365, e: 0.76 },
+      { x: 0.13, w: 0.245, y0: 0.115, y1: 0.425, e: 0.73 },
+      { x: -0.15, w: 0.32, y0: 0.096, y1: 0.492, e: 0.7 },
+      { x: -0.45, w: 0.40, y0: 0.082, y1: 0.555, e: 0.68 },
+      { x: -0.80, w: 0.47, y0: 0.074, y1: 0.600, e: 0.66 },
+      { x: -1.15, w: 0.53, y0: 0.068, y1: 0.625, e: 0.64 },
+      { x: -1.45, w: 0.56, y0: 0.064, y1: 0.645, e: 0.64 },
+      { x: -1.75, w: 0.54, y0: 0.063, y1: 0.650, e: 0.66 },
+      { x: -2.10, w: 0.45, y0: 0.070, y1: 0.620, e: 0.7 },
+      { x: -2.45, w: 0.34, y0: 0.083, y1: 0.545, e: 0.74 },
+      { x: -2.80, w: 0.22, y0: 0.110, y1: 0.430, e: 0.8 },
+      { x: -3.08, w: 0.12, y0: 0.150, y1: 0.320, e: 0.88 }
+    ].map(at),
+    engineCover: [
+      { x: -1.60, w: 0.245, y0: 0.58, y1: 0.700, e: 0.8 },
+      { x: -1.80, w: 0.27, y0: 0.55, y1: 0.755, e: 0.75 },
+      { x: -2.02, w: 0.27, y0: 0.50, y1: 0.815, e: 0.72 },
+      { x: -2.30, w: 0.24, y0: 0.43, y1: 0.800, e: 0.7 },
+      { x: -2.60, w: 0.20, y0: 0.36, y1: 0.735, e: 0.7 },
+      { x: -2.95, w: 0.14, y0: 0.29, y1: 0.620, e: 0.74 },
+      { x: -3.25, w: 0.085, y0: 0.24, y1: 0.470, e: 0.82 },
+      { x: -3.48, w: 0.045, y0: 0.22, y1: 0.335, e: 0.9 }
+    ].map(at)
   };
 }
 
@@ -470,6 +547,8 @@ function computeStatic(source = state) {
 
   return {
     source,
+    geometryRevision: geometryRevisionFor(source),
+    geometrySignature: geometrySignature(source),
     dims,
     frame,
     mass,
@@ -524,6 +603,7 @@ function computeStatic(source = state) {
     heave,
     pitch,
     roll,
+    referencePoint: { x: 0, y: heave, z: 0 },
     poseDeg: {
       pitch: pitch * RAD,
       roll: roll * RAD

@@ -6,6 +6,18 @@ const UI = {
   initialized: false,
   lastModel: null,
   selfTests: [],
+  selfTestCache: {
+    revision: 0,
+    staticTests: null,
+    dynamicTests: null,
+    dynamicRevision: 0,
+    dynamicSetupRevision: 0,
+    dynamicRunning: false,
+    dynamicJob: null,
+    dynamicToken: 0,
+    runs: { static: 0, dynamic: 0 }
+  },
+  checkRows: {},
   toastTimer: 0,
   labelLayer: null,
   cornerLabels: [],
@@ -14,8 +26,34 @@ const UI = {
   partLabels: [],
   inspectIndex: -1,
   elements: {},
-  modalReturnFocus: null
+  modalReturnFocus: null,
+  modalInert: null,
+  solverState: 'ok',
+  listeners: [],
+  mediaListeners: [],
+  modalFocusTimer: 0,
+  resizeTimer: 0,
+  disposed: false
 };
+
+const PANEL_TABINDEX = new WeakMap();
+
+const SETUP_KEYS = ['mass', 'frontWeightPct', 'cgHeight', 'cgLateral', 'wheelbase', 'trackFront', 'trackRear', 'wheelRadius', 'tireWidthF', 'tireWidthR', 'wheelRateF', 'wheelRateR', 'dampingF', 'dampingR', 'arbFront', 'arbRear', 'slope', 'bank', 'friction'];
+let SETUP_REVISION = 0;
+let SETUP_SIGNATURE = '';
+
+function setupSignature(source = state) {
+  return SETUP_KEYS.map((key) => Number(source[key]).toPrecision(10)).join('|');
+}
+
+function noteSetupChange(source = state) {
+  const signature = setupSignature(source);
+  if (signature !== SETUP_SIGNATURE) {
+    SETUP_SIGNATURE = signature;
+    SETUP_REVISION += 1;
+  }
+  return SETUP_REVISION;
+}
 
 const INSPECT_VIEWS = [
   { preset: 'inspectSteering', label: '转向', toast: '转向机、转向拉杆与转向柱' },
@@ -27,6 +65,17 @@ const INSPECT_VIEWS = [
 const $ = (selector, parent = document) => parent.querySelector(selector);
 const $$ = (selector, parent = document) => Array.from(parent.querySelectorAll(selector));
 const _partWorld = new THREE.Vector3();
+
+function listenUI(target, type, handler, options) {
+  target.addEventListener(type, handler, options);
+  UI.listeners.push({ target, type, handler, options });
+}
+
+function listenUIMedia(query, handler) {
+  if (query.addEventListener) query.addEventListener('change', handler);
+  else if (query.addListener) query.addListener(handler);
+  UI.mediaListeners.push({ query, handler });
+}
 
 function formatOutputValue(param, value) {
   switch (param) {
@@ -101,7 +150,9 @@ function syncControlsFromState() {
     if (input.type === 'range') input.setAttribute('aria-valuetext', formatOutputValue(param, state[param]));
   });
   $$('.unit-toggle button').forEach((button) => {
-    button.classList.toggle('is-active', button.dataset.units === state.units);
+    const selected = button.dataset.units === state.units;
+    button.classList.toggle('is-active', selected);
+    button.setAttribute('aria-pressed', String(selected));
   });
   const xrayButton = document.getElementById('btnXray');
   if (xrayButton) {
@@ -130,6 +181,7 @@ function updateRoadChips() {
       Math.abs(state.bank - target.bank) < 0.001 &&
       (target.friction == null || Math.abs(state.friction - target.friction) < 0.001);
     button.classList.toggle('is-active', Boolean(matches));
+    button.setAttribute('aria-pressed', String(Boolean(matches)));
   });
 }
 
@@ -149,7 +201,9 @@ function applyUnit(unit) {
   if (unit !== 'N' && unit !== 'kg') return;
   state.units = unit;
   $$('.unit-toggle button').forEach((button) => {
-    button.classList.toggle('is-active', button.dataset.units === unit);
+    const selected = button.dataset.units === unit;
+    button.classList.toggle('is-active', selected);
+    button.setAttribute('aria-pressed', String(selected));
   });
   persistState();
   refreshAll({ rebuild: false });
@@ -194,6 +248,11 @@ function setAutoRotate(enabled) {
 
 function simulationReset({ settle = 0, toast = '姿态已重置到平衡位置' } = {}) {
   if (!SIM) SIM = simCreate(state);
+  if (SIM.geometryRevision !== geometryRevisionFor(state)) {
+    refreshAll({ rebuild: true, reason: 'geometry' });
+    if (toast) showToast('几何参数已变化，重建完成后再重置');
+    return;
+  }
   simReset(SIM, state, { settle });
   SIM.running = true;
   const model = simBuildModel(SIM, state);
@@ -223,7 +282,6 @@ function resetAll() {
   autoRotate = false;
   if (SIM) {
     SIM.running = true;
-    simReset(SIM, state, { settle: 1.0 });
   }
   syncControlsFromState();
   setAutoRotate(false);
@@ -231,7 +289,7 @@ function resetAll() {
   persistState();
   resetCamera(false);
   resetInspectButton();
-  refreshAll({ rebuild: true });
+  refreshAll({ rebuild: true, reason: 'reset' });
   showToast('已恢复默认标定与相机');
 }
 
@@ -306,16 +364,85 @@ async function copyConfig() {
 }
 
 function showToast(message) {
+  if (UI.disposed) return;
   const toast = document.getElementById('toast');
   if (!toast) return;
   toast.textContent = message;
   toast.classList.add('is-visible');
   window.clearTimeout(UI.toastTimer);
-  UI.toastTimer = window.setTimeout(() => toast.classList.remove('is-visible'), 2400);
+  UI.toastTimer = window.setTimeout(() => {
+    UI.toastTimer = 0;
+    if (!UI.disposed) toast.classList.remove('is-visible');
+  }, 2400);
 }
 
 function isCompact() {
   return window.innerWidth <= 980;
+}
+
+function setPanelInert(panel, inert) {
+  if (!panel) return;
+  if ('inert' in panel) {
+    panel.inert = inert;
+  } else if (inert) {
+    const saved = [];
+    $$('button, [href], input, select, textarea, summary, [tabindex]', panel).forEach((element) => {
+      saved.push([element, element.getAttribute('tabindex')]);
+      element.setAttribute('tabindex', '-1');
+    });
+    PANEL_TABINDEX.set(panel, saved);
+  } else {
+    const saved = PANEL_TABINDEX.get(panel) || [];
+    saved.forEach(([element, value]) => {
+      if (value === null) element.removeAttribute('tabindex');
+      else element.setAttribute('tabindex', value);
+    });
+    PANEL_TABINDEX.delete(panel);
+  }
+  if (inert) panel.setAttribute('aria-hidden', 'true');
+  else panel.removeAttribute('aria-hidden');
+}
+
+function modalFocusables(modal) {
+  return $$('button, [href], input, select, textarea, summary, [tabindex]', modal).filter((element) => {
+    if (element.disabled) return false;
+    if (element.getAttribute('tabindex') === '-1') return false;
+    if (element.closest('[inert]')) return false;
+    return element.offsetParent !== null;
+  });
+}
+
+function setModalBackgroundInert() {
+  if (UI.modalInert) return;
+  UI.modalInert = new Map();
+  $$('#viewport, .topbar, .panel, .bottom-bar, .viewport-hint, #mobileScrim').forEach((element) => {
+    UI.modalInert.set(element, element.inert);
+    element.inert = true;
+  });
+}
+
+function restoreModalBackgroundInert() {
+  if (!UI.modalInert) return;
+  UI.modalInert.forEach((value, element) => {
+    element.inert = value;
+  });
+  UI.modalInert = null;
+}
+
+function trapModalFocus(event) {
+  const modal = document.getElementById('modelModal');
+  if (!modal || modal.hidden) return;
+  const items = modalFocusables(modal);
+  if (!items.length) return;
+  const first = items[0];
+  const last = items[items.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    last.focus();
+    event.preventDefault();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    first.focus();
+    event.preventDefault();
+  }
 }
 
 function updatePanelUI() {
@@ -327,11 +454,11 @@ function updatePanelUI() {
   const rightButton = document.getElementById('btnToggleTelemetry');
   if (leftButton) {
     leftButton.classList.toggle('is-active', Boolean(leftOpen));
-    leftButton.setAttribute('aria-pressed', String(Boolean(leftOpen)));
+    leftButton.setAttribute('aria-expanded', String(Boolean(leftOpen)));
   }
   if (rightButton) {
     rightButton.classList.toggle('is-active', Boolean(rightOpen));
-    rightButton.setAttribute('aria-pressed', String(Boolean(rightOpen)));
+    rightButton.setAttribute('aria-expanded', String(Boolean(rightOpen)));
   }
   const scrim = document.getElementById('mobileScrim');
   if (scrim) scrim.hidden = !(isCompact() && (leftOpen || rightOpen));
@@ -343,10 +470,20 @@ function setPanel(panelId, open, { exclusive = false } = {}) {
   if (open && exclusive) {
     const otherId = panelId === 'panelControls' ? 'panelTelemetry' : 'panelControls';
     const other = document.getElementById(otherId);
-    if (other) other.classList.remove('is-open');
+    if (other) {
+      other.classList.remove('is-open');
+      setPanelInert(other, true);
+    }
+  }
+  if (!open && panel.contains(document.activeElement)) {
+    const toggleId = panelId === 'panelControls' ? 'btnToggleControls' : 'btnToggleTelemetry';
+    const toggle = document.getElementById(toggleId);
+    if (toggle) toggle.focus({ preventScroll: true });
   }
   panel.classList.toggle('is-open', open);
+  setPanelInert(panel, !open);
   updatePanelUI();
+  if (S.initialized && !UI.disposed) resizeScene();
 }
 
 function togglePanel(panelId) {
@@ -357,15 +494,21 @@ function togglePanel(panelId) {
 }
 
 function openModelModal() {
+  if (UI.disposed) return;
   const modal = document.getElementById('modelModal');
   if (!modal) return;
   UI.modalReturnFocus = document.activeElement;
   modal.hidden = false;
+  setModalBackgroundInert();
   document.body.classList.add('modal-open');
   refreshSelfTests();
-  window.setTimeout(() => {
-    const closeButton = modal.querySelector('button[data-close-modal]');
-    if (closeButton) closeButton.focus();
+  window.clearTimeout(UI.modalFocusTimer);
+  UI.modalFocusTimer = window.setTimeout(() => {
+    UI.modalFocusTimer = 0;
+    if (UI.disposed || modal.hidden) return;
+    const items = modalFocusables(modal);
+    const target = modal.querySelector('button[data-close-modal]') || items[0];
+    if (target) target.focus();
   }, 20);
 }
 
@@ -374,33 +517,165 @@ function closeModelModal() {
   if (!modal || modal.hidden) return;
   modal.hidden = true;
   document.body.classList.remove('modal-open');
+  restoreModalBackgroundInert();
   if (UI.modalReturnFocus && typeof UI.modalReturnFocus.focus === 'function') {
     UI.modalReturnFocus.focus();
   }
 }
 
-function refreshSelfTests({ dynamic = true } = {}) {
-  const staticTests = runSelfTests(state);
-  UI.selfTests = staticTests;
-  if (dynamic || !UI.dynamicTests) UI.dynamicTests = runDynamicSelfTests(state);
-  const tests = staticTests.concat(UI.dynamicTests);
+function cancelDynamicSelfTests() {
+  const cache = UI.selfTestCache;
+  cache.dynamicToken += 1;
+  if (cache.dynamicJob) cache.dynamicJob.cancel();
+  cache.dynamicJob = null;
+  cache.dynamicRunning = false;
+  cache.dynamicTests = null;
+  cache.dynamicRevision = 0;
+  UI.dynamicTests = [];
+}
+
+function startDynamicSelfTestJob(setup, { isCurrent, onDone, onDiscard }) {
+  const iterator = simDynamicSelfTestSteps(setup);
+  const tests = [];
+  let timer = 0;
+  let stopped = false;
+  const cancel = () => {
+    if (stopped) return;
+    stopped = true;
+    window.clearTimeout(timer);
+    if (typeof iterator.return === 'function') iterator.return();
+  };
+  const discard = () => {
+    cancel();
+    if (onDiscard) onDiscard();
+  };
+  const pump = () => {
+    timer = 0;
+    if (stopped) return;
+    if (!isCurrent()) {
+      discard();
+      return;
+    }
+    const startedAt = performance.now();
+    while (!stopped) {
+      if (!isCurrent()) {
+        discard();
+        return;
+      }
+      const step = iterator.next();
+      if (step.done) {
+        stopped = true;
+        if (onDone) onDone(step.value || tests);
+        return;
+      }
+      tests.push(step.value);
+      if (performance.now() - startedAt >= 50) {
+        timer = window.setTimeout(pump, 0);
+        return;
+      }
+    }
+  };
+  pump();
+  return { cancel };
+}
+
+function ensureStaticSelfTests({ force = false } = {}) {
+  const revision = noteSetupChange(state);
+  if (force || UI.selfTestCache.revision !== revision || !UI.selfTestCache.staticTests) {
+    UI.selfTestCache.staticTests = runSelfTests(state);
+    UI.selfTestCache.revision = revision;
+    UI.selfTestCache.runs.static += 1;
+    if (UI.selfTestCache.dynamicRevision !== revision || UI.selfTestCache.dynamicRunning) {
+      cancelDynamicSelfTests();
+    }
+  }
+  UI.selfTests = UI.selfTestCache.staticTests;
+  return UI.selfTests;
+}
+
+function ensureDynamicSelfTests({ force = false, onDone = null } = {}) {
+  if (UI.disposed) return null;
+  const cache = UI.selfTestCache;
+  const revision = noteSetupChange(state);
+  if (!force && cache.dynamicTests && cache.dynamicRevision === revision) {
+    if (onDone) onDone(cache.dynamicTests);
+    return cache.dynamicTests;
+  }
+  if (!force && cache.dynamicRunning && cache.dynamicJob && cache.dynamicJob.revision === revision) return null;
+  if (cache.dynamicJob || cache.dynamicTests) cancelDynamicSelfTests();
+  const setup = cloneState(state);
+  const startedRevision = revision;
+  const token = cache.dynamicToken + 1;
+  cache.dynamicToken = token;
+  cache.dynamicRunning = true;
+  cache.dynamicSetupRevision = startedRevision;
+  cache.dynamicTests = null;
+  cache.dynamicRevision = 0;
+  UI.dynamicTests = [];
+  const isCurrent = () => !UI.disposed && cache.dynamicToken === token && noteSetupChange(state) === startedRevision;
+  const discard = () => {
+    if (cache.dynamicToken !== token) return;
+    cache.dynamicJob = null;
+    cache.dynamicRunning = false;
+    cache.dynamicTests = null;
+    cache.dynamicRevision = 0;
+    UI.dynamicTests = [];
+  };
+  const job = startDynamicSelfTestJob(setup, {
+    isCurrent,
+    onDiscard: discard,
+    onDone: (tests) => {
+      if (!isCurrent()) {
+        discard();
+        return;
+      }
+      cache.dynamicJob = null;
+      cache.dynamicRunning = false;
+      cache.dynamicTests = tests;
+      cache.dynamicRevision = startedRevision;
+      cache.runs.dynamic += 1;
+      UI.dynamicTests = tests;
+      if (onDone) onDone(tests);
+      refreshSelfTests({ dynamic: false });
+    }
+  });
+  job.revision = startedRevision;
+  if (cache.dynamicRunning && cache.dynamicToken === token) cache.dynamicJob = job;
+  return null;
+}
+
+function refreshSelfTests({ dynamic = true, force = false } = {}) {
+  if (UI.disposed) return UI.selfTests;
+  const staticTests = ensureStaticSelfTests({ force });
+  if (dynamic && (force || !UI.selfTestCache.dynamicTests || UI.selfTestCache.dynamicRevision !== UI.selfTestCache.revision)) {
+    ensureDynamicSelfTests({ force, onDone: () => refreshSelfTests({ dynamic: false }) });
+  }
+  const dynamicTests = UI.selfTestCache.dynamicTests || [];
+  UI.dynamicTests = dynamicTests;
+  const tests = staticTests.concat(dynamicTests);
   const passed = tests.filter((test) => test.ok).length;
   const total = tests.length;
 
+  const dynamicState = dynamicTests.length
+    ? `动态 ${dynamicTests.filter((test) => test.ok).length} / ${dynamicTests.length}`
+    : (UI.selfTestCache.dynamicRunning ? '动态运行中' : '动态待运行');
   const rightStatus = document.getElementById('selfTestStatus');
-  if (rightStatus) rightStatus.textContent = `${passed} / ${total} 通过`;
+  if (rightStatus) rightStatus.textContent = `静力 ${staticTests.filter((test) => test.ok).length} / ${staticTests.length} · ${dynamicState}`;
 
+  const solverState = UI.lastModel ? solverStateOf(UI.lastModel) : 'ok';
+  const solverWarn = solverState !== 'ok';
+  const solverText = solverState === 'failed' ? '求解失败' : solverState === 'degraded' ? '求解降级' : '求解正常';
   const summary = document.getElementById('selfTestSummary');
   if (summary) {
-    summary.textContent = `${passed} / ${total} 项通过 · 静态 ${staticTests.length} / 动态 ${UI.dynamicTests.length}`;
-    summary.style.color = passed === total ? 'var(--ok)' : 'var(--warn)';
+    summary.textContent = `${passed} / ${total} 项通过 · 静态 ${staticTests.length} / ${dynamicState}${solverWarn ? ' · ' + solverText : ''}`;
+    summary.style.color = passed === total && !solverWarn && dynamicTests.length ? 'var(--ok)' : 'var(--warn)';
   }
 
   const list = document.getElementById('selfTestList');
   if (list) {
     list.textContent = '';
     const labelled = staticTests.map((test) => ({ ...test, group: '静态' }))
-      .concat(UI.dynamicTests.map((test) => ({ ...test, group: '动态' })));
+      .concat(dynamicTests.map((test) => ({ ...test, group: '动态' })));
     labelled.forEach((test) => {
       const item = document.createElement('li');
       if (!test.ok) item.className = 'is-fail';
@@ -478,6 +753,7 @@ function updateLabelPositions() {
   if (!UI.cornerLabels.length || !S.initialized) return;
   const showLoadLabels = Boolean(state.showLoads && state.showLabels);
   const anchors = S.labelAnchors || [];
+  const safe = cameraSafeArea();
   for (let i = 0; i < UI.cornerLabels.length; i += 1) {
     const label = UI.cornerLabels[i];
     const anchor = anchors[i];
@@ -491,7 +767,11 @@ function updateLabelPositions() {
       continue;
     }
     label.element.classList.remove('is-hidden');
-    label.element.style.transform = `translate(-50%, -50%) translate(${projected.x.toFixed(1)}px, ${projected.y.toFixed(1)}px)`;
+    const halfWidth = label.element.offsetWidth / 2;
+    const halfHeight = label.element.offsetHeight / 2;
+    const x = clamp(projected.x, safe.left + halfWidth + 3, safe.right - halfWidth - 3);
+    const y = clamp(projected.y, safe.top + halfHeight + 3, safe.bottom - halfHeight - 3);
+    label.element.style.transform = `translate(-50%, -50%) translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
   }
 
   if (UI.cgLabel) {
@@ -540,7 +820,8 @@ function updateLabelPositions() {
       return;
     }
     label.element.classList.remove('is-hidden');
-    const x = (projected.x + label.offsetX).toFixed(1);
+    const halfWidth = label.element.offsetWidth / 2;
+    const x = clamp(projected.x + label.offsetX, safe.left + halfWidth + 3, safe.right - halfWidth - 3).toFixed(1);
     label.element.style.transform = `translate(-50%, ${label.offset}%) translate(${x}px, ${projected.y.toFixed(1)}px)`;
   });
 }
@@ -560,24 +841,53 @@ function setText(id, text) {
   if (element) element.textContent = text;
 }
 
+function setNodeText(element, text) {
+  if (!element) return;
+  const first = element.firstChild;
+  if (first && first.nodeType === 3) {
+    if (first.nodeValue !== text) first.nodeValue = text;
+    return;
+  }
+  element.textContent = text;
+}
+
+function solverStateOf(model) {
+  const sim = model && model.sim;
+  if (sim && sim.solverFailed) return 'failed';
+  if (sim && sim.solverDegraded) return 'degraded';
+  if (model && model.solverOk === true) return 'ok';
+  if (sim) return 'failed';
+  return 'ok';
+}
+
+function refreshSolverBadge(model) {
+  const state = solverStateOf(model);
+  if (UI.solverState === state) return;
+  UI.solverState = state;
+  const badge = document.getElementById('solverBadge');
+  if (!badge) return;
+  badge.dataset.state = state;
+  if (state === 'ok') {
+    badge.hidden = true;
+    return;
+  }
+  badge.hidden = false;
+  badge.textContent = state === 'degraded' ? '求解降级' : '求解失败';
+}
+
 function refreshChecks(model) {
   const container = document.getElementById('checkList');
-  if (!container) return;
+  if (!container || !model) return;
   const diag = getCarDiagnostics();
-  const tests = UI.selfTests;
-  const dynamicTests = UI.dynamicTests || [];
+  const tests = UI.selfTests || [];
+  const dynamicTests = (UI.selfTestCache && UI.selfTestCache.dynamicTests) || UI.dynamicTests || [];
   const passed = tests.filter((test) => test.ok).length;
   const dynamicPassed = dynamicTests.filter((test) => test.ok).length;
-  const sim = model.sim || {
-    time: 0,
-    running: true,
-    holding: true,
-    sliding: false,
-    finite: true,
-    recovered: false,
-    stepHz: 500,
-    substeps: 0
+  const fallbackSim = {
+    time: 0, running: true, holding: true, sliding: false, finite: true,
+    recovered: false, stepHz: 500, substeps: 0, backlog: 0, droppedTime: 0, timeScale: 1
   };
+  const sim = model.sim || fallbackSim;
   const linksOk = diag.linkCount > 0 && diag.maxSuspLinkStretchMm < 1 && diag.rockerSolveOk;
   const steerOk = diag.tieRodStretchMm < 5 && diag.rockerSolveOk;
   const arbOk = diag.arbCount === 2 && diag.arbFront && diag.arbRear && diag.arbStretchMm < 0.5;
@@ -586,66 +896,87 @@ function refreshChecks(model) {
   const testsOk = tests.length > 0 && passed === tests.length;
   const dynamicOk = dynamicTests.length > 0 && dynamicPassed === dynamicTests.length;
   const frictionState = sim.sliding ? '滑移' : sim.holding ? '静摩擦' : '—';
+  const timeScale = Number.isFinite(sim.timeScale) ? sim.timeScale : 1;
+  const dropped = Number.isFinite(sim.droppedTime) ? sim.droppedTime : 0;
+  const solverState = solverStateOf(model);
+  const solverOk = model.solverOk === true;
+  const residuals = Array.isArray(model.rockerResidualMm) ? model.rockerResidualMm : [];
+  const feasible = Array.isArray(model.rockerFeasible) ? model.rockerFeasible : [];
+  const residualMaxMm = residuals.length ? Math.max.apply(null, residuals) : NaN;
+  const failedCorners = feasible.filter((value) => !value).length;
+  const residualOk = feasible.length === 4 && feasible.every(Boolean) && Number.isFinite(residualMaxMm) && residualMaxMm < 0.1;
+  const ratioStates = Array.isArray(model.motionRatioState) ? model.motionRatioState : [];
+  const unavailableCorners = ratioStates.filter((value) => value !== 'ok').length;
+  const motionOk = ratioStates.length === 4 && unavailableCorners === 0;
+  const solverLabel = solverState === 'failed' ? '失败' : solverState === 'degraded' ? '降级' : '正常';
 
   const rows = [
-    {
-      ok: sim.finite && !sim.recovered,
-      name: '六自由度积分',
-      value: `t ${sim.time.toFixed(2)} s · ${sim.stepHz} Hz · ${sim.substeps} 子步`
-    },
-    {
-      ok: contactOk,
-      name: '四轮接地',
-      value: `${diag.contactCount} / 4 · 最小 ${loadDisplay(model.minLoad)} ${unitDisplay()}`
-    },
-    {
-      ok: linksOk,
-      name: '悬架杆长偏差',
-      value: `${diag.linkCount} 根 / ${diag.jointCount} 点 · ${diag.maxSuspLinkStretchMm.toFixed(3)} mm`
-    },
-    {
-      ok: steerOk,
-      name: '齿条 / 横拉杆',
-      value: `齿条 ${formatSigned(diag.rackTravelMm, 1)} mm · 横拉杆 ${diag.tieRodStretchMm.toFixed(3)} mm`
-    },
-    {
-      ok: arbOk,
-      name: '防倾杆连接',
-      value: `${diag.arbCount} 套 · 扭转 ${diag.arbTwistDeg.toFixed(2)}° · 伸长 ${diag.arbStretchMm.toFixed(2)} mm`
-    },
-    {
-      ok: frictionOk,
-      name: '坡面摩擦',
-      value: `μ_req ${model.frictionDemand.toFixed(3)} / ${model.frictionCapacity.toFixed(2)} · ${frictionState}`
-    },
-    {
-      ok: testsOk,
-      name: '静力自检',
-      value: tests.length ? `${passed} / ${tests.length} 通过` : '待运行'
-    },
-    {
-      ok: dynamicOk,
-      name: '动态自检',
-      value: dynamicTests.length ? `${dynamicPassed} / ${dynamicTests.length} 通过` : '待运行'
-    }
+    { id: 'sim', ok: sim.finite && !sim.recovered && solverOk, name: '六自由度积分与求解', value: `t ${sim.time.toFixed(2)} s · ${sim.stepHz} Hz · ${sim.substeps} 子步 · ${timeScale.toFixed(2)}× · 丢 ${dropped.toFixed(2)} s · 求解 ${solverLabel}` },
+    { id: 'contact', ok: contactOk, name: '四轮接地', value: `${diag.contactCount} / 4 · 最小 ${loadDisplay(model.minLoad)} ${unitDisplay()}` },
+    { id: 'links', ok: linksOk, name: '悬架杆长偏差', value: `${diag.linkCount} 根 / ${diag.jointCount} 点 · ${diag.maxSuspLinkStretchMm.toFixed(3)} mm` },
+    { id: 'steer', ok: steerOk, name: '齿条 / 横拉杆', value: `齿条 ${formatSigned(diag.rackTravelMm, 1)} mm · 横拉杆 ${diag.tieRodStretchMm.toFixed(3)} mm` },
+    { id: 'arb', ok: arbOk, name: '防倾杆连接', value: `${diag.arbCount} 套 · 扭转 ${diag.arbTwistDeg.toFixed(2)}° · 伸长 ${diag.arbStretchMm.toFixed(2)} mm` },
+    { id: 'friction', ok: frictionOk, name: '坡面摩擦', value: `μ_req ${model.frictionDemand.toFixed(3)} / ${model.frictionCapacity.toFixed(2)} · ${frictionState}` },
+    { id: 'rockerResidual', ok: residualOk, error: solverState === 'failed', name: '摇臂闭合残差', value: Number.isFinite(residualMaxMm) ? `${residualMaxMm.toFixed(3)} / 0.100 mm · 失败 ${failedCorners} 角` : '—' },
+    { id: 'motionRatio', ok: motionOk, error: solverState === 'failed', name: '运动比连续性', value: ratioStates.length ? `不可用 ${unavailableCorners} 角 · 求解${solverLabel}` : '—' },
+    { id: 'staticTests', ok: testsOk, name: '静力自检', value: tests.length ? `${passed} / ${tests.length} 通过` : '待运行' },
+    { id: 'dynamicTests', ok: dynamicOk, name: '动态自检', value: dynamicTests.length ? `${dynamicPassed} / ${dynamicTests.length} 通过` : '待运行' }
   ];
 
-  container.textContent = '';
   rows.forEach((row) => {
-    const item = document.createElement('div');
-    item.className = 'check-item ' + (row.ok ? 'is-ok' : 'is-warn');
-    const icon = document.createElement('span');
-    icon.className = 'check-icon';
-    icon.textContent = row.ok ? '✓' : '!';
-    const name = document.createElement('span');
-    name.className = 'check-name';
-    name.textContent = row.name;
-    const value = document.createElement('span');
-    value.className = 'check-val';
-    value.textContent = row.value;
-    item.append(icon, name, value);
-    container.appendChild(item);
+    const className = 'check-item ' + (row.ok ? 'is-ok' : row.error ? 'is-error' : 'is-warn');
+    let cached = UI.checkRows[row.id];
+    if (!cached || !cached.item || cached.item.parentNode !== container) {
+      const item = document.createElement('div');
+      item.className = className;
+      item.dataset.checkId = row.id;
+      const icon = document.createElement('span');
+      icon.className = 'check-icon';
+      icon.textContent = row.ok ? '✓' : '!';
+      const name = document.createElement('span');
+      name.className = 'check-name';
+      name.textContent = row.name;
+      const value = document.createElement('span');
+      value.className = 'check-val';
+      value.textContent = row.value;
+      item.append(icon, name, value);
+      container.appendChild(item);
+      cached = { item, icon, name, value, ok: row.ok, className, text: row.name, valueText: row.value };
+      UI.checkRows[row.id] = cached;
+      return;
+    }
+    if (cached.className !== className) {
+      cached.className = className;
+      cached.ok = row.ok;
+      cached.item.className = className;
+      setNodeText(cached.icon, row.ok ? '✓' : '!');
+    }
+    if (cached.text !== row.name) {
+      cached.text = row.name;
+      setNodeText(cached.name, row.name);
+    }
+    if (cached.valueText !== row.value) {
+      cached.valueText = row.value;
+      setNodeText(cached.value, row.value);
+    }
   });
+}
+
+function renderSimStatus(model = UI.lastModel) {
+  const sim = model && model.sim ? model.sim : null;
+  if (!sim && !SIM) {
+    setText('simDetail', '静态参考');
+    return;
+  }
+  const running = SIM ? SIM.running : sim ? sim.running : true;
+  const time = SIM ? SIM.time : sim ? sim.time : 0;
+  const sliding = SIM ? SIM.flags.sliding : Boolean(sim && sim.sliding);
+  const holding = SIM ? SIM.flags.holding : Boolean(sim && sim.holding);
+  const stateText = sliding ? '切向滑移' : holding ? '静摩擦保持' : '瞬态';
+  const backlogMs = (Number.isFinite(sim && sim.backlog) ? sim.backlog : (Number.isFinite(sim && sim.accumulator) ? sim.accumulator : 0)) * 1000;
+  const dropped = Number.isFinite(sim && sim.droppedTime) ? sim.droppedTime : 0;
+  const stepHz = sim && sim.stepHz ? sim.stepHz : Math.round(1 / SIM_DT);
+  setText('simDetail', `${running ? '运行' : '暂停'} · t ${time.toFixed(2)} s · ${stepHz} Hz · ${stateText} · 积压 ${backlogMs.toFixed(1)} ms · 丢 ${dropped.toFixed(2)} s`);
 }
 
 function syncSimControls(model = UI.lastModel) {
@@ -670,13 +1001,15 @@ function syncSimControls(model = UI.lastModel) {
   }
   setText('telemetrySimState', sim || SIM ? (running ? '运行' : '暂停') : '静态');
   setText('telemetrySimTime', `${simTime.toFixed(2)} s`);
-  setText('telemetrySimSteps', sim || SIM ? `${sim ? sim.stepHz : Math.round(1 / SIM_DT)} Hz · ${substeps} 子步/帧` : '—');
+  const timeScale = SIM && Number.isFinite(SIM.timeScale) ? SIM.timeScale : (sim && Number.isFinite(sim.timeScale) ? sim.timeScale : 1);
+  setText('telemetrySimSteps', sim || SIM ? `${sim ? sim.stepHz : Math.round(1 / SIM_DT)} Hz · ${substeps} 子步/帧 · ${timeScale.toFixed(2)}×` : '—');
+  renderSimStatus(model);
 }
 
 function refreshTelemetry(model) {
   UI.lastModel = model;
   if (!model) return;
-  UI.selfTests = runSelfTests(state);
+  ensureStaticSelfTests();
   const sim = model.sim || null;
   const loads = model.loads.slice();
   const sumLoads = loads.reduce((acc, value) => acc + value, 0);
@@ -778,13 +1111,6 @@ function refreshTelemetry(model) {
   if (model.inertia) {
     setText('dynInertia', `${model.inertia.Ixx.toFixed(0)} / ${model.inertia.Iyy.toFixed(0)} / ${model.inertia.Izz.toFixed(0)} kg·m²`);
   }
-  if (sim) {
-    const stateText = sim.sliding ? '切向滑移' : sim.holding ? '静摩擦保持' : '瞬态';
-    setText('simDetail', `${sim.running ? '运行' : '暂停'} · t ${sim.time.toFixed(2)} s · ${sim.stepHz} Hz · ${stateText}`);
-  } else {
-    setText('simDetail', '静态参考');
-  }
-
   const diag = getCarDiagnostics();
   setText('linkStatus', `${diag.linkCount} 根 · ${diag.jointCount} 点 · 悬架杆长偏差 ${diag.maxSuspLinkStretchMm.toFixed(3)} mm`);
   setText(
@@ -802,7 +1128,7 @@ function refreshTelemetry(model) {
     const dynamicPassed = dynamicTests.filter((test) => test.ok).length;
     setText(
       'selfTestStatus',
-      `静力 ${passed} / ${tests.length}${dynamicTests.length ? ` · 动态 ${dynamicPassed} / ${dynamicTests.length}` : ''}`
+      `静力 ${passed} / ${tests.length}${dynamicTests.length ? ` · 动态 ${dynamicPassed} / ${dynamicTests.length}` : ' · 动态待运行'} · ${solverStateOf(model) === 'failed' ? '求解失败' : solverStateOf(model) === 'degraded' ? '求解降级' : '求解正常'}`
     );
   }
 
@@ -814,7 +1140,19 @@ function refreshTelemetry(model) {
   if (warning) {
     const title = warning.querySelector('b');
     const detail = warning.querySelector('span');
-    if (model.liftedCount > 0) {
+    const solverState = solverStateOf(model);
+    const residuals = Array.isArray(model.rockerResidualMm) ? model.rockerResidualMm : [];
+    const residualMax = residuals.length ? Math.max.apply(null, residuals) : NaN;
+    const feasible = Array.isArray(model.rockerFeasible) ? model.rockerFeasible : [];
+    const failedCorners = feasible.filter((value) => !value).length;
+    const ratioStates = Array.isArray(model.motionRatioState) ? model.motionRatioState : [];
+    const unavailable = ratioStates.filter((value) => value !== 'ok').length;
+    warning.classList.toggle('is-error', solverState === 'failed');
+    if (solverState !== 'ok') {
+      warning.hidden = false;
+      title.textContent = solverState === 'failed' ? `求解失败：${failedCorners} 个角点不可达` : `求解降级：${failedCorners} 个角点不可达`;
+      detail.textContent = `最大残差 ${Number.isFinite(residualMax) ? residualMax.toFixed(3) : '—'} mm（判据 0.100 mm）· 运动比不可用 ${unavailable} 角；载荷按降级分支计算。`;
+    } else if (model.liftedCount > 0) {
       warning.hidden = false;
       title.textContent = `${model.liftedCount} 个车轮卸载`;
       detail.textContent = '等效悬挂力已截断为 0；请减小倾角、质心高度或横向偏移，或提高轮心率。';
@@ -831,6 +1169,13 @@ function refreshTelemetry(model) {
     }
   }
 
+  refreshSolverBadge(model);
+  const solveResiduals = Array.isArray(model.rockerResidualMm) ? model.rockerResidualMm : [];
+  const solveMax = solveResiduals.length ? Math.max.apply(null, solveResiduals) : NaN;
+  const solveRatios = Array.isArray(model.motionRatioState) ? model.motionRatioState : [];
+  const solveUnavailable = solveRatios.filter((value) => value !== 'ok').length;
+  const solveState = solverStateOf(model);
+  setText('cornerSolveStatus', Number.isFinite(solveMax) ? `max ${solveMax.toFixed(3)} / 0.100 mm · 不可用 ${solveUnavailable} 角 · ${solveState === 'failed' ? '求解失败' : solveState === 'degraded' ? '求解降级' : '求解正常'}` : '—');
   syncSimControls(model);
   refreshChecks(model);
   refreshLabelContent(model);
@@ -840,7 +1185,9 @@ function refreshTelemetry(model) {
 
 function syncCameraButtonActive(name) {
   $$('[data-camera]').forEach((button) => {
-    button.classList.toggle('is-active', button.dataset.camera === name);
+    const selected = button.dataset.camera === name;
+    button.classList.toggle('is-active', selected);
+    button.setAttribute('aria-pressed', String(selected));
   });
 }
 
@@ -864,6 +1211,7 @@ function resetInspectButton() {
   const button = document.getElementById('btnInspect');
   if (button) {
     button.classList.remove('is-active');
+    button.setAttribute('aria-pressed', 'false');
     button.innerHTML = '<span class="tool-glyph">⌬</span>机构';
   }
 }
@@ -879,6 +1227,7 @@ function cycleInspectView() {
   const button = document.getElementById('btnInspect');
   if (button) {
     button.classList.add('is-active');
+    button.setAttribute('aria-pressed', 'true');
     button.innerHTML = `<span class="tool-glyph">⌬</span>机构 · ${view.label}`;
   }
   showToast(`${view.toast} · 按 R 返回总览`);
@@ -900,7 +1249,7 @@ function bindControls() {
   $$('[data-param]').forEach((input) => {
     const param = input.dataset.param;
     if (input.type === 'checkbox') {
-      input.addEventListener('change', () => {
+      listenUI(input, 'change', () => {
         applyStateChange(param, input.checked, { rebuild: false });
         if (param === 'xray') {
           const button = document.getElementById('btnXray');
@@ -912,7 +1261,7 @@ function bindControls() {
       });
       return;
     }
-    input.addEventListener('input', () => {
+    listenUI(input, 'input', () => {
       const value = Number(input.value);
       if (!Number.isFinite(value)) return;
       const rebuild = input.dataset.rebuild === '1';
@@ -928,38 +1277,38 @@ function bindControls() {
   });
 
   $$('[data-road-preset]').forEach((button) => {
-    button.addEventListener('click', () => applyRoadPreset(button.dataset.roadPreset));
+    listenUI(button, 'click', () => applyRoadPreset(button.dataset.roadPreset));
   });
 
   $$('.unit-toggle button').forEach((button) => {
-    button.addEventListener('click', () => applyUnit(button.dataset.units));
+    listenUI(button, 'click', () => applyUnit(button.dataset.units));
   });
 
   const btnScreenshot = document.getElementById('btnScreenshot');
-  if (btnScreenshot) btnScreenshot.addEventListener('click', requestScreenshot);
+  if (btnScreenshot) listenUI(btnScreenshot, 'click', requestScreenshot);
   const btnScreenshotBottom = document.getElementById('btnScreenshotBottom');
-  if (btnScreenshotBottom) btnScreenshotBottom.addEventListener('click', requestScreenshot);
+  if (btnScreenshotBottom) listenUI(btnScreenshotBottom, 'click', requestScreenshot);
 
   const btnReset = document.getElementById('btnResetAll');
-  if (btnReset) btnReset.addEventListener('click', resetAll);
+  if (btnReset) listenUI(btnReset, 'click', resetAll);
   const btnCopy = document.getElementById('btnCopyConfig');
-  if (btnCopy) btnCopy.addEventListener('click', copyConfig);
+  if (btnCopy) listenUI(btnCopy, 'click', copyConfig);
   const btnLevel = document.getElementById('btnLevelSnapshot');
-  if (btnLevel) btnLevel.addEventListener('click', () => applyRoadPreset('level'));
+  if (btnLevel) listenUI(btnLevel, 'click', () => applyRoadPreset('level'));
 
   const btnXray = document.getElementById('btnXray');
-  if (btnXray) btnXray.addEventListener('click', () => setXray(!state.xray));
+  if (btnXray) listenUI(btnXray, 'click', () => setXray(!state.xray));
   const btnAuto = document.getElementById('btnAutoRotate');
-  if (btnAuto) btnAuto.addEventListener('click', () => setAutoRotate(!autoRotate));
+  if (btnAuto) listenUI(btnAuto, 'click', () => setAutoRotate(!autoRotate));
   const btnInspect = document.getElementById('btnInspect');
-  if (btnInspect) btnInspect.addEventListener('click', cycleInspectView);
+  if (btnInspect) listenUI(btnInspect, 'click', cycleInspectView);
 
   const btnSimToggle = document.getElementById('btnSimToggle');
-  if (btnSimToggle) btnSimToggle.addEventListener('click', simulationToggle);
+  if (btnSimToggle) listenUI(btnSimToggle, 'click', simulationToggle);
   const btnSimReset = document.getElementById('btnSimReset');
-  if (btnSimReset) btnSimReset.addEventListener('click', () => simulationReset({ settle: 0 }));
+  if (btnSimReset) listenUI(btnSimReset, 'click', () => simulationReset({ settle: 0 }));
   const btnSimSettle = document.getElementById('btnSimSettle');
-  if (btnSimSettle) btnSimSettle.addEventListener('click', () => simulationReset({ settle: 2, toast: '已回到静力平衡姿态' }));
+  if (btnSimSettle) listenUI(btnSimSettle, 'click', () => simulationReset({ settle: 2, toast: '已回到静力平衡姿态' }));
   const impulseButtons = [
     ['btnImpulseHeave', 'heave'],
     ['btnImpulseRoll', 'roll'],
@@ -967,58 +1316,68 @@ function bindControls() {
   ];
   for (const [id, kind] of impulseButtons) {
     const button = document.getElementById(id);
-    if (button) button.addEventListener('click', () => simulationImpulse(kind));
+    if (button) listenUI(button, 'click', () => simulationImpulse(kind));
   }
 
   const btnResetView = document.getElementById('btnResetView');
-  if (btnResetView) btnResetView.addEventListener('click', () => {
+  if (btnResetView) listenUI(btnResetView, 'click', () => {
     resetCamera();
     resetInspectButton();
     showToast('相机已重置');
   });
 
   const btnOrtho = document.getElementById('btnOrtho');
-  if (btnOrtho) btnOrtho.addEventListener('click', () => {
+  if (btnOrtho) listenUI(btnOrtho, 'click', () => {
     setOrtho(CAMERA.projection !== 'orthographic');
   });
 
   $$('[data-camera]').forEach((button) => {
-    button.addEventListener('click', () => {
+    listenUI(button, 'click', () => {
       resetInspectButton();
       setCameraPreset(button.dataset.camera);
     });
   });
 
   const btnToggleControls = document.getElementById('btnToggleControls');
-  if (btnToggleControls) btnToggleControls.addEventListener('click', () => togglePanel('panelControls'));
+  if (btnToggleControls) listenUI(btnToggleControls, 'click', () => togglePanel('panelControls'));
   const btnToggleTelemetry = document.getElementById('btnToggleTelemetry');
-  if (btnToggleTelemetry) btnToggleTelemetry.addEventListener('click', () => togglePanel('panelTelemetry'));
+  if (btnToggleTelemetry) listenUI(btnToggleTelemetry, 'click', () => togglePanel('panelTelemetry'));
   $$('[data-close-panel]').forEach((button) => {
-    button.addEventListener('click', () => setPanel(button.dataset.closePanel, false));
+    listenUI(button, 'click', () => setPanel(button.dataset.closePanel, false));
   });
   const scrim = document.getElementById('mobileScrim');
-  if (scrim) scrim.addEventListener('click', () => {
+  if (scrim) listenUI(scrim, 'click', () => {
     setPanel('panelControls', false);
     setPanel('panelTelemetry', false);
   });
 
   const btnHelp = document.getElementById('btnHelp');
-  if (btnHelp) btnHelp.addEventListener('click', openModelModal);
+  if (btnHelp) listenUI(btnHelp, 'click', openModelModal);
   $$('[data-close-modal]').forEach((element) => {
-    element.addEventListener('click', closeModelModal);
+    listenUI(element, 'click', closeModelModal);
   });
 
   bindKeyboard();
   bindWindowChrome();
 }
 
+const SHORTCUT_BLOCK_SELECTOR = 'button, a[href], summary, label, input, select, textarea, [contenteditable=""], [contenteditable="true"], [role="button"], [role="slider"], [role="switch"], [role="checkbox"]';
+function shortcutTargetBlocked(target) {
+  if (!target || typeof target.closest !== 'function') return false;
+  return Boolean(target.closest(SHORTCUT_BLOCK_SELECTOR));
+}
+
 function bindKeyboard() {
-  window.addEventListener('keydown', (event) => {
+  listenUI(window, 'keydown', (event) => {
     const tag = event.target && event.target.tagName ? event.target.tagName.toLowerCase() : '';
     const isTyping = tag === 'input' || tag === 'textarea' || tag === 'select';
     const modal = document.getElementById('modelModal');
     const modalOpen = modal && !modal.hidden;
 
+    if (event.key === 'Tab' && modalOpen) {
+      trapModalFocus(event);
+      return;
+    }
     if (event.key === 'Escape') {
       if (modalOpen) {
         closeModelModal();
@@ -1032,11 +1391,12 @@ function bindKeyboard() {
       return;
     }
     if (isTyping || modalOpen) return;
+    if (event.defaultPrevented || shortcutTargetBlocked(event.target)) return;
     // Leave browser and OS shortcuts (Ctrl+R, Cmd+O, Alt+...) alone.
     if (event.ctrlKey || event.metaKey || event.altKey) return;
 
     const key = event.key.toLowerCase();
-    if (event.code === 'Space') {
+    if (event.key === ' ' || event.code === 'Space') {
       simulationToggle();
       event.preventDefault();
     } else if (key === 'i') {
@@ -1106,28 +1466,29 @@ function bindWindowChrome() {
   // embedded browsers, so use the same media query as the CSS layout.
   const compactQuery = window.matchMedia('(max-width: 980px)');
   const onCompactChange = (event) => {
-    setPanel('panelControls', !event.matches);
-    setPanel('panelTelemetry', !event.matches);
+    if (event.matches) {
+      setPanel('panelControls', false);
+      setPanel('panelTelemetry', false);
+    }
     updatePanelUI();
   };
-  if (compactQuery.addEventListener) compactQuery.addEventListener('change', onCompactChange);
-  else if (compactQuery.addListener) compactQuery.addListener(onCompactChange);
+  listenUIMedia(compactQuery, onCompactChange);
 
-  let resizeTimer = 0;
-  window.addEventListener('resize', () => {
-    window.clearTimeout(resizeTimer);
-    resizeTimer = window.setTimeout(() => {
-      updatePanelUI();
+  listenUI(window, 'resize', () => {
+    window.clearTimeout(UI.resizeTimer);
+    UI.resizeTimer = window.setTimeout(() => {
+      UI.resizeTimer = 0;
+      if (!UI.disposed) updatePanelUI();
     }, 80);
   });
 }
 
 function initUI() {
-  if (UI.initialized) return;
+  if (UI.initialized || UI.disposed) return;
   createAnnotationLabels();
   bindControls();
   syncControlsFromState();
-  refreshSelfTests();
+  refreshSelfTests({ dynamic: false });
   syncSimControls();
   CAMERA.onChange = (reason) => {
     if (reason === 'preset') {
@@ -1141,6 +1502,38 @@ function initUI() {
   syncCameraButtonActive(CAMERA.preset || '');
   syncCameraModeButtons();
   UI.initialized = true;
+}
+
+function teardownUI() {
+  if (UI.disposed) return;
+  UI.disposed = true;
+  cancelDynamicSelfTests();
+  window.clearTimeout(UI.toastTimer);
+  window.clearTimeout(UI.modalFocusTimer);
+  window.clearTimeout(UI.resizeTimer);
+  UI.toastTimer = 0;
+  UI.modalFocusTimer = 0;
+  UI.resizeTimer = 0;
+  for (const entry of UI.listeners.splice(0)) {
+    entry.target.removeEventListener(entry.type, entry.handler, entry.options);
+  }
+  for (const entry of UI.mediaListeners.splice(0)) {
+    if (entry.query.removeEventListener) entry.query.removeEventListener('change', entry.handler);
+    else if (entry.query.removeListener) entry.query.removeListener(entry.handler);
+  }
+  const modal = document.getElementById('modelModal');
+  if (modal) modal.hidden = true;
+  document.body.classList.remove('modal-open');
+  restoreModalBackgroundInert();
+  UI.modalReturnFocus = null;
+  CAMERA.onChange = null;
+  if (UI.labelLayer) UI.labelLayer.textContent = '';
+  UI.labelLayer = null;
+  UI.cornerLabels = [];
+  UI.partLabels = [];
+  UI.cgLabel = null;
+  UI.projLabel = null;
+  UI.initialized = false;
 }
 
 UI.refreshTelemetry = refreshTelemetry;

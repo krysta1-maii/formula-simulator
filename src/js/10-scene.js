@@ -18,7 +18,11 @@ const S = {
   labelAnchors: [],
   cgWorld: new THREE.Vector3(),
   projWorld: new THREE.Vector3(),
-  plate: null
+  plate: null,
+  teardownDone: false,
+  listeners: [],
+  resizeObserver: null,
+  portraitChange: null
 };
 
 const MAT = {};
@@ -35,16 +39,16 @@ const TEX = {};
  *           above this value, otherwise the long car overflows the screen.
  */
 const CAMERA_PRESETS = {
-  threeQuarter: { theta: 0.62, phi: 1.22, zoom: 5.79, target: [0, 0.55, 0], projection: 'perspective' },
+  threeQuarter: { theta: 0.62, phi: 1.22, zoom: 5.79, fitWidth: 6.2, target: [0, 0.55, 0], projection: 'perspective' },
   side: { theta: Math.PI / 2, phi: Math.PI / 2, zoom: 6.0, fitWidth: 6.3, target: [0, 0.55, 0], projection: 'orthographic' },
   front: { theta: 0, phi: Math.PI / 2, zoom: 2.45, fitWidth: 3.1, target: [0, 0.55, 0], projection: 'orthographic' },
   rear: { theta: Math.PI, phi: Math.PI / 2, zoom: 2.45, fitWidth: 3.1, target: [0, 0.55, 0], projection: 'orthographic' },
   top: { theta: Math.PI / 2, phi: 0.002, zoom: 6.0, fitWidth: 6.3, target: [0, 0.55, 0], projection: 'orthographic' },
-  portrait: { theta: 0.26, phi: 1.18, zoom: 8.05, target: [0, 0.55, 0], projection: 'perspective' },
-  inspectSteering: { theta: 0.55, phi: 0.72, zoom: 1.82, target: [1.35, 0.34, 0], arc: 0.22 },
+  portrait: { theta: 0.26, phi: 1.18, zoom: 8.05, fitWidth: 5.0, target: [0, 0.55, 0], projection: 'perspective' },
+  inspectSteering: { theta: 0.55, phi: 0.72, zoom: 1.82, target: [1.675, 0.30, 0], arc: 0.22 },
   inspectDrivetrain: { theta: 2.40, phi: 0.70, zoom: 1.82, target: [-1.40, 0.34, 0], arc: 0.22 },
-  inspectArb: { theta: 0.15, phi: 0.72, zoom: 1.95, target: [1.34, 0.55, 0], arc: 0.22 },
-  inspectArbRear: { theta: 2.55, phi: 0.45, zoom: 1.82, target: [-1.45, 0.52, 0], arc: 0.22 }
+  inspectArb: { theta: 0.15, phi: 0.72, zoom: 1.95, target: [1.53, 0.43, 0], arc: 0.22 },
+  inspectArbRear: { theta: 2.55, phi: 0.45, zoom: 1.82, target: [-1.30, 0.40, 0], arc: 0.22 }
 };
 
 const PORTRAIT_QUERY = window.matchMedia('(max-width: 980px) and (orientation: portrait)');
@@ -651,7 +655,11 @@ function setupEnvironment() {
   S.envRT = pmrem.fromEquirectangular(TEX.env);
   S.scene.environment = S.envRT.texture;
   pmrem.dispose();
-  TEX.env.dispose();
+  if (TEX.env) {
+    TEX.env.userData = TEX.env.userData || {};
+    TEX.env.userData.__disposed = true;
+    TEX.env.dispose();
+  }
 }
 
 function setupLights() {
@@ -1026,6 +1034,14 @@ function buildOverlay() {
   S.cgProjectionCross = projCross;
 }
 
+const LOAD_ARROW_REF_HEIGHT = 0.30;
+const LOAD_ARROW_MAX_HEIGHT = 1.35;
+
+function loadArrowHeight(loadN, referenceN) {
+  const ref = Number.isFinite(referenceN) && referenceN > 1 ? referenceN : 1;
+  return clamp((loadN / ref) * LOAD_ARROW_REF_HEIGHT, 0, LOAD_ARROW_MAX_HEIGHT);
+}
+
 function updateOverlays(model) {
   const visible = Boolean(state.showLoads);
   S.loadOverlay.visible = visible;
@@ -1046,7 +1062,7 @@ function updateOverlays(model) {
     const fore = wheel.axle === 'front' ? 0.24 : -0.24;
     const baseX = contact.x + forwardX * fore + lateralX * outward;
     const baseZ = contact.z + forwardZ * fore + lateralZ * outward;
-    const arrowHeight = clamp(0.26 + 0.56 * (load / Math.max(avgCorner, 1)), 0.2, 0.88);
+    const arrowHeight = loadArrowHeight(load, Math.max(avgCorner, 1));
     const arrow = S.loadArrows[i];
     const shaftLength = Math.max(0.02, arrowHeight - arrow.arrow.head);
     arrow.arrow.group.position.set(baseX, 0.035, baseZ);
@@ -1142,9 +1158,70 @@ const CAMERA_ORTHO_DISTANCE = 12;
 const CAMERA_TARGET_MIN = new THREE.Vector3(-4.2, -0.6, -3.6);
 const CAMERA_TARGET_MAX = new THREE.Vector3(4.2, 2.6, 3.6);
 
+function cameraSafeArea() {
+  const width = S.host ? Math.max(1, S.host.clientWidth) : 1280;
+  const height = S.host ? Math.max(1, S.host.clientHeight) : 720;
+  const hostRect = S.host ? S.host.getBoundingClientRect() : { left: 0, top: 0 };
+  let left = 12;
+  let right = width - 12;
+  let top = 12;
+  let bottom = height - 12;
+  const topbar = document.querySelector('.topbar');
+  const bottomBar = document.querySelector('.bottom-bar');
+  if (topbar) top = Math.max(top, topbar.getBoundingClientRect().bottom - hostRect.top + 8);
+  if (bottomBar) bottom = Math.min(bottom, bottomBar.getBoundingClientRect().top - hostRect.top - 8);
+
+  // Compact panels are modal drawers. Desktop panels instead define the
+  // unobscured camera viewport, including room for labels at its edges.
+  if (window.innerWidth > 980) {
+    const controls = document.getElementById('panelControls');
+    const telemetry = document.getElementById('panelTelemetry');
+    if (controls && controls.classList.contains('is-open')) {
+      left = Math.max(left, controls.getBoundingClientRect().right - hostRect.left + 12);
+    }
+    if (telemetry && telemetry.classList.contains('is-open')) {
+      right = Math.min(right, telemetry.getBoundingClientRect().left - hostRect.left - 12);
+    }
+  }
+  if (right - left < 120) {
+    const center = (left + right) / 2;
+    left = Math.max(0, center - 60);
+    right = Math.min(width, center + 60);
+  }
+  return {
+    left,
+    top,
+    right,
+    bottom,
+    width: Math.max(1, right - left),
+    height: Math.max(1, bottom - top),
+    canvasWidth: width,
+    canvasHeight: height
+  };
+}
+
 function cameraAspect() {
-  if (!S.host) return 16 / 9;
-  return Math.max(0.2, S.host.clientWidth / Math.max(1, S.host.clientHeight));
+  const area = cameraSafeArea();
+  return Math.max(0.2, area.width / area.height);
+}
+
+function applyCameraSafeArea() {
+  const area = cameraSafeArea();
+  for (const camera of [S.cameraPersp, S.cameraOrtho]) {
+    if (!camera) continue;
+    // The virtual camera covers only the safe rectangle. Negative view offsets
+    // expand its projection onto the full canvas without changing pixel scale.
+    camera.setViewOffset(
+      area.width,
+      area.height,
+      -area.left,
+      -area.top,
+      area.canvasWidth,
+      area.canvasHeight
+    );
+  }
+  updateOrthoFrustum();
+  if (S.cameraPersp) S.cameraPersp.updateProjectionMatrix();
 }
 
 /** Perspective distance that shows exactly CAMERA.zoom metres at the target. */
@@ -1247,6 +1324,7 @@ function applyCameraView(view) {
 function setCameraPreset(name, immediate = false) {
   const preset = CAMERA_PRESETS[name];
   if (!preset) return;
+  if (S.initialized) applyCameraSafeArea();
   if (preset.projection && preset.projection !== CAMERA.projection) {
     setCameraProjection(preset.projection, { silent: true });
   }
@@ -1317,6 +1395,7 @@ function clearCameraPreset() {
  * of the car toward the viewer instead of always zooming the orbit centre.
  */
 function zoomCameraAt(clientX, clientY, factor) {
+  if (!S.renderer || !S.camera) return;
   const rect = S.renderer.domElement.getBoundingClientRect();
   const before = CAMERA.goalZoom;
   const after = clamp(before * factor, CAMERA_MIN_ZOOM, CAMERA_MAX_ZOOM);
@@ -1324,13 +1403,16 @@ function zoomCameraAt(clientX, clientY, factor) {
   const ratio = after / before;
   const ndcX = ((clientX - rect.left) / Math.max(1, rect.width)) * 2 - 1;
   const ndcY = 1 - ((clientY - rect.top) / Math.max(1, rect.height)) * 2;
-  const right = new THREE.Vector3().setFromMatrixColumn(S.camera.matrix, 0);
-  const up = new THREE.Vector3().setFromMatrixColumn(S.camera.matrix, 1);
-  const halfHeight = before / 2;
-  const halfWidth = halfHeight * (rect.width / Math.max(1, rect.height));
-  const pivot = CAMERA.goalTarget.clone()
-    .addScaledVector(right, ndcX * halfWidth)
-    .addScaledVector(up, ndcY * halfHeight);
+  const origin = CAMERA.projection === 'orthographic'
+    ? new THREE.Vector3(ndcX, ndcY, -1).unproject(S.camera)
+    : S.camera.position.clone();
+  const cursorWorld = new THREE.Vector3(ndcX, ndcY, 0.5).unproject(S.camera);
+  const direction = cursorWorld.sub(origin).normalize();
+  const normal = S.camera.getWorldDirection(new THREE.Vector3());
+  const denominator = direction.dot(normal);
+  if (Math.abs(denominator) < 1e-8) return;
+  const distance = CAMERA.goalTarget.clone().sub(origin).dot(normal) / denominator;
+  const pivot = origin.addScaledVector(direction, distance);
   const offset = pivot.sub(CAMERA.goalTarget);
   CAMERA.goalZoom = after;
   CAMERA.goalTarget.addScaledVector(offset, 1 - ratio);
@@ -1338,8 +1420,9 @@ function zoomCameraAt(clientX, clientY, factor) {
 }
 
 function panCameraBy(dx, dy) {
-  const rect = S.renderer.domElement.getBoundingClientRect();
-  const worldPerPixel = CAMERA.goalZoom / Math.max(1, rect.height);
+  if (!S.camera) return;
+  const area = cameraSafeArea();
+  const worldPerPixel = CAMERA.goalZoom / Math.max(1, area.height);
   const right = new THREE.Vector3().setFromMatrixColumn(S.camera.matrix, 0);
   const up = new THREE.Vector3().setFromMatrixColumn(S.camera.matrix, 1);
   CAMERA.goalTarget.addScaledVector(right, -dx * worldPerPixel);
@@ -1347,9 +1430,14 @@ function panCameraBy(dx, dy) {
   clampCameraTarget(CAMERA.goalTarget);
 }
 
+function listenScene(target, type, handler, options) {
+  target.addEventListener(type, handler, options);
+  S.listeners.push({ target, type, handler, options });
+}
+
 function initCameraControls() {
   const el = S.renderer.domElement;
-  el.addEventListener('contextmenu', (event) => event.preventDefault());
+  listenScene(el, 'contextmenu', (event) => event.preventDefault());
 
   const pointerPair = () => Array.from(CAMERA.pointers.values());
   const pointerDistance = () => {
@@ -1449,11 +1537,11 @@ function initCameraControls() {
     }
   };
 
-  el.addEventListener('pointerdown', onPointerDown);
-  el.addEventListener('pointermove', onPointerMove);
-  el.addEventListener('pointerup', onPointerUp);
-  el.addEventListener('pointercancel', onPointerUp);
-  window.addEventListener('blur', () => {
+  listenScene(el, 'pointerdown', onPointerDown);
+  listenScene(el, 'pointermove', onPointerMove);
+  listenScene(el, 'pointerup', onPointerUp);
+  listenScene(el, 'pointercancel', onPointerUp);
+  listenScene(window, 'blur', () => {
     // A window switch can swallow pointerup; drop stale pointers so the next
     // gesture starts in a single-pointer state.
     CAMERA.pointers.clear();
@@ -1463,7 +1551,7 @@ function initCameraControls() {
     el.classList.remove('is-panning');
   });
 
-  el.addEventListener('wheel', (event) => {
+  listenScene(el, 'wheel', (event) => {
     event.preventDefault();
     if (!CAMERA.enabled) return;
     const delta = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY;
@@ -1473,7 +1561,37 @@ function initCameraControls() {
     zoomCameraAt(event.clientX, event.clientY, clamp(factor, 0.7, 1.4));
   }, { passive: false });
 
-  el.addEventListener('dblclick', () => resetCamera());
+  listenScene(el, 'dblclick', () => resetCamera());
+
+  listenScene(el, 'keydown', (event) => {
+    if (!CAMERA.enabled || event.ctrlKey || event.metaKey || event.altKey || event.defaultPrevented) return;
+    const key = event.key;
+    const area = cameraSafeArea();
+    const rect = el.getBoundingClientRect();
+    const centerX = rect.left + area.left + area.width / 2;
+    const centerY = rect.top + area.top + area.height / 2;
+    if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(key)) {
+      markCameraManual();
+      if (event.shiftKey) {
+        const dx = key === 'ArrowLeft' ? -48 : key === 'ArrowRight' ? 48 : 0;
+        const dy = key === 'ArrowUp' ? -48 : key === 'ArrowDown' ? 48 : 0;
+        panCameraBy(dx, dy);
+      } else {
+        if (key === 'ArrowLeft') CAMERA.goalTheta -= 0.12;
+        if (key === 'ArrowRight') CAMERA.goalTheta += 0.12;
+        if (key === 'ArrowUp') CAMERA.goalPhi = clamp(CAMERA.goalPhi - 0.10, CAMERA_PHI_MIN, CAMERA_PHI_MAX);
+        if (key === 'ArrowDown') CAMERA.goalPhi = clamp(CAMERA.goalPhi + 0.10, CAMERA_PHI_MIN, CAMERA_PHI_MAX);
+      }
+      event.preventDefault();
+      event.stopPropagation();
+    } else if (['+', '=', '-', '_', 'PageUp', 'PageDown'].includes(key)) {
+      markCameraManual();
+      const zoomIn = key === '+' || key === '=' || key === 'PageUp';
+      zoomCameraAt(centerX, centerY, zoomIn ? 0.88 : 1.14);
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  });
 }
 
 function updateCamera(dt) {
@@ -1523,11 +1641,7 @@ function resizeScene() {
   const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
   S.renderer.setPixelRatio(pixelRatio);
   S.renderer.setSize(width, height, true);
-  if (S.cameraPersp) {
-    S.cameraPersp.aspect = width / height;
-    S.cameraPersp.updateProjectionMatrix();
-  }
-  updateOrthoFrustum();
+  applyCameraSafeArea();
   // Keep an untouched axis view fitted when the viewport changes shape.
   if (S.initialized && CAMERA.preset && !CAMERA.userMoved && !CAMERA.transition) {
     const preset = CAMERA_PRESETS[CAMERA.preset];
@@ -1545,6 +1659,36 @@ function resizeScene() {
   }
 }
 
+function cameraFramingProbe() {
+  const empty = { left: 0, right: 0, top: 0, bottom: 0, samples: 0, safe: cameraSafeArea() };
+  if (!S.carRoot || !S.camera || !S.scene) return empty;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let samples = 0;
+  const point = new THREE.Vector3();
+  const canvas = S.renderer.domElement;
+  const width = canvas.clientWidth;
+  const height = canvas.clientHeight;
+  S.scene.updateMatrixWorld(true);
+  S.carRoot.traverse((object) => {
+    if (!object.isMesh || !object.geometry || !object.geometry.attributes.position) return;
+    const positions = object.geometry.attributes.position;
+    for (let i = 0; i < positions.count; i += 1) {
+      point.fromBufferAttribute(positions, i).applyMatrix4(object.matrixWorld).project(S.camera);
+      const x = (point.x * 0.5 + 0.5) * width;
+      const y = (-point.y * 0.5 + 0.5) * height;
+      minX = Math.min(minX, x);
+      maxX = Math.max(maxX, x);
+      minY = Math.min(minY, y);
+      maxY = Math.max(maxY, y);
+      samples += 1;
+    }
+  });
+  return { left: minX, right: maxX, top: minY, bottom: maxY, samples, safe: cameraSafeArea() };
+}
+
 function projectWorld(world, out = { x: 0, y: 0, visible: false }) {
   if (!S.camera || !S.renderer) return out;
   const projected = world.clone().project(S.camera);
@@ -1559,6 +1703,7 @@ function projectWorld(world, out = { x: 0, y: 0, visible: false }) {
 
 function initScene() {
   if (S.initialized) return;
+  S.teardownDone = false;
   S.host = document.getElementById('viewport');
 
   S.renderer = new THREE.WebGLRenderer({
@@ -1573,7 +1718,8 @@ function initScene() {
   S.renderer.toneMappingExposure = 0.72;
   S.renderer.shadowMap.enabled = true;
   S.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  S.renderer.domElement.setAttribute('aria-label', '方程式赛车三维动态底盘台');
+  S.renderer.domElement.setAttribute('aria-label', '方程式赛车三维动态底盘台；方向键旋转，Shift 加方向键平移，加减键或 PageUp、PageDown 缩放');
+  S.renderer.domElement.setAttribute('aria-keyshortcuts', 'ArrowLeft ArrowRight ArrowUp ArrowDown Shift+ArrowLeft Shift+ArrowRight Shift+ArrowUp Shift+ArrowDown + - PageUp PageDown');
   S.renderer.domElement.setAttribute('tabindex', '0');
   S.host.appendChild(S.renderer.domElement);
 
@@ -1607,9 +1753,9 @@ function initScene() {
   buildOverlay();
   initCameraControls();
 
-  const resizeObserver = new ResizeObserver(() => resizeScene());
-  resizeObserver.observe(S.host);
-  window.addEventListener('resize', resizeScene);
+  S.resizeObserver = new ResizeObserver(() => resizeScene());
+  S.resizeObserver.observe(S.host);
+  listenScene(window, 'resize', resizeScene);
 
   resizeScene();
 
@@ -1617,7 +1763,7 @@ function initScene() {
   // visible; desktop starts at the standard three-quarter view.
   if (PORTRAIT_QUERY.matches) setCameraPreset('portrait', true);
   else setCameraPreset('threeQuarter', true);
-  const onPortraitChange = (event) => {
+  S.portraitChange = (event) => {
     // A deliberate axis view is re-fitted to the new viewport; the default
     // view swaps between the desktop and portrait framing.
     if (CAMERA.preset && CAMERA.preset !== 'portrait' && CAMERA.preset !== 'threeQuarter') {
@@ -1626,9 +1772,129 @@ function initScene() {
       setCameraPreset(event.matches ? 'portrait' : 'threeQuarter');
     }
   };
-  if (PORTRAIT_QUERY.addEventListener) PORTRAIT_QUERY.addEventListener('change', onPortraitChange);
-  else if (PORTRAIT_QUERY.addListener) PORTRAIT_QUERY.addListener(onPortraitChange);
+  if (PORTRAIT_QUERY.addEventListener) PORTRAIT_QUERY.addEventListener('change', S.portraitChange);
+  else if (PORTRAIT_QUERY.addListener) PORTRAIT_QUERY.addListener(S.portraitChange);
 
   updateCamera(0.016);
   S.initialized = true;
 }
+
+/* ------------------------------ teardown ------------------------------ */
+
+function teardownScene() {
+  if (S.teardownDone) return CAR.assets.lastTeardown;
+  S.teardownDone = true;
+  for (const entry of S.listeners.splice(0)) {
+    entry.target.removeEventListener(entry.type, entry.handler, entry.options);
+  }
+  if (S.resizeObserver) {
+    S.resizeObserver.disconnect();
+    S.resizeObserver = null;
+  }
+  if (S.portraitChange) {
+    if (PORTRAIT_QUERY.removeEventListener) PORTRAIT_QUERY.removeEventListener('change', S.portraitChange);
+    else if (PORTRAIT_QUERY.removeListener) PORTRAIT_QUERY.removeListener(S.portraitChange);
+    S.portraitChange = null;
+  }
+  CAMERA.onChange = null;
+  CAMERA.transition = null;
+  CAMERA.dragging = null;
+  CAMERA.pinch = null;
+  CAMERA.pointers.clear();
+  CAR.built = false;
+  const rendererMemoryBefore = S.renderer && S.renderer.info
+    ? {
+        geometries: S.renderer.info.memory.geometries,
+        textures: S.renderer.info.memory.textures,
+        programs: S.renderer.info.programs ? S.renderer.info.programs.length : 0
+      }
+    : null;
+  let rendererMemoryAfter = null;
+  const groupStats = disposeGroupChildren(S.scene, { materials: true, textures: true, updateLastBuild: false });
+  let sharedMaterialsDisposed = 0;
+  let cachedMaterialsDisposed = 0;
+  let sharedGeometriesDisposed = 0;
+  let texturesDisposed = groupStats.textureDisposed;
+
+  for (const key of Object.keys(CAR.shared)) {
+    const geometry = CAR.shared[key];
+    if (geometry && geometry.isBufferGeometry && disposeResourceOnce(geometry)) sharedGeometriesDisposed += 1;
+  }
+  for (const material of Object.values(MAT)) {
+    if (material && disposeResourceOnce(material)) sharedMaterialsDisposed += 1;
+  }
+  for (const texture of Object.values(TEX)) {
+    if (texture && disposeResourceOnce(texture)) texturesDisposed += 1;
+  }
+  for (const material of CAR.decalCache.values()) {
+    if (!material) continue;
+    texturesDisposed += disposeMaterialMaps(material);
+    if (disposeResourceOnce(material)) cachedMaterialsDisposed += 1;
+  }
+
+  if (S.envRT) {
+    S.envRT.dispose();
+    S.envRT = null;
+  }
+  if (S.keyLight && S.keyLight.shadow && S.keyLight.shadow.map) {
+    S.keyLight.shadow.map.dispose();
+    S.keyLight.shadow.map = null;
+  }
+  if (S.renderer) {
+    S.renderer.dispose();
+    if (S.renderer.info) {
+      rendererMemoryAfter = {
+        geometries: S.renderer.info.memory.geometries,
+        textures: S.renderer.info.memory.textures,
+        programs: S.renderer.info.programs ? S.renderer.info.programs.length : 0
+      };
+    }
+    if (S.renderer.domElement && S.renderer.domElement.parentNode) {
+      S.renderer.domElement.parentNode.removeChild(S.renderer.domElement);
+    }
+  }
+
+  CAR.assets.totals.sharedMaterialDisposed += sharedMaterialsDisposed;
+  CAR.assets.totals.cachedMaterialDisposed += cachedMaterialsDisposed;
+  CAR.assets.totals.geometryDisposed += sharedGeometriesDisposed;
+  CAR.assets.totals.textureDisposed += texturesDisposed;
+  CAR.assets.lastTeardown = {
+    instanceMaterialsDisposed: groupStats.materialDisposed,
+    sceneMaterialsDisposed: groupStats.sceneMaterialsDisposed,
+    sharedMaterialsDisposed,
+    cachedMaterialsDisposed,
+    geometriesDisposed: groupStats.geometryDisposed + sharedGeometriesDisposed,
+    texturesDisposed,
+    rendererMemoryBefore,
+    rendererMemoryAfter,
+    at: typeof performance !== 'undefined' ? performance.now() : Date.now()
+  };
+
+  CAR.shared = {};
+  CAR.decalCache.clear();
+  CAR.assets.instanceMaterials.clear();
+  clearCarReferences();
+  for (const key of Object.keys(MAT)) delete MAT[key];
+  for (const key of Object.keys(TEX)) delete TEX[key];
+  S.scene = null;
+  S.renderer = null;
+  S.camera = null;
+  S.cameraPersp = null;
+  S.cameraOrtho = null;
+  S.roadGroup = null;
+  S.carRoot = null;
+  S.bodyPivot = null;
+  S.loadOverlay = null;
+  S.cgOverlay = null;
+  S.loadArrows = [];
+  S.labelAnchors = [];
+  S.labels = {};
+  S.keyLight = null;
+  S.overheadLight = null;
+  S.plate = null;
+  S.contactBlob = null;
+  S.host = null;
+  S.initialized = false;
+  return CAR.assets.lastTeardown;
+}
+

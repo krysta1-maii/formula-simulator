@@ -1,0 +1,1217 @@
+{
+  "schema": 1,
+  "appVersion": "0.2.0",
+  "commit": "fbb401d",
+  "generatedAt": "2026-11-18T18:30:29.505Z",
+  "environment": {
+    "node": "v24.22.1",
+    "platform": "linux",
+    "arch": "x64",
+    "chrome": "auto"
+  },
+  "knownFailures": [],
+  "defectEvidence": {
+    "B4.1": {
+      "checks": [
+        "B4.1/unreachable-ok",
+        "B4.1/ok-residual",
+        "B4.1/motion-ratio-range",
+        "B4.1/motion-ratio-continuity",
+        "B4.1/damping-peak"
+      ],
+      "failing": []
+    },
+    "B4.2": {
+      "checks": [
+        "B4.2/cg-drift-x",
+        "B4.2/ref-path-x",
+        "B4.2/omega-x",
+        "B4.2/quat-norm-x",
+        "B4.2/cg-drift-y",
+        "B4.2/ref-path-y",
+        "B4.2/omega-y",
+        "B4.2/quat-norm-y",
+        "B4.2/cg-drift-z",
+        "B4.2/ref-path-z",
+        "B4.2/omega-z",
+        "B4.2/quat-norm-z"
+      ],
+      "failing": []
+    },
+    "B4.3": {
+      "checks": [
+        "B4.3/low-speed-hold",
+        "B4.3/contact-state-field",
+        "B4.3/step-no-reversal",
+        "B4.3/slope-perturbation",
+        "B4.3/repark"
+      ],
+      "failing": []
+    },
+    "B4.4": {
+      "checks": [
+        "B4.4/body-moment",
+        "B4.4/road-magnitude",
+        "B4.4/yaw90-axis"
+      ],
+      "failing": []
+    },
+    "B4.5": {
+      "checks": [
+        "B4.5/default-sample",
+        "B4.5/attitudes",
+        "B4.5/contact-plane",
+        "B4.5/fallback-full-quaternion"
+      ],
+      "failing": []
+    },
+    "B5.1": {
+      "checks": [
+        "B5.1/60hz",
+        "B5.1/30hz",
+        "B5.1/10-time",
+        "B5.1/5-time",
+        "B5.1/5-clamp50-time",
+        "B5.1/dropped-field"
+      ],
+      "failing": []
+    },
+    "B5.2": {
+      "checks": [
+        "B5.2/geometry-generation"
+      ],
+      "failing": []
+    },
+    "B5.3": {
+      "checks": [
+        "B5.3/telemetry-dom"
+      ],
+      "failing": []
+    },
+    "B5.4": {
+      "checks": [
+        "B5.4/material-release"
+      ],
+      "failing": []
+    },
+    "O1": {
+      "checks": [
+        "O1/writeback-peak",
+        "O1/writeback-state",
+        "O1/seed-poison",
+        "O1/peak-bound",
+        "O1/chunked-vs-one-shot"
+      ],
+      "failing": []
+    },
+    "A2": {
+      "checks": [
+        "A2/source-contract",
+        "A2/no-silent-fallback"
+      ],
+      "failing": []
+    },
+    "UI": {
+      "checks": [
+        "U1/landscape",
+        "U2/space-key",
+        "U3/panel-focus",
+        "U4/pause-text"
+      ],
+      "failing": []
+    }
+  },
+  "checks": {
+    "B4.2/cg-drift-x": {
+      "audit": "free-body",
+      "group": "physics",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "cgDriftMm": 0,
+        "time": 1.0000000000000007
+      },
+      "threshold": "cgDriftMm <= 0.01",
+      "detail": "free rotation about x for 1 s"
+    },
+    "B4.2/ref-path-x": {
+      "audit": "free-body",
+      "group": "physics",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "refDispMm": 287.65523540431394,
+        "expectedRefMm": 287.65532316252177
+      },
+      "threshold": "abs(refDispMm - expectedRefMm) <= 0.5",
+      "detail": "reference point must follow R(q)c"
+    },
+    "B4.2/omega-x": {
+      "audit": "free-body",
+      "group": "physics",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "omegaError": 0
+      },
+      "threshold": "omegaError <= 1e-9",
+      "detail": "no external torque"
+    },
+    "B4.2/quat-norm-x": {
+      "audit": "free-body",
+      "group": "physics",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "qnormError": 1.1102230246251565e-16
+      },
+      "threshold": "qnormError <= 1e-12",
+      "detail": "quaternion normalisation"
+    },
+    "B4.2/cg-drift-y": {
+      "audit": "free-body",
+      "group": "physics",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "cgDriftMm": 0,
+        "time": 1.0000000000000007
+      },
+      "threshold": "cgDriftMm <= 0.01",
+      "detail": "free rotation about y for 1 s"
+    },
+    "B4.2/ref-path-y": {
+      "audit": "free-body",
+      "group": "physics",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "refDispMm": 153.17641285279714,
+        "expectedRefMm": 153.1764595840428
+      },
+      "threshold": "abs(refDispMm - expectedRefMm) <= 0.5",
+      "detail": "reference point must follow R(q)c"
+    },
+    "B4.2/omega-y": {
+      "audit": "free-body",
+      "group": "physics",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "omegaError": 0
+      },
+      "threshold": "omegaError <= 1e-9",
+      "detail": "no external torque"
+    },
+    "B4.2/quat-norm-y": {
+      "audit": "free-body",
+      "group": "physics",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "qnormError": 1.1102230246251565e-16
+      },
+      "threshold": "qnormError <= 1e-12",
+      "detail": "quaternion normalisation"
+    },
+    "B4.2/cg-drift-z": {
+      "audit": "free-body",
+      "group": "physics",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "cgDriftMm": 0,
+        "time": 1.0000000000000007
+      },
+      "threshold": "cgDriftMm <= 0.01",
+      "detail": "free rotation about z for 1 s"
+    },
+    "B4.2/ref-path-z": {
+      "audit": "free-body",
+      "group": "physics",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "refDispMm": 325.896529453693,
+        "expectedRefMm": 325.89662887860123
+      },
+      "threshold": "abs(refDispMm - expectedRefMm) <= 0.5",
+      "detail": "reference point must follow R(q)c"
+    },
+    "B4.2/omega-z": {
+      "audit": "free-body",
+      "group": "physics",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "omegaError": 0
+      },
+      "threshold": "omegaError <= 1e-9",
+      "detail": "no external torque"
+    },
+    "B4.2/quat-norm-z": {
+      "audit": "free-body",
+      "group": "physics",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "qnormError": 1.1102230246251565e-16
+      },
+      "threshold": "qnormError <= 1e-12",
+      "detail": "quaternion normalisation"
+    },
+    "B4.1/unreachable-ok": {
+      "audit": "rocker-reach",
+      "group": "physics",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "unreachableOk": 0,
+        "firstViolation": {
+          "corner": 0,
+          "step": 120,
+          "time": 1.7420000000000013,
+          "targetMm": 707.834385779026,
+          "minReachMm": 708.389959517888,
+          "residualMm": 18.15278380883345,
+          "ratio": 1.8188641280690767,
+          "ok": false
+        },
+        "maxViolationMm": 17.51709856004169
+      },
+      "threshold": "unreachableOk == 0",
+      "detail": "unreachable geometry must not report ok"
+    },
+    "B4.1/ok-residual": {
+      "audit": "rocker-reach",
+      "group": "physics",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "okWithResidual": 0,
+        "maxResidualMm": 38.24940867480908,
+        "maxResidualInfo": {
+          "corner": 0,
+          "step": 166,
+          "time": 1.8340000000000014,
+          "ok": false,
+          "residualMm": 38.24940867480908
+        }
+      },
+      "threshold": "okWithResidual == 0 and residual <= 0.1 mm when ok",
+      "detail": "rocker closure residual at the solved angle"
+    },
+    "B4.1/motion-ratio-range": {
+      "audit": "rocker-reach",
+      "group": "physics",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "minRatio": 0.2282833995022969,
+        "maxRatio": 0.7948478266553802,
+        "unavailableWhenOk": 0
+      },
+      "threshold": "0.2 <= ratio <= 0.8 and available when ok",
+      "detail": "instantaneous motion ratio over the pitch pulse"
+    },
+    "B4.1/motion-ratio-continuity": {
+      "audit": "rocker-reach",
+      "group": "physics",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "maxJump": 0.07291881783087617,
+        "signFlips": 0,
+        "maxStep": 217,
+        "maxStepTime": 1.9360000000000015
+      },
+      "threshold": "signFlips == 0 and maxJump <= 0.1 per 2 ms step",
+      "detail": "4.1 low-damping large travel changes about 0.074 per step; 0.02 only suits the default small travel"
+    },
+    "B4.1/damping-peak": {
+      "audit": "rocker-reach",
+      "group": "physics",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "peakDampingKN": 1.733605875929732,
+        "peakInfo": {
+          "corner": 0,
+          "step": 402,
+          "time": 2.3059999999999676,
+          "dampingN": 1733.6058759297318,
+          "ratio": 0.681934982210335,
+          "ok": true
+        }
+      },
+      "threshold": "peakDampingKN <= 15",
+      "detail": "damping must stay within the physical envelope"
+    },
+    "O1/writeback-peak": {
+      "audit": "seed-writeback",
+      "group": "physics",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "plainPeakKN": 1.733605875929732,
+        "writebackPeakKN": 1.733605875929732,
+        "relativeDelta": 0,
+        "writebackPeakInfo": {
+          "frame": 50,
+          "sub": 3,
+          "index": 0,
+          "time": 2.3079999999999674,
+          "ratio": 1.3998719797071244
+        }
+      },
+      "threshold": "abs(writebackPeak - plainPeak) / plainPeak <= 0.01",
+      "detail": "render-layer corner.angle writeback must not change the physical peak"
+    },
+    "O1/writeback-state": {
+      "audit": "seed-writeback",
+      "group": "physics",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "stateDelta": 0,
+        "plainTime": 2.939999999999898,
+        "writebackTime": 2.939999999999898
+      },
+      "threshold": "state delta <= 1e-12",
+      "detail": "complete state, time and flags must be identical"
+    },
+    "O1/seed-poison": {
+      "audit": "seed-writeback",
+      "group": "physics",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "poisonDelta": 0,
+        "poisonPeakKN": 1.733605875929732
+      },
+      "threshold": "state delta <= 1e-12 after poisoning corner.angle",
+      "detail": "physics must not read corner.angle as a seed"
+    },
+    "O1/peak-bound": {
+      "audit": "seed-writeback",
+      "group": "physics",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "plainPeakKN": 1.733605875929732
+      },
+      "threshold": "plainPeakKN <= 15",
+      "detail": "same physical envelope as B4.1"
+    },
+    "A2/source-contract": {
+      "audit": "shadowing",
+      "group": "physics",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "sourcePresent": true,
+        "sourceFriction": 0.2,
+        "capacityWithSource": 1565.141339999998
+      },
+      "threshold": "reference.source exists and carries setup friction",
+      "detail": "computeStatic must expose the setup snapshot"
+    },
+    "A2/no-silent-fallback": {
+      "audit": "shadowing",
+      "group": "physics",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "threw": true,
+        "message": "simEvaluate: reference.source is required",
+        "capacityWithSource": 1565.141339999998,
+        "capacityWithoutSource": null,
+        "ratio": null
+      },
+      "threshold": "throw mentioning reference.source or keep capacity ratio 1",
+      "detail": "missing reference.source must not silently fall back to DEFAULTS"
+    },
+    "B4.3/low-speed-hold": {
+      "audit": "friction-low-speed",
+      "group": "contact",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "afterOne": {
+          "vx": 0,
+          "x": -0.15974999999999995,
+          "mode": "HOLD",
+          "hasContactState": true
+        },
+        "afterFour": {
+          "vx": 0,
+          "x": -0.15974999999999995,
+          "mode": "HOLD",
+          "displacement": 0
+        }
+      },
+      "threshold": "vx <= 1e-12 after one step; HOLD after four; displacement <= 2e-6 m",
+      "detail": "level road, vx=0.0005 m/s"
+    },
+    "B4.3/contact-state-field": {
+      "audit": "friction-low-speed",
+      "group": "contact",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "hasContactState": true,
+        "mode": "HOLD"
+      },
+      "threshold": "sim.contact.mode in HOLD/SLIP",
+      "detail": "state machine must be observable"
+    },
+    "B4.3/step-no-reversal": {
+      "audit": "friction-low-speed",
+      "group": "contact",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "vx": 0,
+        "x": 0,
+        "mode": "SLIP"
+      },
+      "threshold": "0 <= vx < 1e-6 and 0 <= x < 1e-4 after one 2 ms step",
+      "detail": "level road, vx=0.01 m/s"
+    },
+    "B4.3/slope-perturbation": {
+      "audit": "friction-low-speed",
+      "group": "contact",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "vx": 0,
+        "displacement": 0,
+        "mode": "HOLD"
+      },
+      "threshold": "HOLD, vx <= 1e-12, displacement < 1e-4 m",
+      "detail": "8 degree slope, mu=1.4, vx=0.0005 m/s"
+    },
+    "B4.3/repark": {
+      "audit": "friction-low-speed",
+      "group": "contact",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "before": {
+          "time": 1.0000000000000007,
+          "vx": -0.36210494419272854,
+          "vz": 0.35668387055416556,
+          "mode": "SLIP",
+          "displacement": 0.372196796804775
+        },
+        "retargetMethod": "simRetargetReference",
+        "after100ms": {
+          "vx": 0,
+          "vz": 0,
+          "wy": 0,
+          "mode": "HOLD",
+          "speed": 0
+        },
+        "after11s": {
+          "vx": 0,
+          "vz": 0,
+          "wy": 0,
+          "mode": "HOLD",
+          "displacement": 0
+        }
+      },
+      "threshold": "HOLD within 0.1 s, velocities zero, drift < 1e-9 m",
+      "detail": "10/10 degree low grip to level mu=0.9"
+    },
+    "B4.4/body-moment": {
+      "audit": "impulse-frame",
+      "group": "contact",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "maxBodyError": 8.185452315956354e-12,
+        "expected": [
+          0,
+          0,
+          -6880.45
+        ],
+        "yaw0Body": [
+          0,
+          0,
+          -6880.45
+        ],
+        "yaw90Body": [
+          0,
+          0,
+          -6880.449999999999
+        ]
+      },
+      "threshold": "maxBodyError <= 1e-9 N m over 24 yaw attitudes",
+      "detail": "body-frame impulse moment after R(q)"
+    },
+    "B4.4/road-magnitude": {
+      "audit": "impulse-frame",
+      "group": "contact",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "maxMagnitudeError": 5.4569682106375694e-12,
+        "expectedMagnitude": 6880.45
+      },
+      "threshold": "abs(|M| - 6880.45) <= 1e-9",
+      "detail": "moment magnitude is invariant under rotation"
+    },
+    "B4.4/yaw90-axis": {
+      "audit": "impulse-frame",
+      "group": "contact",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "yaw90Body": [
+          0,
+          0,
+          -6880.449999999999
+        ]
+      },
+      "threshold": "yaw 90 body moment = (0, 0, -6880.45)",
+      "detail": "the pitch lever must not become a roll moment"
+    },
+    "B4.5/default-sample": {
+      "audit": "contact-gap",
+      "group": "contact",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "gapMm": 6.117243517289594e-8,
+        "perCorner": [
+          {
+            "index": 0,
+            "gapMm": 6.117243517289594e-8
+          },
+          {
+            "index": 1,
+            "gapMm": 6.117243517289594e-8
+          },
+          {
+            "index": 2,
+            "gapMm": 4.541506060107281e-12
+          },
+          {
+            "index": 3,
+            "gapMm": 4.541506060107281e-12
+          }
+        ]
+      },
+      "threshold": "gapMm <= 1e-3",
+      "detail": "default pitch impulse, sample 60 ms after start"
+    },
+    "B4.5/attitudes": {
+      "audit": "contact-gap",
+      "group": "contact",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "maxAttitudeGapMm": 9.601282522591414e-7,
+        "cases": [
+          {
+            "label": "pitch-0",
+            "pitchDeg": 0,
+            "rollDeg": 0,
+            "gapMm": 9.601282522591414e-7,
+            "maxY": 9.601282522591414e-10,
+            "perCorner": [
+              {
+                "index": 0,
+                "gapMm": 4.995461879287106e-7
+              },
+              {
+                "index": 1,
+                "gapMm": 4.995461879287106e-7
+              },
+              {
+                "index": 2,
+                "gapMm": 9.601282522591414e-7
+              },
+              {
+                "index": 3,
+                "gapMm": 9.601282522591414e-7
+              }
+            ]
+          },
+          {
+            "label": "pitch-2",
+            "pitchDeg": 2,
+            "rollDeg": 0,
+            "gapMm": 4.6743539594551464e-8,
+            "maxY": 4.6743539594551464e-11,
+            "perCorner": [
+              {
+                "index": 0,
+                "gapMm": 3.86467767510279e-8
+              },
+              {
+                "index": 1,
+                "gapMm": 3.86467767510279e-8
+              },
+              {
+                "index": 2,
+                "gapMm": 4.6743539594551464e-8
+              },
+              {
+                "index": 3,
+                "gapMm": 4.6743539594551464e-8
+              }
+            ]
+          },
+          {
+            "label": "pitch-5",
+            "pitchDeg": 5,
+            "rollDeg": 0,
+            "gapMm": 2.5690226335139954e-7,
+            "maxY": 2.5690226335139954e-10,
+            "perCorner": [
+              {
+                "index": 0,
+                "gapMm": 1.1305330283040149e-7
+              },
+              {
+                "index": 1,
+                "gapMm": 1.1305330283040149e-7
+              },
+              {
+                "index": 2,
+                "gapMm": 2.5690226335139954e-7
+              },
+              {
+                "index": 3,
+                "gapMm": 2.5690226335139954e-7
+              }
+            ]
+          },
+          {
+            "label": "pitch-10",
+            "pitchDeg": 10,
+            "rollDeg": 0,
+            "gapMm": 2.2517598896598656e-8,
+            "maxY": 2.2517598896598656e-11,
+            "perCorner": [
+              {
+                "index": 0,
+                "gapMm": 2.1502355451730182e-8
+              },
+              {
+                "index": 1,
+                "gapMm": 2.1502355451730182e-8
+              },
+              {
+                "index": 2,
+                "gapMm": 2.2517598896598656e-8
+              },
+              {
+                "index": 3,
+                "gapMm": 2.2517598896598656e-8
+              }
+            ]
+          },
+          {
+            "label": "roll-0",
+            "pitchDeg": 0,
+            "rollDeg": 0,
+            "gapMm": 9.601282522591414e-7,
+            "maxY": 9.601282522591414e-10,
+            "perCorner": [
+              {
+                "index": 0,
+                "gapMm": 4.995461879287106e-7
+              },
+              {
+                "index": 1,
+                "gapMm": 4.995461879287106e-7
+              },
+              {
+                "index": 2,
+                "gapMm": 9.601282522591414e-7
+              },
+              {
+                "index": 3,
+                "gapMm": 9.601282522591414e-7
+              }
+            ]
+          },
+          {
+            "label": "roll-2",
+            "pitchDeg": 0,
+            "rollDeg": 2,
+            "gapMm": 1.460984978829405e-8,
+            "maxY": 1.460984978829405e-11,
+            "perCorner": [
+              {
+                "index": 0,
+                "gapMm": 7.009890931608531e-9
+              },
+              {
+                "index": 1,
+                "gapMm": 1.460984978829405e-8
+              },
+              {
+                "index": 2,
+                "gapMm": 8.358940276065319e-9
+              },
+              {
+                "index": 3,
+                "gapMm": 8.743563165158896e-9
+              }
+            ]
+          },
+          {
+            "label": "roll-5",
+            "pitchDeg": 0,
+            "rollDeg": 5,
+            "gapMm": 1.1127774396380019e-7,
+            "maxY": 1.1127774396380019e-10,
+            "perCorner": [
+              {
+                "index": 0,
+                "gapMm": 1.1127774396380019e-7
+              },
+              {
+                "index": 1,
+                "gapMm": 1.7789519857203118e-9
+              },
+              {
+                "index": 2,
+                "gapMm": 4.1348868773383174e-11
+              },
+              {
+                "index": 3,
+                "gapMm": 2.825170652975828e-10
+              }
+            ]
+          },
+          {
+            "label": "roll-10",
+            "pitchDeg": 0,
+            "rollDeg": 10,
+            "gapMm": 6.004986785601574e-8,
+            "maxY": 6.004986785601574e-11,
+            "perCorner": [
+              {
+                "index": 0,
+                "gapMm": 4.216071936014032e-11
+              },
+              {
+                "index": 1,
+                "gapMm": 6.004986785601574e-8
+              },
+              {
+                "index": 2,
+                "gapMm": 2.0138196665797636e-9
+              },
+              {
+                "index": 3,
+                "gapMm": 1.0375617032210016e-8
+              }
+            ]
+          },
+          {
+            "label": "tilt-8-7",
+            "pitchDeg": 0,
+            "rollDeg": 0,
+            "gapMm": 5.129077353810407e-7,
+            "maxY": 5.129077353810407e-10,
+            "perCorner": [
+              {
+                "index": 0,
+                "gapMm": 5.129077353810407e-7
+              },
+              {
+                "index": 1,
+                "gapMm": 1.8348188094742535e-8
+              },
+              {
+                "index": 2,
+                "gapMm": 1.2325842278261556e-8
+              },
+              {
+                "index": 3,
+                "gapMm": 1.6235681419077275e-8
+              }
+            ]
+          },
+          {
+            "label": "tilt-10-10",
+            "pitchDeg": 0,
+            "rollDeg": 0,
+            "gapMm": 8.177415189219647e-7,
+            "maxY": 8.177415189219647e-10,
+            "perCorner": [
+              {
+                "index": 0,
+                "gapMm": 8.177415189219647e-7
+              },
+              {
+                "index": 1,
+                "gapMm": 3.1457956357026917e-7
+              },
+              {
+                "index": 2,
+                "gapMm": 6.851414876521585e-7
+              },
+              {
+                "index": 3,
+                "gapMm": 1.873230100766024e-7
+              }
+            ]
+          }
+        ]
+      },
+      "threshold": "max gap <= 1e-3 mm for pitch/roll 0/2/5/10 and 8/7, 10/10 tilt",
+      "detail": "yaw-only contact versus solved mechanism contact"
+    },
+    "B4.5/contact-plane": {
+      "audit": "contact-gap",
+      "group": "contact",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "maxY": 9.601282522591414e-10
+      },
+      "threshold": "abs(contact.y) <= 1e-6 m",
+      "detail": "all contacts stay on the road plane"
+    },
+    "B4.5/fallback-full-quaternion": {
+      "audit": "contact-gap",
+      "group": "contact",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "rollDeg": 10,
+        "maxY": 0,
+        "maxVsYawOnlyMm": 12.305720060111437,
+        "perCorner": [
+          {
+            "index": 0,
+            "y": 0,
+            "vsYawOnlyMm": 12.305720060111437,
+            "vsSolvedMm": 26.469143114045753
+          },
+          {
+            "index": 1,
+            "y": 0,
+            "vsYawOnlyMm": 12.305720060111437,
+            "vsSolvedMm": 32.30661094094468
+          },
+          {
+            "index": 2,
+            "y": 0,
+            "vsYawOnlyMm": 12.001875120355665,
+            "vsSolvedMm": 20.70816193691152
+          },
+          {
+            "index": 3,
+            "y": 0,
+            "vsYawOnlyMm": 12.001875120355665,
+            "vsSolvedMm": 33.05735070783962
+          }
+        ]
+      },
+      "threshold": "fallback y <= 1e-6 m and differs from yaw-only by > 10 mm",
+      "detail": "fallback must use the full quaternion, not the yaw-only formula"
+    },
+    "B5.1/60hz": {
+      "audit": "frame-time",
+      "group": "runtime",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "hz": 60,
+        "clampMs": null,
+        "frames": 60,
+        "wallSeconds": 1,
+        "advanced": 1.0000000000000007,
+        "dropped": 0,
+        "total": 1.0000000000000007,
+        "maxSubsteps": 9,
+        "lastSubsteps": 9,
+        "hasDroppedField": true,
+        "time": 1.400000000000001
+      },
+      "threshold": "advanced >= 0.98 s at 1 s wall",
+      "detail": "60 Hz baseline must stay real time"
+    },
+    "B5.1/30hz": {
+      "audit": "frame-time",
+      "group": "runtime",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "hz": 30,
+        "clampMs": null,
+        "frames": 30,
+        "wallSeconds": 1,
+        "advanced": 0.9980000000000007,
+        "dropped": 0,
+        "total": 0.9980000000000007,
+        "maxSubsteps": 17,
+        "lastSubsteps": 16,
+        "hasDroppedField": true,
+        "time": 1.398000000000001
+      },
+      "threshold": "advanced >= 0.98 s at 1 s wall",
+      "detail": "30 Hz baseline"
+    },
+    "B5.1/10-time": {
+      "audit": "frame-time",
+      "group": "runtime",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "hz": 10,
+        "clampMs": null,
+        "frames": 10,
+        "wallSeconds": 1,
+        "advanced": 0.9980000000000007,
+        "dropped": 0,
+        "total": 0.9980000000000007,
+        "maxSubsteps": 50,
+        "lastSubsteps": 50,
+        "hasDroppedField": true,
+        "time": 1.398000000000001
+      },
+      "threshold": "advanced >= 0.98 or advanced+droppedTime >= 0.98 with droppedTime > 0",
+      "detail": "low frame rate must not silently lose simulation time"
+    },
+    "B5.1/5-time": {
+      "audit": "frame-time",
+      "group": "runtime",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "hz": 5,
+        "clampMs": null,
+        "frames": 5,
+        "wallSeconds": 1,
+        "advanced": 0.9980000000000007,
+        "dropped": 0,
+        "total": 0.9980000000000007,
+        "maxSubsteps": 100,
+        "lastSubsteps": 100,
+        "hasDroppedField": true,
+        "time": 1.398000000000001
+      },
+      "threshold": "advanced >= 0.98 or advanced+droppedTime >= 0.98 with droppedTime > 0",
+      "detail": "low frame rate must not silently lose simulation time"
+    },
+    "B5.1/5-clamp50-time": {
+      "audit": "frame-time",
+      "group": "runtime",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "dt": 0.2,
+        "steps": 99,
+        "advanced": 0.19800000000000012,
+        "limitRemoved": true,
+        "time": 0.5980000000000004
+      },
+      "threshold": "simAdvance(0.2) advances >= 0.19 s in >= 90 substeps; the old 50 ms clamp is gone",
+      "detail": "B3-1 removed the app-layer 50 ms truncation"
+    },
+    "B5.1/dropped-field": {
+      "audit": "frame-time",
+      "group": "runtime",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "fields": [
+          {
+            "hz": 60,
+            "advanced": 1.0000000000000007,
+            "dropped": 0,
+            "hasDroppedField": true
+          },
+          {
+            "hz": 30,
+            "advanced": 0.9980000000000007,
+            "dropped": 0,
+            "hasDroppedField": true
+          },
+          {
+            "hz": 10,
+            "advanced": 0.9980000000000007,
+            "dropped": 0,
+            "hasDroppedField": true
+          },
+          {
+            "hz": 5,
+            "advanced": 0.9980000000000007,
+            "dropped": 0,
+            "hasDroppedField": true
+          }
+        ]
+      },
+      "threshold": "all low-rate cases expose droppedTime or stay real time",
+      "detail": "backlog/dropped time must be observable"
+    },
+    "B5.2/geometry-generation": {
+      "audit": "browser-contract",
+      "group": "runtime",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "wheelGapMaxMm": 1.5699769780618585e-9,
+        "linkStretchMm": 1.099120794378905e-11,
+        "diagStretchMm": 2.55351295663786e-12,
+        "stretch": {
+          "susp": 2.6645352591003757e-12,
+          "tie": 1.099120794378905e-11,
+          "push": 2.220446049250313e-13,
+          "arb": 5.551115123125783e-14
+        },
+        "beforeWheelbase": 3.55,
+        "afterWheelbase": 3.9,
+        "sceneWheel0": [
+          1.9500091528806385,
+          0.3599279083470385,
+          -0.8100136941808712
+        ],
+        "solvedWheel0": [
+          1.950009152880977,
+          0.3599279079829744,
+          -0.8100136941809061
+        ]
+      },
+      "threshold": "wheel gap <= 1e-6 m and link stretch <= 0.001 mm",
+      "detail": "setState with rebuild=false must not mix geometry generations"
+    },
+    "B5.3/telemetry-dom": {
+      "audit": "browser-contract",
+      "group": "runtime",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "listPresent": true,
+        "nodeRebuilds": 0,
+        "textMutations": 1
+      },
+      "threshold": "childList rebuild count === 0 over 1 s idle; characterData is auxiliary only",
+      "detail": "periodic telemetry must not rebuild the check list nodes"
+    },
+    "B5.4/material-release": {
+      "audit": "browser-contract",
+      "group": "runtime",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "materialDisposed": 7,
+        "geometryDisposed": 387
+      },
+      "threshold": "materialDisposed >= 3 and geometryDisposed > 0",
+      "detail": "rebuild must dispose owned materials as well as geometry"
+    },
+    "O1/chunked-vs-one-shot": {
+      "audit": "browser-contract",
+      "group": "runtime",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "bodyPosDelta": 0,
+        "quatDelta": 0,
+        "dampingDelta": 0,
+        "travelDelta": 0,
+        "oneShotTime": 1.0600000000000007,
+        "chunkedTime": 1.0600000000000007
+      },
+      "threshold": "body/quaternion delta <= 1e-9 and damping/travel delta <= 1e-6",
+      "detail": "rendering between simulation chunks must not change the physical result"
+    },
+    "browser-contract/page-errors": {
+      "audit": "browser-contract",
+      "group": "runtime",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "pageErrors": []
+      },
+      "threshold": "pageErrors.length === 0",
+      "detail": "uncaught exceptions and console errors"
+    },
+    "U1/landscape": {
+      "audit": "ui",
+      "group": "ui",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "viewport": {
+          "width": 844,
+          "height": 390
+        },
+        "topbar": {
+          "top": 0,
+          "bottom": 56,
+          "height": 56,
+          "width": 844
+        },
+        "bottomBar": {
+          "top": 344,
+          "bottom": 382,
+          "height": 38,
+          "width": 824
+        }
+      },
+      "threshold": "topbar and bottom-bar inside 844x390 viewport",
+      "detail": "low-height landscape must not push the toolbar off-screen"
+    },
+    "U2/space-key": {
+      "audit": "ui",
+      "group": "ui",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "focused": "",
+        "modalOpen": true,
+        "beforeRunning": true,
+        "afterRunning": true
+      },
+      "threshold": "Space opens the help modal and does not toggle simulation",
+      "detail": "focused button keeps its native Space behaviour"
+    },
+    "U3/panel-focus": {
+      "audit": "ui",
+      "group": "ui",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "open": false,
+        "inert": true,
+        "ariaHidden": "true",
+        "focusable": 38
+      },
+      "threshold": "closed panel is inert and aria-hidden",
+      "detail": "closed panel must not be reachable with Tab"
+    },
+    "U4/pause-text": {
+      "audit": "ui",
+      "group": "ui",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "detail": "暂停 · t 2.82 s · 500 Hz · 静摩擦保持 · 积压 244.0 ms · 丢 3.40 s",
+        "running": false
+      },
+      "threshold": "simDetail contains pause and does not start with running",
+      "detail": "all simulation status fields update from one render path"
+    },
+    "ui/page-errors": {
+      "audit": "ui",
+      "group": "ui",
+      "status": "pass",
+      "knownFailure": false,
+      "observed": {
+        "pageErrors": []
+      },
+      "threshold": "pageErrors.length === 0",
+      "detail": "uncaught exceptions and console errors"
+    }
+  }
+}

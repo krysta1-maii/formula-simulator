@@ -3,17 +3,38 @@
    ========================================================================= */
 
 const REBUILD_KEYS = new Set(['wheelbase', 'trackFront', 'trackRear', 'wheelRadius', 'tireWidthF', 'tireWidthR']);
+const PHYSICS_KEYS = ['mass', 'frontWeightPct', 'cgHeight', 'cgLateral', 'wheelRateF', 'wheelRateR', 'dampingF', 'dampingR', 'arbFront', 'arbRear', 'slope', 'bank', 'friction'];
 const PENDING = {
   rebuild: false,
-  model: null,
-  lastBuildAt: 0
+  reason: '',
+  requestedAt: 0,
+  lastBuildAt: 0,
+  commits: 0,
+  failures: 0,
+  lastPolicy: 'none'
 };
+
+function physicsSignature(source = state) {
+  return PHYSICS_KEYS.map((key) => Number(source[key]).toPrecision(10)).join('|');
+}
+
+function stampReference(sim, source = state) {
+  if (!sim || !sim.reference) return;
+  sim.geometryRevision = sim.reference.geometryRevision;
+  sim.reference.physicsSignature = physicsSignature(source);
+  sim.steerApplied = source.steer;
+}
 
 let booted = false;
 let firstFrameRendered = false;
 let loaderShownAt = 0;
 let lastFrameTime = 0;
 let screenshotCount = 0;
+let frameRequest = 0;
+let loaderTimer = 0;
+let lastFrameDt = 0;
+let appDisposed = false;
+let appSuspended = false;
 
 function liveModel() {
   if (!SIM) return computeStatic(state);
@@ -23,15 +44,19 @@ function liveModel() {
 function calibrateRack(sim, steerDeg) {
   if (!sim || !sim.reference || !sim.reference.suspension) return 0;
   const st = sim.state;
+  // B1-1: sim.state is the centre of mass; the linkage solver expects the
+  // body reference point.
+  const ref = simReferencePoint(sim);
   return suspRackForSteer(
     sim.reference.suspension.corners,
-    { x: st.x, y: st.y, z: st.z },
+    { x: ref.x, y: ref.y, z: ref.z },
     new THREE.Quaternion(st.qx, st.qy, st.qz, st.qw),
     steerDeg * DEG
   );
 }
 
 function updateSceneFromModel(model) {
+  if (appDisposed || !S.scene || !S.roadGroup || !S.carRoot) return;
   if (typeof applyXray === 'function') applyXray();
   S.roadGroup.quaternion.copy(model.frame.q);
   S.roadGroup.updateMatrixWorld(true);
@@ -42,57 +67,86 @@ function updateSceneFromModel(model) {
   if (UI.initialized) UI.updateLabelPositions();
 }
 
-function requestRebuild(model) {
+function requestRebuild(reason = 'explicit') {
+  if (!PENDING.rebuild) PENDING.requestedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
   PENDING.rebuild = true;
-  PENDING.model = model;
+  PENDING.reason = reason;
+  PENDING.lastPolicy = reason === 'geometry' ? 'geometry-forced' : (reason || 'explicit');
 }
 
 function processPendingRebuild(now) {
-  if (!PENDING.rebuild || !PENDING.model) return;
+  if (appDisposed || !booted || !PENDING.rebuild) return;
   if (now - PENDING.lastBuildAt < 85) return;
-  PENDING.rebuild = false;
   PENDING.lastBuildAt = now;
-  if (!SIM) SIM = simCreate(state);
-  simReset(SIM, state, { settle: 0.5 });
-  SIM.rackShift = calibrateRack(SIM, state.steer);
-  const model = simBuildModel(SIM, state);
-  buildCar(model);
-  applyXray();
-  S.roadGroup.quaternion.copy(model.frame.q);
-  S.roadGroup.updateMatrixWorld(true);
-  updateCar(model);
-  S.scene.updateMatrixWorld(true);
-  updateOverlays(model);
-  S.scene.updateMatrixWorld(true);
-  UI.refreshSelfTests({ dynamic: false });
-  UI.refreshTelemetry(model);
-  UI.updateLabelPositions();
+  try {
+    if (!SIM) SIM = simCreate(state);
+    simReset(SIM, state, { settle: 0.5 });
+    SIM.advanceCarry = 0;
+    stampReference(SIM, state);
+    const model = simBuildModel(SIM, state);
+    buildCar(model);
+    applyXray();
+    S.roadGroup.quaternion.copy(model.frame.q);
+    S.roadGroup.updateMatrixWorld(true);
+    updateCar(model);
+    S.scene.updateMatrixWorld(true);
+    updateOverlays(model);
+    S.scene.updateMatrixWorld(true);
+    UI.refreshSelfTests({ dynamic: false });
+    UI.refreshTelemetry(model);
+    UI.updateLabelPositions();
+    PENDING.rebuild = false;
+    PENDING.commits += 1;
+    PENDING.failures = 0;
+  } catch (error) {
+    PENDING.failures += 1;
+    if (PENDING.failures >= 3) {
+      PENDING.rebuild = false;
+      showFatalError(error);
+    } else {
+      PENDING.rebuild = true;
+    }
+  }
 }
 
-function refreshAll({ rebuild = false } = {}) {
-  if (!booted) return;
-  const reference = computeStatic(state);
-  if (!SIM) SIM = simCreate(state);
-  SIM.reference = reference;
-  SIM.rackShift = calibrateRack(SIM, state.steer);
-  const model = simBuildModel(SIM, state);
-  if (rebuild) {
-    requestRebuild(model);
-    UI.refreshTelemetry(model);
-    UI.refreshLabelContent(model);
+function refreshAll({ rebuild = false, reason = 'params' } = {}) {
+  if (!booted || appDisposed) return;
+  if (PENDING.rebuild) { PENDING.lastPolicy = 'pending'; return; }
+  const staleGeometry = !SIM || geometryRevisionFor(state) !== SIM.geometryRevision;
+  if (rebuild || staleGeometry) {
+    requestRebuild(staleGeometry ? 'geometry' : reason);
     return;
   }
-  if (PENDING.rebuild) {
-    PENDING.model = model;
+  const stalePhysics = !SIM.reference || SIM.reference.physicsSignature !== physicsSignature(state);
+  if (stalePhysics) {
+    simRetargetReference(SIM, state);
+    stampReference(SIM, state);
+    SIM.rackShift = calibrateRack(SIM, state.steer);
+    const model = simBuildModel(SIM, state);
+    updateSceneFromModel(model);
     UI.refreshTelemetry(model);
     UI.refreshLabelContent(model);
+    PENDING.lastPolicy = 'params';
     return;
   }
-  // Update the mechanism before reading its diagnostics; telemetry reports the
-  // ARB twist and link closure for the pose that is actually on screen.
-  updateSceneFromModel(model);
-  UI.refreshTelemetry(model);
-  UI.refreshLabelContent(model);
+  const staleSteer = !nearly(SIM.steerApplied, state.steer, 1e-12);
+  if (staleSteer) {
+    SIM.rackShift = calibrateRack(SIM, state.steer);
+    SIM.steerApplied = state.steer;
+    const model = simBuildModel(SIM, state);
+    updateSceneFromModel(model);
+    UI.refreshTelemetry(model);
+    UI.refreshLabelContent(model);
+    PENDING.lastPolicy = 'display';
+    return;
+  }
+  PENDING.lastPolicy = 'display';
+  UI.refreshTelemetry(UI.lastModel);
+  UI.refreshLabelContent(UI.lastModel);
+  if (UI.lastModel) {
+    updateOverlays(UI.lastModel);
+    S.scene.updateMatrixWorld(false);
+  }
 }
 
 function formatStamp(date = new Date()) {
@@ -118,7 +172,7 @@ function formatLocalDate(date = new Date()) {
 
 function exportScreenshot() {
   if (!S.renderer) return false;
-  const model = liveModel();
+  const model = PENDING.rebuild && UI.lastModel ? UI.lastModel : liveModel();
   updateSceneFromModel(model);
   S.renderer.render(S.scene, S.camera);
 
@@ -229,12 +283,13 @@ function exportScreenshot() {
   ctx.fillStyle = 'rgba(133,149,168,0.55)';
   ctx.font = `500 ${Math.round(9 * scale)}px ui-monospace, monospace`;
   const creditY = cardX + cardW > width - 260 * scale ? cardY - 10 * scale : height - pad;
-  ctx.fillText('FORMULA SIMULATOR  ·  DESIGN.md v0.2  ·  THREE.JS r149', width - pad, creditY);
+  ctx.fillText('FORMULA SIMULATOR  ·  DESIGN.md v' + APP_VERSION + '  ·  THREE.JS r149', width - pad, creditY);
   ctx.textAlign = 'left';
 
   const link = document.createElement('a');
   screenshotCount += 1;
-  link.download = `FS-01_static_${formatStamp()}_${screenshotCount}.png`;
+  const mode = model.sim ? (model.sim.running ? 'dynamic' : 'paused') : 'static';
+  link.download = `FS-01_${mode}_${formatStamp()}_${screenshotCount}.png`;
   link.href = canvas.toDataURL('image/png');
   link.click();
   return true;
@@ -252,6 +307,125 @@ function showFatalError(error) {
   }
 }
 
+function suspensionPackagingProbe() {
+  const enclosures = [];
+  if (CAR.bodyworkGroup) {
+    CAR.bodyworkGroup.traverse((object) => {
+      if (object.isMesh && /^envelope-/.test(object.name || '')) enclosures.push(object);
+    });
+  }
+  S.scene.updateMatrixWorld(true);
+  const bodyInverse = S.bodyPivot.matrixWorld.clone().invert();
+  const bodyQuaternion = S.bodyPivot.getWorldQuaternion(new THREE.Quaternion());
+  const direction = new THREE.Vector3(0.923, 0.271, 0.277).normalize().applyQuaternion(bodyQuaternion);
+  const ray = new THREE.Raycaster(new THREE.Vector3(), direction, 0, 20);
+  const boxes = enclosures.map((mesh) => ({ mesh, box: new THREE.Box3().setFromObject(mesh) }));
+  const materials = enclosures.map((mesh) => ({ material: mesh.material, side: mesh.material.side }));
+  for (const entry of materials) entry.material.side = THREE.DoubleSide;
+
+  try {
+  const inside = (point) => {
+    for (const entry of boxes) {
+      if (!entry.box.containsPoint(point)) continue;
+      ray.ray.origin.copy(point);
+      const hits = ray.intersectObject(entry.mesh, false);
+      if (hits.length % 2 === 1) return true;
+    }
+    return false;
+  };
+  const localPoint = (point) => point.clone().applyMatrix4(bodyInverse).toArray().map((value) => Number(value.toFixed(5)));
+  const components = [];
+  const objectLabel = (object) => {
+    const names = [];
+    let current = object;
+    for (let depth = 0; current && depth < 4; depth += 1) {
+      if (current.name) names.unshift(current.name);
+      current = current.parent;
+    }
+    return names.join('/') || object.type;
+  };
+  const sampleRoot = (root, label, perMesh = 72) => {
+    if (!root) return;
+    const result = { label, samples: 0, outside: 0, examples: [] };
+    root.traverse((object) => {
+      if (!object.isMesh || !object.geometry || !object.geometry.attributes.position) return;
+      const positions = object.geometry.attributes.position;
+      const step = Math.max(1, Math.ceil(positions.count / perMesh));
+      const point = new THREE.Vector3();
+      for (let i = 0; i < positions.count; i += step) {
+        point.fromBufferAttribute(positions, i).applyMatrix4(object.matrixWorld);
+        result.samples += 1;
+        if (!inside(point)) {
+          result.outside += 1;
+          if (result.examples.length < 32) {
+            result.examples.push({ object: objectLabel(object), geometry: object.geometry.type, point: localPoint(point) });
+          }
+        }
+      }
+    });
+    components.push(result);
+  };
+
+  sampleRoot(CAR.internalGroup, 'inboard-suspension-and-driveline');
+  for (const spring of CAR.springs || []) {
+    sampleRoot(spring.assembly, 'coilover-' + spring.corner.key);
+    sampleRoot(spring.jointMount, 'mount-' + spring.corner.key, 24);
+    sampleRoot(spring.jointDamper, 'damper-eye-' + spring.corner.key, 24);
+  }
+
+  const hardpoints = [];
+  for (const corner of CAR.corners || []) {
+    const points = {
+      rocker: corner.rocker.pivot,
+      damperMount: corner.body.damper,
+      pushTip: suspRockerPoint(corner, corner.rocker.pushArm, corner.angle),
+      damperTip: suspRockerPoint(corner, corner.rocker.damperArm, corner.angle)
+    };
+    for (const [name, local] of Object.entries(points)) {
+      const world = local.clone().applyMatrix4(S.bodyPivot.matrixWorld);
+      hardpoints.push({ corner: corner.key, name, inside: inside(world), point: local.toArray() });
+    }
+  }
+  const coilAxes = (CAR.corners || []).map((corner) => {
+    const a = corner.body.damper;
+    const b = suspRockerPoint(corner, corner.rocker.damperArm, corner.angle);
+    const axis = b.clone().sub(a);
+    const length = axis.length();
+    return {
+      corner: corner.key,
+      actuation: corner.front ? 'pushrod' : 'pullrod',
+      length,
+      tiltDeg: length > 1e-9 ? Math.asin(Math.abs(axis.y) / length) * RAD : 90,
+      longitudinalDominant: length > 1e-9 && Math.abs(axis.x) > Math.abs(axis.z),
+      a: a.toArray(),
+      b: b.toArray()
+    };
+  });
+  const internalVisible = CAR.internalGroup ? CAR.internalGroup.visible : false;
+  const springVisibility = (CAR.springs || []).every((spring) =>
+    spring.assembly.visible === internalVisible &&
+    spring.jointMount.visible === internalVisible &&
+    spring.jointDamper.visible === internalVisible);
+  const samples = components.reduce((sum, row) => sum + row.samples, 0);
+  const outside = components.reduce((sum, row) => sum + row.outside, 0);
+  const exposedHardpoints = hardpoints.filter((row) => !row.inside);
+  const skinMountVisible = Boolean(CAR.skinMountGroup && CAR.skinMountGroup.visible);
+  return {
+    ok: outside === 0 && exposedHardpoints.length === 0 && internalVisible === Boolean(state.xray) && springVisibility && skinMountVisible,
+    samples,
+    outside,
+    hardpoints,
+    exposedHardpoints,
+    components: components.filter((row) => row.samples > 0),
+    coilAxes,
+    enclosures: enclosures.map((mesh) => mesh.name),
+    visibility: { xray: Boolean(state.xray), internalVisible, springVisibility, skinMountVisible }
+  };
+  } finally {
+    for (const entry of materials) entry.material.side = entry.side;
+  }
+}
+
 function bindGlobalAPI() {
   window.FSApp = {
     ready: false,
@@ -259,7 +433,7 @@ function bindGlobalAPI() {
     getState: () => cloneState(state),
     getSnapshot: () => {
       const model = liveModel();
-      const tests = UI.selfTests.length ? UI.selfTests : runSelfTests(state);
+      const tests = (UI.selfTestCache && UI.selfTestCache.staticTests) || (UI.selfTests.length ? UI.selfTests : runSelfTests(state));
       const diag = getCarDiagnostics();
       return {
         version: APP_VERSION,
@@ -286,6 +460,11 @@ function bindGlobalAPI() {
         yawDeg: model.poseDeg.yaw,
         bodyPos: model.bodyPos ? { x: model.bodyPos.x, y: model.bodyPos.y, z: model.bodyPos.z } : null,
         solved: model.solved || null,
+        solverOk: model.solverOk === true,
+        solverState: solverStateOf(model),
+        rockerResidualMm: model.rockerResidualMm ? model.rockerResidualMm.slice() : null,
+        rockerFeasible: model.rockerFeasible ? model.rockerFeasible.slice() : null,
+        motionRatioState: model.motionRatioState ? model.motionRatioState.slice() : null,
         bodyVelocity: model.bodyVelocity ? { x: model.bodyVelocity.x, y: model.bodyVelocity.y, z: model.bodyVelocity.z } : null,
         bodyRatesDeg: model.bodyRatesDeg || null,
         travelMm: model.travelMm.slice(),
@@ -330,19 +509,59 @@ function bindGlobalAPI() {
           transition: Boolean(CAMERA.transition)
         },
         pendingRebuild: PENDING.rebuild,
-        frameCount: UI.frameCount || 0
+        setupRevision: typeof SETUP_REVISION === 'number' ? SETUP_REVISION : 0,
+        selfTestRuns: UI.selfTestCache && UI.selfTestCache.runs ? Object.assign({}, UI.selfTestCache.runs) : { static: 0, dynamic: 0 },
+        selfTestDynamic: {
+          running: Boolean(UI.selfTestCache.dynamicRunning),
+          revision: UI.selfTestCache.dynamicRevision,
+          setupRevision: UI.selfTestCache.dynamicSetupRevision,
+          token: UI.selfTestCache.dynamicToken
+        },
+        geometry: {
+          sceneRevision: CAR.geometryRevision || null,
+          physicsRevision: SIM && SIM.reference ? SIM.reference.geometryRevision : null,
+          pending: PENDING.rebuild,
+          policy: PENDING.lastPolicy,
+          commitCount: PENDING.commits,
+          mismatch: Boolean(CAR.diag.geometryMismatch),
+          dims: {
+            wheelbase: state.wheelbase,
+            trackFront: state.trackFront,
+            trackRear: state.trackRear,
+            wheelRadius: state.wheelRadius,
+            tireWidthF: state.tireWidthF,
+            tireWidthR: state.tireWidthR
+          }
+        },
+        assets: CAR.assets ? {
+          totals: Object.assign({}, CAR.assets.totals),
+          lastBuild: CAR.assets.lastBuild ? Object.assign({}, CAR.assets.lastBuild) : null,
+          lastTeardown: CAR.assets.lastTeardown ? Object.assign({}, CAR.assets.lastTeardown) : null
+        } : null,
+        frameCount: UI.frameCount || 0,
+        lifecycle: {
+          disposed: appDisposed,
+          suspended: appSuspended,
+          frameScheduled: Boolean(frameRequest),
+          lastFrameDt
+        }
       };
     },
     setState: (patch, options = {}) => {
       if (!patch || typeof patch !== 'object') return window.FSApp.getSnapshot();
       const previous = cloneState(state);
       const merged = sanitizeState(Object.assign({}, state, patch));
-      const dimensionsChanged = Array.from(REBUILD_KEYS).some((key) => !nearly(previous[key], merged[key], 1e-9));
-      const rebuild = typeof options.rebuild === 'boolean' ? options.rebuild : dimensionsChanged;
+      const dimensionsChanged = geometrySignature(merged) !== geometrySignature(previous);
+      const forced = options.rebuild === true;
+      const rebuild = dimensionsChanged || forced;
+      if (options.rebuild === false && dimensionsChanged) {
+        console.warn('[FS-01] geometry dimensions changed; rebuild:false is ignored');
+      }
       Object.assign(state, merged);
+      if (Object.prototype.hasOwnProperty.call(patch, 'xray')) applyXray();
       syncControlsFromState();
       persistState();
-      refreshAll({ rebuild });
+      refreshAll({ rebuild, reason: dimensionsChanged ? 'geometry' : (forced ? 'explicit' : 'params') });
       return window.FSApp.getSnapshot();
     },
     reset: () => {
@@ -361,8 +580,14 @@ function bindGlobalAPI() {
     },
     resetDynamics: (options = {}) => {
       if (!SIM) SIM = simCreate(state);
+      if (SIM.geometryRevision !== geometryRevisionFor(state)) {
+        requestRebuild('geometry');
+        return window.FSApp.getSnapshot();
+      }
       const settle = Number.isFinite(options.settle) ? options.settle : 0;
       simReset(SIM, state, { settle });
+      SIM.advanceCarry = 0;
+      stampReference(SIM, state);
       const model = simBuildModel(SIM, state);
       updateSceneFromModel(model);
       UI.refreshTelemetry(model);
@@ -378,7 +603,11 @@ function bindGlobalAPI() {
     advanceSimulation: (seconds = 0.5) => {
       if (!SIM) SIM = simCreate(state);
       const duration = clamp(Number(seconds) || 0, 0, 10);
-      simRunFor(SIM, duration);
+      const carry = Number.isFinite(SIM.advanceCarry) ? SIM.advanceCarry : 0;
+      const total = carry + duration;
+      const steps = Math.floor((total + 1e-12) / SIM_DT);
+      SIM.advanceCarry = total - steps * SIM_DT;
+      for (let i = 0; i < steps; i += 1) simStep(SIM, SIM_DT);
       const model = simBuildModel(SIM, state);
       updateSceneFromModel(model);
       UI.refreshTelemetry(model);
@@ -387,6 +616,7 @@ function bindGlobalAPI() {
     },
     openModel: UI.openModelModal,
     closeModel: UI.closeModelModal,
+    getSuspensionPackaging: () => suspensionPackagingProbe(),
     getSceneProbe: () => ({
       springs: (CAR.springs || []).map((spring) => spring.lastA.distanceTo(spring.lastB)),
       wireLengths: SIM && SIM.reference && SIM.reference.suspension
@@ -401,29 +631,55 @@ function bindGlobalAPI() {
         push: CAR.diag.pushRodStretchMm,
         arb: CAR.diag.arbStretchMm
       },
-      solverOk: CAR.diag.rockerSolveOk
+      solverOk: CAR.diag.rockerSolveOk,
+      solverState: solverStateOf(UI.lastModel),
+      rockerResidualMm: UI.lastModel && Array.isArray(UI.lastModel.rockerResidualMm) ? UI.lastModel.rockerResidualMm.slice() : [],
+      loadArrowHeights: (S.loadArrows || []).map((entry) => entry.arrow.shaft.scale.y + entry.arrow.head),
+      geometryRevision: CAR.geometryRevision || null,
+      physicsRevision: SIM && SIM.reference ? SIM.reference.geometryRevision : null,
+      geometryMismatch: Boolean(CAR.diag.geometryMismatch),
+      cameraFraming: cameraFramingProbe()
     }),
     runSelfTests: () => runSelfTests(state),
     runDynamicSelfTests: () => runDynamicSelfTests(state),
+    dispose: disposeApp,
+    getAssetStats: () => ({
+      totals: CAR.assets ? Object.assign({}, CAR.assets.totals) : null,
+      lastBuild: CAR.assets && CAR.assets.lastBuild ? Object.assign({}, CAR.assets.lastBuild) : null,
+      lastTeardown: CAR.assets && CAR.assets.lastTeardown ? Object.assign({}, CAR.assets.lastTeardown) : null,
+      renderer: S.renderer ? { geometries: S.renderer.info.memory.geometries, textures: S.renderer.info.memory.textures, programs: S.renderer.info.programs ? S.renderer.info.programs.length : 0 } : null
+    }),
     exportScreenshot,
     setCameraPreset,
     setCameraProjection
   };
 }
 
+function scheduleFrame() {
+  if (frameRequest || appDisposed || appSuspended || !booted) return;
+  frameRequest = requestAnimationFrame(animate);
+}
+
+function cancelFrame() {
+  if (frameRequest) cancelAnimationFrame(frameRequest);
+  frameRequest = 0;
+}
+
 function animate(now) {
-  // requestAnimationFrame timestamps are monotonic frame-clock values, but the
-  // first callback may carry a timestamp from before the expensive boot. Never
-  // seed the frame clock with performance.now(), and clamp anomalous deltas.
-  const dt = lastFrameTime ? clamp((now - lastFrameTime) / 1000, 0, 0.05) : 0;
+  frameRequest = 0;
+  if (appDisposed || appSuspended || !booted || !S.renderer || !S.scene || !S.camera) return;
+  // A BFCache restore starts a fresh frame clock instead of integrating the
+  // time spent outside the active page. The first callback therefore has dt=0.
+  const frameDt = lastFrameTime ? Math.max(0, (now - lastFrameTime) / 1000) : 0;
   lastFrameTime = now;
+  lastFrameDt = frameDt;
 
   UI.frameCount = (UI.frameCount || 0) + 1;
-  updateCamera(dt);
+  updateCamera(Math.min(frameDt, 0.05));
   processPendingRebuild(now);
 
-  if (booted && SIM) {
-    const steps = simAdvance(SIM, dt);
+  if (SIM) {
+    const steps = simAdvance(SIM, frameDt);
     if (steps > 0 || !UI.lastDynamicUpdate) {
       const model = simBuildModel(SIM, state);
       updateSceneFromModel(model);
@@ -435,16 +691,16 @@ function animate(now) {
     }
   }
 
-  // Camera and scene matrices are current before projecting the DOM labels.
   S.scene.updateMatrixWorld(false);
   if (UI.initialized) UI.updateLabelPositions();
-
   S.renderer.render(S.scene, S.camera);
 
   if (!firstFrameRendered) {
     firstFrameRendered = true;
     const wait = Math.max(0, 480 - (now - loaderShownAt));
-    window.setTimeout(() => {
+    loaderTimer = window.setTimeout(() => {
+      loaderTimer = 0;
+      if (appDisposed) return;
       const loading = document.getElementById('loading');
       if (loading) loading.classList.add('is-done');
       document.documentElement.dataset.fsReady = '1';
@@ -452,7 +708,43 @@ function animate(now) {
     }, wait);
   }
 
-  requestAnimationFrame(animate);
+  scheduleFrame();
+}
+
+function onPageHide(event) {
+  if (event.persisted) {
+    appSuspended = true;
+    cancelFrame();
+    lastFrameTime = 0;
+    lastFrameDt = 0;
+    return;
+  }
+  disposeApp();
+}
+
+function onPageShow(event) {
+  if (!event.persisted || appDisposed) return;
+  appSuspended = false;
+  lastFrameTime = 0;
+  lastFrameDt = 0;
+  scheduleFrame();
+}
+
+function disposeApp() {
+  if (appDisposed) return CAR.assets.lastTeardown;
+  appDisposed = true;
+  appSuspended = false;
+  booted = false;
+  cancelFrame();
+  window.clearTimeout(loaderTimer);
+  loaderTimer = 0;
+  window.removeEventListener('pagehide', onPageHide);
+  window.removeEventListener('pageshow', onPageShow);
+  PENDING.rebuild = false;
+  teardownUI();
+  const result = teardownScene();
+  if (window.FSApp) window.FSApp.ready = false;
+  return result;
 }
 
 function boot() {
@@ -464,7 +756,7 @@ function boot() {
 
     initScene();
     SIM = simCreate(state, { settle: 1.8 });
-    SIM.rackShift = calibrateRack(SIM, state.steer);
+    stampReference(SIM, state);
     const initialModel = simBuildModel(SIM, state);
     S.roadGroup.quaternion.copy(initialModel.frame.q);
     S.roadGroup.updateMatrixWorld(true);
@@ -477,10 +769,13 @@ function boot() {
     syncControlsFromState();
     persistState();
     bindGlobalAPI();
+    window.addEventListener('pagehide', onPageHide);
+    window.addEventListener('pageshow', onPageShow);
 
     booted = true;
     lastFrameTime = 0;
-    requestAnimationFrame(animate);
+    lastFrameDt = 0;
+    scheduleFrame();
 
     console.info('[FS-01] stage 02 dynamic chassis v' + APP_VERSION + ' ready');
   } catch (error) {
