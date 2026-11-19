@@ -91,6 +91,48 @@ if (runGroup('cg')) {
   }
 }
 
+/* group conservation: independent linear/angular momentum and energy checks */
+if (runGroup('cg')) {
+  const sim = api.simCreate(api.DEFAULTS, { settle: 0 });
+  const reference = sim.reference;
+  reference.frame.gravityLocal.set(0, 0, 0);
+  reference.baseLoads = [0, 0, 0, 0];
+  reference.springRates = [0, 0, 0, 0];
+  reference.damperRateWheel = [0, 0, 0, 0];
+  reference.arbRate = { front: 0, rear: 0 };
+  reference.suspension = null;
+  Object.assign(sim.state, {
+    x: 0, y: 0, z: 0,
+    vx: 0.4, vy: -0.2, vz: 0.3,
+    qw: 1, qx: 0, qy: 0, qz: 0,
+    wx: 1, wy: 1, wz: 1
+  });
+  const mass = reference.mass;
+  const inertia = reference.inertia;
+  const energy0 = 0.5 * (inertia.Ixx + inertia.Iyy + inertia.Izz);
+  const momentum0 = [mass * sim.state.vx, mass * sim.state.vy, mass * sim.state.vz];
+  const angular0 = Math.hypot(inertia.Ixx, inertia.Iyy, inertia.Izz);
+  for (let i = 0; i < 500; i += 1) api.simStep(sim);
+  const st = sim.state;
+  const displacementError = Math.hypot(st.x - 0.4, st.y + 0.2, st.z - 0.3);
+  const momentumError = Math.hypot(
+    mass * st.vx - momentum0[0],
+    mass * st.vy - momentum0[1],
+    mass * st.vz - momentum0[2]
+  );
+  const energy1 = 0.5 * (inertia.Ixx * st.wx ** 2 + inertia.Iyy * st.wy ** 2 + inertia.Izz * st.wz ** 2);
+  const angularRoad = api.simQuatRotate([st.qw, st.qx, st.qy, st.qz], [
+    inertia.Ixx * st.wx, inertia.Iyy * st.wy, inertia.Izz * st.wz
+  ]);
+  const angular1 = Math.hypot(...angularRoad);
+  const energyError = Math.abs(energy1 - energy0) / energy0;
+  const angularError = Math.abs(angular1 - angular0) / angular0;
+  check('cg/linear-momentum-and-trajectory', momentumError < 1e-9 && displacementError < 1e-9,
+    'Δp ' + momentumError.toExponential(2) + ' kg m/s · Δr ' + displacementError.toExponential(2) + ' m');
+  check('cg/nonprincipal-energy-1s', energyError < 0.0025, energyError.toExponential(3));
+  check('cg/nonprincipal-angular-momentum-1s', angularError < 0.0025, angularError.toExponential(3));
+}
+
 /* group rocker: closed form vs legacy Newton, reachability */
 if (runGroup('rocker')) {
   const reference = api.computeStatic(api.DEFAULTS);
@@ -220,7 +262,9 @@ if (runGroup('ratio')) {
   // the guard, or a jump away from the previous ratio, must still be rejected.
   const guardRow = reference.suspension.design[0];
   const accepted = api.simRatioState(api.simCreate(api.DEFAULTS, { settle: 0 }), 0, guardRow, 1.2);
-  const aboveGuard = api.simRatioState(api.simCreate(api.DEFAULTS, { settle: 0 }), 0, guardRow, 2.6);
+  const aboveGuardSim = api.simCreate(api.DEFAULTS, { settle: 0 });
+  aboveGuardSim.cornerRatio = [null, null, null, null];
+  const aboveGuard = api.simRatioState(aboveGuardSim, 0, guardRow, 2.6);
   const belowGuard = api.simRatioState(api.simCreate(api.DEFAULTS, { settle: 0 }), 0, guardRow, 0.04);
   const jumpSim = api.simCreate(api.DEFAULTS, { settle: 0 });
   api.simRatioState(jumpSim, 0, guardRow, 1.2);

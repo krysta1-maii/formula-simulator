@@ -75,11 +75,11 @@
           <span class="section-hint">WORLD GRAVITY ↓</span>
         </div>
         <div class="preset-row" role="group" aria-label="路面预设">
-          <button type="button" class="chip is-active" data-road-preset="level">水平</button>
-          <button type="button" class="chip" data-road-preset="slope">纵坡 8°</button>
-          <button type="button" class="chip" data-road-preset="bank">横坡 7°</button>
-          <button type="button" class="chip" data-road-preset="mixed">复合坡</button>
-          <button type="button" class="chip" data-road-preset="lowGrip">低附着滑移</button>
+          <button type="button" class="chip is-active" data-road-preset="level" aria-pressed="true">水平</button>
+          <button type="button" class="chip" data-road-preset="slope" aria-pressed="false">纵坡 8°</button>
+          <button type="button" class="chip" data-road-preset="bank" aria-pressed="false">横坡 7°</button>
+          <button type="button" class="chip" data-road-preset="mixed" aria-pressed="false">复合坡</button>
+          <button type="button" class="chip" data-road-preset="lowGrip" aria-pressed="false">低附着滑移</button>
         </div>
 
         <div class="control">
@@ -314,8 +314,8 @@
       </div>
       <div class="panel-head-right">
         <div class="unit-toggle" role="group" aria-label="载荷单位">
-          <button type="button" class="is-active" data-units="N">N</button>
-          <button type="button" data-units="kg">kg</button>
+          <button type="button" class="is-active" data-units="N" aria-pressed="true">N</button>
+          <button type="button" data-units="kg" aria-pressed="false">kg</button>
         </div>
         <button type="button" class="panel-close" data-close-panel="panelTelemetry" aria-label="收起遥测面板">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
@@ -424,12 +424,12 @@
 
   <div class="bottom-bar" role="toolbar" aria-label="视角与显示工具">
     <div class="tool-group camera-group" role="group" aria-label="相机预设">
-      <button type="button" class="tool-btn is-active" data-camera="threeQuarter">三分之四</button>
-      <button type="button" class="tool-btn" data-camera="side">侧视</button>
-      <button type="button" class="tool-btn" data-camera="front">前视</button>
-      <button type="button" class="tool-btn" data-camera="rear">后视</button>
-      <button type="button" class="tool-btn" data-camera="top">顶视</button>
-      <button type="button" class="tool-btn" id="btnInspect" title="机构剖视 (M)"><span class="tool-glyph">⌬</span>机构</button>
+      <button type="button" class="tool-btn is-active" data-camera="threeQuarter" aria-pressed="true">三分之四</button>
+      <button type="button" class="tool-btn" data-camera="side" aria-pressed="false">侧视</button>
+      <button type="button" class="tool-btn" data-camera="front" aria-pressed="false">前视</button>
+      <button type="button" class="tool-btn" data-camera="rear" aria-pressed="false">后视</button>
+      <button type="button" class="tool-btn" data-camera="top" aria-pressed="false">顶视</button>
+      <button type="button" class="tool-btn" id="btnInspect" title="机构剖视 (M)" aria-pressed="false"><span class="tool-glyph">⌬</span>机构</button>
     </div>
     <span class="tool-sep"></span>
     <div class="tool-group">
@@ -528,12 +528,14 @@
           <section>
             <h3><span>04</span>模型自检</h3>
             <div class="selftest-summary" id="selfTestSummary">未运行</div>
+            <p class="muted-note">动态自检在首次打开或参数 revision 变化后按需分片执行；参数不变时复用缓存，旧 revision 的运行结果会取消或丢弃。</p>
             <ul class="selftest-list" id="selfTestList"></ul>
           </section>
           <section>
             <h3><span>05</span>操作与约定</h3>
             <ul class="key-list">
               <li><span>拖动</span> 环绕观察（场景跟随指针），滚轮以光标为中心缩放，右键/中键或 Shift+拖动平移，双击重置</li>
+              <li><span>画布键盘</span> 聚焦画布后，方向键旋转，Shift+方向键平移，+ / − 或 PageUp / PageDown 缩放</li>
               <li><span>1 – 5</span> 切换三分之四、侧视、前视、后视、顶视；三视使用水平正交投影，顶视为正交俯视，<span>O</span> 切换投影，<span>R</span> 重置视角</li>
               <li><span>取景</span> 视线不滚转，相机不低于台面水平面；手动缩放范围 0.9 – 14 m 可视高度，窄屏按车宽自动退距</li>
               <li><span>X</span> 切换车身剖视，<span>M</span> 机构剖视（转向 → 传动 → 前/后防倾杆），<span>R</span> 返回总览</li>
@@ -546,7 +548,7 @@
           </section>
         </div>
         <div class="modal-foot">
-          <span>Formula Simulator · 阶段二演示 v0.3.0 · <a href="DESIGN.md" target="_blank" rel="noopener">DESIGN.md</a></span>
+          <span>Formula Simulator · 阶段二演示 v0.4.1 · <a href="DESIGN.md" target="_blank" rel="noopener">DESIGN.md</a></span>
           <span>六自由度 / 弹簧阻尼器 / 扭杆防倾杆 / 固定步长</span>
         </div>
       </div>

@@ -9,7 +9,7 @@
   --text: #e9edf2;
   --text-soft: #b9c3cf;
   --muted: #8290a3;
-  --faint: #596678;
+  --faint: #7c8a9d;
   --accent: #ff6738;
   --accent-bright: #ff865d;
   --accent-soft: rgba(255, 103, 56, 0.13);
@@ -73,6 +73,11 @@ button { cursor: pointer; }
   outline: none;
   touch-action: none;
   cursor: grab;
+}
+#viewport canvas:focus-visible {
+  outline: 2px solid var(--accent-bright);
+  outline-offset: -4px;
+  box-shadow: inset 0 0 0 4px rgba(255, 134, 93, 0.22);
 }
 #viewport canvas.is-dragging { cursor: grabbing; }
 #viewport canvas.is-panning { cursor: move; }
@@ -776,9 +781,10 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 6px 
 .motion-strip small { color: var(--faint); font-family: var(--mono); font-size: 7px; }
 .checks { margin-top: 12px; display: flex; flex-direction: column; gap: 2px; }
 .check-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  align-items: start;
+  gap: 2px 8px;
   padding: 7px 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.045);
 }
@@ -798,8 +804,9 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 6px 
 .check-item.is-ok .check-icon { color: var(--ok); border-color: rgba(94, 226, 160, 0.3); background: rgba(94, 226, 160, 0.07); }
 .check-item.is-warn .check-icon { color: var(--warn); border-color: rgba(255, 190, 92, 0.32); background: rgba(255, 190, 92, 0.07); }
 .check-item.is-error .check-icon { color: var(--danger); border-color: rgba(255, 116, 116, 0.34); background: rgba(255, 116, 116, 0.08); }
-.check-item .check-name { flex: 1; color: var(--text-soft); font-size: 9.5px; }
-.check-item .check-val { color: var(--muted); font-family: var(--mono); font-size: 9px; letter-spacing: 0.01em; text-align: right; font-variant-numeric: tabular-nums; }
+.check-item .check-icon { grid-column: 1; grid-row: 1 / span 2; }
+.check-item .check-name { grid-column: 2; min-width: 0; color: var(--text-soft); font-size: 10px; line-height: 1.4; }
+.check-item .check-val { grid-column: 2; min-width: 0; color: var(--muted); font-family: var(--mono); font-size: 9px; line-height: 1.45; letter-spacing: 0.01em; text-align: left; white-space: normal; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 .check-item.is-ok .check-val { color: rgba(94, 226, 160, 0.82); }
 .check-item.is-warn .check-val { color: rgba(255, 190, 92, 0.8); }
 .check-item.is-error .check-val { color: rgba(255, 116, 116, 0.86); }
@@ -878,7 +885,7 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 6px 
   display: flex;
   align-items: center;
   gap: 13px;
-  color: rgba(156, 170, 188, 0.45);
+  color: var(--muted);
   font-family: var(--mono);
   font-size: 8px;
   letter-spacing: 0.04em;
@@ -996,9 +1003,9 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 6px 
 .acceptance-item p { margin: 0; color: var(--faint); font-size: 9px; line-height: 1.6; }
 .selftest-summary { margin-bottom: 8px; color: var(--ok); font-family: var(--mono); font-size: 10px; letter-spacing: 0.02em; }
 .selftest-list { margin: 0; padding: 0; list-style: none; }
-.selftest-list li { display: flex; gap: 8px; align-items: baseline; padding: 4px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.05); color: var(--text-soft); font-size: 9.5px; }
-.selftest-list li .st-mark { color: var(--ok); font-family: var(--mono); font-size: 9px; }
-.selftest-list li .st-detail { margin-left: auto; color: var(--faint); font-family: var(--mono); font-size: 8px; white-space: nowrap; }
+.selftest-list li { display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 2px 8px; align-items: baseline; padding: 5px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.05); color: var(--text-soft); font-size: 10px; }
+.selftest-list li .st-mark { grid-column: 1; grid-row: 1 / span 2; color: var(--ok); font-family: var(--mono); font-size: 9px; }
+.selftest-list li .st-detail { grid-column: 2; min-width: 0; margin-left: 0; color: var(--faint); font-family: var(--mono); font-size: 9px; line-height: 1.5; white-space: normal; overflow-wrap: anywhere; }
 .selftest-list li.is-fail .st-mark { color: var(--danger); }
 .selftest-list li.is-fail { color: var(--warn); }
 .key-list { margin: 0; padding: 0; list-style: none; }
@@ -1026,6 +1033,9 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 6px 
 .mobile-scrim { position: fixed; inset: 0; z-index: 25; background: rgba(2, 5, 8, 0.54); backdrop-filter: blur(2px); }
 
 /* ---------------- responsive ---------------- */
+@media (max-width: 1500px) {
+  .viewport-hint { display: none; }
+}
 @media (max-width: 1380px) {
   .topbar-stat-hide { display: none; }
   .panel-left { width: 322px; }
@@ -1088,6 +1098,20 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 6px 
   .toast { bottom: 62px; font-size: 9px; max-width: calc(100vw - 24px); text-align: center; }
 }
 @media (max-width: 420px) {
+  .bottom-bar {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    height: auto;
+    min-height: 72px;
+    padding: 6px;
+    gap: 4px 6px;
+    overflow: visible;
+  }
+  .bottom-bar .camera-group { grid-column: 1 / -1; justify-content: center; }
+  .bottom-bar > .tool-group:not(.camera-group) { justify-content: center; }
+  .bottom-bar > .tool-sep { display: none; }
+  .panel { bottom: 94px; }
+  .toast { bottom: 94px; }
   .corner-grid { gap: 6px; }
   .corner-card { padding: 9px 9px 8px; }
   .corner-value b { font-size: 17px; }
@@ -1118,6 +1142,10 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 6px 
 }
 @media (max-height: 560px) and (max-width: 980px) {
   .bottom-bar { left: 10px; right: 10px; transform: none; max-width: none; bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
+}
+@media (max-width: 420px) {
+  .bottom-bar { height: auto; }
+  .panel { bottom: 94px; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; scroll-behavior: auto !important; }

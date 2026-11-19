@@ -7,7 +7,7 @@ const GRAVITY = 9.80665;
 const DEG = Math.PI / 180;
 const RAD = 180 / Math.PI;
 const STORAGE_KEY = 'fs01.dynamic.setup.v1';
-const APP_VERSION = '0.4.0';
+const APP_VERSION = '0.4.1';
 
 const CORNERS = [
   { key: 'FL', zh: '左前', axle: 'front', side: 'left', zSign: -1 },

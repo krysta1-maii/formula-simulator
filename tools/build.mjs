@@ -19,15 +19,25 @@ export async function renderIndexHtml({ root = ROOT } = {}) {
     .sort();
   const app = (await Promise.all(files.map((f) => read('src/js/' + f)))).join('\n\n');
   for (const [name, source] of [['styles', styles], ['three', three], ['app', app]]) {
-    if (source.includes('</script>')) throw new Error(name + ' contains a literal </script>; escape it before embedding');
+    if (/<\/script\b/i.test(source)) throw new Error(name + ' contains a literal </script> end tag; escape it before embedding');
+  }
+  const placeholders = [
+    ['/*__STYLES__*/', styles],
+    ['/*__THREE__*/', three],
+    ['/*__APP__*/', app]
+  ];
+  for (const [token] of placeholders) {
+    const count = template.split(token).length - 1;
+    if (count !== 1) throw new Error('template must contain exactly one ' + token + ' placeholder; found ' + count);
   }
   const inlineApp = '<script>\n(function () {\n\'use strict\';\n' + app + '\n})();\n</script>';
-  const html = template
-    .replace('/*__STYLES__*/', () => styles)
-    .replace('/*__THREE__*/', () => three)
-    .replace('/*__APP__*/', () => inlineApp);
-  if (html.includes('/*__STYLES__*/') || html.includes('/*__THREE__*/') || html.includes('/*__APP__*/')) {
-    throw new Error('template placeholder replacement failed');
+  let html = template;
+  for (const [token, source] of placeholders) {
+    const replacement = token === '/*__APP__*/' ? inlineApp : source;
+    html = html.replace(token, () => replacement);
+  }
+  for (const [token] of placeholders) {
+    if (html.includes(token)) throw new Error('template placeholder replacement failed: ' + token);
   }
   return { html, files };
 }

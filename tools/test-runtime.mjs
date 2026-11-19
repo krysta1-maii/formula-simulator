@@ -101,13 +101,18 @@ function runFrame() {
   const refState = [ref.state.y, ref.state.qx, ref.state.qz];
   for (const fps of [60, 30, 12, 10]) {
     const sim = physics.simCreate(physics.DEFAULTS, { settle: 0 });
-    for (let i = 0; i < Math.round(fps * 0.5); i += 1) physics.simAdvance(sim, 1 / fps);
+    while (sim.time < 0.5 - 1e-12) {
+      const frameDt = Math.min(1 / fps, 0.5 - sim.time);
+      physics.simAdvance(sim, frameDt);
+    }
     const steps2 = Math.round(sim.time / physics.SIM_DT);
     physics.simRunFor(ref, 0);
-    const delta = steps2 === Math.round(ref.time / physics.SIM_DT)
+    const refSteps = Math.round(ref.time / physics.SIM_DT);
+    const delta = steps2 === refSteps
       ? Math.abs(sim.state.y - refState[0]) + Math.abs(sim.state.qx - refState[1]) + Math.abs(sim.state.qz - refState[2])
-      : 0;
-    check(fps + ' Hz state matches fixed stepping', delta <= 1e-12, delta.toExponential(2));
+      : Infinity;
+    check(fps + ' Hz state matches fixed stepping', delta <= 1e-12,
+      'steps=' + steps2 + '/' + refSteps + ' delta=' + delta.toExponential(2));
   }
 }
 

@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 
 export const ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
-export const APP_VERSION = '0.4.0';
+export const APP_VERSION = '0.4.1';
 export const COMMIT = 'fbb401d';
 export const BASELINE_PATH = join(ROOT, 'tools/audit/baseline/0.2.0.json');
 

@@ -214,6 +214,40 @@ function finishCarBuild(model) {
   }
 }
 
+function clearCarReferences() {
+  CAR.dynamicGroup = null;
+  CAR.bodyworkGroup = null;
+  CAR.internalGroup = null;
+  CAR.skinMountGroup = null;
+  CAR.shellMeshes = [];
+  CAR.wheels = [];
+  CAR.corners = [];
+  CAR.links = [];
+  CAR.joints = [];
+  CAR.driveshafts = [];
+  CAR.springs = [];
+  CAR.rockers = [];
+  CAR.arbs = [];
+  CAR.bodyHardpoints = [];
+  CAR.steeringWheel = null;
+  CAR.mechanics = {
+    steeringRack: false,
+    steeringColumn: false,
+    differential: false,
+    arbFront: false,
+    arbRear: false,
+    rackGroup: null,
+    steeringPoint: null,
+    columnPoint: null,
+    diffPoint: null,
+    arbPoints: {}
+  };
+  CAR.dims = null;
+  CAR.geometryRevision = 0;
+  CAR.diag.geometryRevision = 0;
+  CAR.built = false;
+}
+
 function disposeResourceOnce(resource) {
   if (!resource) return false;
   if (!resource.userData) resource.userData = {};
@@ -284,7 +318,7 @@ function disposeGroupChildren(group, options = {}) {
   CAR.assets.totals.instanceMaterialDisposed += materialDisposed;
   CAR.assets.totals.sceneMaterialsDisposed += sceneMaterialsDisposed;
   CAR.assets.totals.textureDisposed += textureDisposed;
-  if (CAR.assets.lastBuild) {
+  if (options.updateLastBuild !== false && CAR.assets.lastBuild) {
     CAR.assets.lastBuild.geometryDisposed += geometryDisposed;
     CAR.assets.lastBuild.textureDisposed += textureDisposed;
     CAR.assets.lastBuild.instanceMaterialDisposed += materialDisposed;

@@ -26,6 +26,7 @@ const {
   NUM_LIMITS,
   GRAVITY,
   simCreate,
+  simReset,
   simStep,
   simRunFor,
   simAdvance,
@@ -444,8 +445,10 @@ function contactMode(sim) {
     sim.state.vx === before.vx && sim.state.vz === before.vz &&
     contactMode(sim) === before.mode && sim.cornerSeed.every((seed) => seed === null);
   for (let i = 0; i < 50; i += 1) simStep(sim);
+  const parkedQ = [sim.state.qw, sim.state.qx, sim.state.qy, sim.state.qz];
+  const parkedYawRoad = simQuatRotate(parkedQ, [sim.state.wx, sim.state.wy, sim.state.wz])[1];
   const parked = contactMode(sim) === 'HOLD' &&
-    Math.abs(sim.state.vx) < 1e-12 && Math.abs(sim.state.vz) < 1e-12 && Math.abs(sim.state.wy) < 1e-12;
+    Math.abs(sim.state.vx) < 1e-12 && Math.abs(sim.state.vz) < 1e-12 && Math.abs(parkedYawRoad) < 1e-12;
   const x1 = sim.state.x;
   const z1 = sim.state.z;
   for (let i = 0; i < 500; i += 1) simStep(sim);
@@ -609,8 +612,8 @@ function impulseSample(kind, yawDeg, pitchDeg, rollDeg) {
   const heave = impulseSample('heave', 0, 0, 0);
   const roll = impulseSample('roll', 0, 0, 0);
   check(
-    'heave and roll impulses carry their own levers',
-    Math.abs(heave.road[2] + 1086.30) < 1e-6 && Math.abs(heave.road[0]) < 1e-6 &&
+    'heave acts at CG and roll keeps its own lever',
+    maxAbs(heave.road) < 1e-9 &&
       Math.abs(roll.road[0] - 3780) < 1e-6 && Math.abs(roll.road[2] + 670.95) < 1e-6,
     'heave ' + heave.road.map((value) => value.toFixed(2)).join('/') +
       ' · roll ' + roll.road.map((value) => value.toFixed(2)).join('/')
@@ -1009,6 +1012,13 @@ console.log('\n[16] coil telemetry fallback and degraded state');
     sameLength && fallbackRows > 0 && rejectedRows > 0,
     fallbackRows + ' fallback · ' + rejectedRows + ' not ok'
   );
+  check(
+    'no rejected mechanism enters the force path and fallback is bounded',
+    model.solved.every((row) => row && (row.ok || row.coilSource === 'fallback')) &&
+      model.solved.every((row) => row && (row.coilSource !== 'fallback' || ['frame', 'rocker', 'ratio'].includes(row.fallbackReason))) &&
+      evaluation.corners.every((corner) => Math.abs(corner.springForce) <= 20000 && Math.abs(corner.dampingForce) <= 20000),
+    model.solved.map((row) => row.coilSource + ':' + (row.fallbackReason || '-')).join(' / ')
+  );
   const projected = model.solved.map((row, i) => {
     if (!row || row.coilSource !== 'fallback') return { delta: 0, contactY: 0 };
     const corner = sim.reference.suspension.corners[i];
@@ -1033,6 +1043,180 @@ console.log('\n[16] coil telemetry fallback and degraded state');
     sim.solverDegraded === true,
     'solverDegraded ' + sim.solverDegraded + ' · failureSteps ' + sim.solverFailureSteps
   );
+}
+
+
+console.log('\n[17] immutable setup snapshots and continuous retarget');
+function referenceVelocity(sim) {
+  const st = sim.state;
+  const c = sim.reference.cgBody;
+  const q = [st.qw, st.qx, st.qy, st.qz];
+  const arm = simQuatRotate(q, [c.x, c.y, c.z]);
+  const omega = simQuatRotate(q, [st.wx, st.wy, st.wz]);
+  const spin = cross3(omega, arm);
+  return [st.vx - spin[0], st.vy - spin[1], st.vz - spin[2]];
+}
+{
+  const source = make({ cgHeight: 0.3 });
+  const sim = simCreate(source, { settle: 0 });
+  source.cgHeight = 0.6;
+  source.frontWeightPct = 55;
+  check('create owns an immutable settings snapshot', Object.isFrozen(sim.reference.source) &&
+    sim.reference.source.cgHeight === 0.3 && sim.reference.source.frontWeightPct === DEFAULTS.frontWeightPct);
+
+  const resetSource = make({ cgHeight: 0.32 });
+  simReset(sim, resetSource, { settle: 0 });
+  resetSource.cgHeight = 0.6;
+  check('reset owns an immutable settings snapshot', Object.isFrozen(sim.reference.source) &&
+    sim.reference.source.cgHeight === 0.32);
+
+  const q = simQuatFromEuler(0.21, 0.08, -0.06);
+  Object.assign(sim.state, {
+    qw: q[0], qx: q[1], qy: q[2], qz: q[3],
+    vx: 0.2, vy: -0.08, vz: 0.12,
+    wx: 0.3, wy: 0.4, wz: -0.2
+  });
+  const beforePoint = simReferencePoint(sim);
+  const beforeVelocity = referenceVelocity(sim);
+  const beforeCgVelocity = [sim.state.vx, sim.state.vy, sim.state.vz];
+  const oldCg = sim.reference.cgBody;
+  const contact = sim.contact;
+  sim.solverDegraded = true;
+  sim.solverFailed = true;
+  sim.solverFailureSteps = 10;
+  const retargetSource = make({ cgHeight: 0.5, cgLateral: 0.08, frontWeightPct: 50, steer: 12 });
+  simRetargetReference(sim, retargetSource);
+  retargetSource.cgHeight = 0.15;
+  const afterPoint = simReferencePoint(sim);
+  const afterVelocity = referenceVelocity(sim);
+  const pointError = Math.hypot(afterPoint.x - beforePoint.x, afterPoint.y - beforePoint.y, afterPoint.z - beforePoint.z);
+  const velocityError = maxAbs(afterVelocity.map((value, i) => value - beforeVelocity[i]));
+  const newCg = sim.reference.cgBody;
+  const deltaArm = simQuatRotate(q, [newCg.x - oldCg.x, newCg.y - oldCg.y, newCg.z - oldCg.z]);
+  const omega = simQuatRotate(q, [sim.state.wx, sim.state.wy, sim.state.wz]);
+  const expectedCgVelocity = cross3(omega, deltaArm).map((value, i) => beforeCgVelocity[i] + value);
+  const cgVelocityError = maxAbs([sim.state.vx, sim.state.vy, sim.state.vz].map((value, i) => value - expectedCgVelocity[i]));
+  check('CG retarget preserves reference-point pose and velocity', pointError < 1e-12 && velocityError < 1e-12 && cgVelocityError < 1e-12,
+    'p ' + pointError.toExponential(2) + ' m · vp ' + velocityError.toExponential(2) + ' · vcg ' + cgVelocityError.toExponential(2) + ' m/s');
+  check('retarget snapshots source and clears only solver degradation', Object.isFrozen(sim.reference.source) &&
+    sim.reference.source.cgHeight === 0.5 && sim.contact === contact &&
+    !sim.solverDegraded && !sim.solverFailed && sim.solverFailureSteps === 0);
+  const retargetRack = suspRackForSteer(sim.reference.suspension.corners, simReferencePoint(sim),
+    new THREE.Quaternion(sim.state.qx, sim.state.qy, sim.state.qz, sim.state.qw), 12 * Math.PI / 180);
+  check('combined CG and steer retarget recalibrates at the preserved pose',
+    Math.abs(sim.rackShift - retargetRack) < 1e-10 && Math.abs(sim.rackShift) > 0.02,
+    (sim.rackShift * 1000).toFixed(6) + ' mm');
+}
+
+
+console.log('\n[18] steered create/reset use final rack and dynamic equilibrium');
+function checkSteeredInitial(label, sim) {
+  const model = simBuildModel(sim);
+  const point = simReferencePoint(sim);
+  const st = sim.state;
+  const rack = suspRackForSteer(
+    sim.reference.suspension.corners,
+    point,
+    new THREE.Quaternion(st.qx, st.qy, st.qz, st.qw),
+    sim.reference.source.steer * Math.PI / 180
+  );
+  check(label + ': final rack is installed before settle', Math.abs(sim.rackShift - rack) < 1e-10 && Math.abs(sim.rackShift) > 0.03,
+    (sim.rackShift * 1000).toFixed(6) + ' mm');
+  check(label + ': actual-contact CG residual is below 0.01 N/Nm',
+    model.forceError < 0.01 && model.momentXError < 0.01 && model.momentZError < 0.01 && model.solverOk,
+    model.forceError.toExponential(2) + ' / ' + model.momentXError.toExponential(2) + ' / ' + model.momentZError.toExponential(2));
+  check(label + ': static reference and dynamic loads agree',
+    maxAbs(sim.reference.loads.map((value, i) => value - model.loads[i])) < 1e-9 &&
+      Math.abs(sim.reference.forceError - model.forceError) < 1e-9 &&
+      Math.abs(sim.reference.momentXError - model.momentXError) < 1e-9 &&
+      Math.abs(sim.reference.momentZError - model.momentZError) < 1e-9);
+  simStep(sim);
+  const next = simBuildModel(sim);
+  check(label + ': first fixed step has no initialization shock',
+    maxAbs(next.loads.map((value, i) => value - model.loads[i])) < 0.01,
+    maxAbs(next.loads.map((value, i) => value - model.loads[i])).toExponential(2) + ' N');
+}
+{
+  const sim = simCreate(make({ steer: 18 }), { settle: 0 });
+  checkSteeredInitial('create +18deg', sim);
+  sim.state.vx = 0.4;
+  sim.state.wz = 0.2;
+  simReset(sim, make({ steer: 18 }), { settle: 0 });
+  checkSteeredInitial('reset +18deg', sim);
+}
+
+
+console.log('\n[19] combined slope/bank joint planar-yaw re-parking');
+{
+  const sim = simCreate(make({ slope: 10, bank: 10, friction: 0.3 }), { settle: 0.5 });
+  const gravity = sim.reference.frame.gravityLocal;
+  const tangent = Math.hypot(gravity.x, gravity.z);
+  sim.state.vx = 0.3 * gravity.x / tangent;
+  sim.state.vz = 0.3 * gravity.z / tangent;
+  let holdAt = null;
+  for (let i = 0; i < 10000; i += 1) {
+    simStep(sim);
+    if (holdAt === null && contactMode(sim) === 'HOLD') holdAt = sim.time;
+  }
+  const q = [sim.state.qw, sim.state.qx, sim.state.qy, sim.state.qz];
+  const yawRoad = simQuatRotate(q, [sim.state.wx, sim.state.wy, sim.state.wz])[1];
+  const evaluation = simEvaluate(sim);
+  check('10deg slope + 10deg bank, mu 0.3 re-parks within 20s',
+    contactMode(sim) === 'HOLD' && holdAt !== null && sim.state.vx === 0 && sim.state.vz === 0 &&
+      Math.abs(yawRoad) < 1e-12 && evaluation.demand < evaluation.capacity,
+    'hold ' + (holdAt === null ? 'never' : holdAt.toFixed(3) + 's') + ' · yawRoad ' + yawRoad.toExponential(2) +
+      ' · demand/capacity ' + (evaluation.demand / evaluation.capacity).toFixed(4));
+  const point = simReferencePoint(sim);
+  simRunFor(sim, 1);
+  const held = simReferencePoint(sim);
+  check('re-parked compound slope has no subsequent creep', contactMode(sim) === 'HOLD' &&
+    Math.hypot(held.x - point.x, held.z - point.z) < 1e-9);
+}
+
+console.log('\n[20] joint low-speed saturation never reverses a component');
+{
+  const random = mulberry32(20261119);
+  const sim = simCreate(make({ friction: 0.2 }), { settle: 0 });
+  const base = { ...sim.state };
+  const yawRoad = (st) => simQuatRotate([st.qw, st.qx, st.qy, st.qz], [st.wx, st.wy, st.wz])[1];
+  let lowSpeedCases = 0;
+  let jointCases = 0;
+  let projectedCases = 0;
+  let reversals = 0;
+  let first = '';
+  for (let i = 0; i < 5000; i += 1) {
+    const q = simQuatFromEuler((random() * 2 - 1) * 0.25, (random() * 2 - 1) * 0.2, (random() * 2 - 1) * 0.2);
+    Object.assign(sim.state, base, {
+      qw: q[0], qx: q[1], qy: q[2], qz: q[3],
+      vx: (random() * 2 - 1) * 0.025,
+      vz: (random() * 2 - 1) * 0.025,
+      wx: (random() * 2 - 1) * 0.08,
+      wy: (random() * 2 - 1) * 0.08,
+      wz: (random() * 2 - 1) * 0.08
+    });
+    sim.contact = { mode: 'SLIP', dwell: 0, since: 0, changes: 0, lastChangeStep: 0, reason: 'speed', slipSpeed: 0, usage: 0 };
+    const before = { ...sim.state };
+    const evaluation = simStep(sim);
+    if (!evaluation.arrest.lowSpeed) continue;
+    lowSpeedCases += 1;
+    if (evaluation.arrest.joint) jointCases += 1;
+    if (evaluation.arrest.joint && (evaluation.arrest.planar || evaluation.arrest.yaw)) projectedCases += 1;
+    const after = { ...sim.state };
+    const pairs = [
+      ['vx', before.vx, after.vx],
+      ['vz', before.vz, after.vz],
+      ['yawRoad', yawRoad(before), yawRoad(after)]
+    ];
+    for (const [key, start, end] of pairs) {
+      if (Math.abs(start) > 1e-7 && Math.abs(end) > 1e-9 && start * end < 0) {
+        reversals += 1;
+        if (!first) first = 'step ' + i + ' ' + key + ' ' + start + ' -> ' + end;
+      }
+    }
+  }
+  check('5000 deterministic low-speed cases never reverse velocity or road yaw',
+    lowSpeedCases > 100 && jointCases > 0 && projectedCases > 0 && reversals === 0,
+    'low=' + lowSpeedCases + ' joint=' + jointCases + ' projected=' + projectedCases + ' reversals=' + reversals + (first ? ' · ' + first : ''));
 }
 
 console.log('\n' + (failures === 0 ? 'PASS' : 'FAIL') + '  ' + (checks - failures) + '/' + checks + ' checks');

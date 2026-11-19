@@ -1,10 +1,10 @@
 # Formula Simulator · FS-01 动态底盘台
 
-阶段二交付：一个可离线运行、可交互调参的方程式赛车六自由度车身与动态悬架演示。当前版本 `0.4.0`。入口是仓库根目录的 [`index.html`](index.html)，Three.js r149 已内嵌，不依赖网络、构建环境或本地服务器，直接用浏览器打开即可。
+阶段二交付：一个可离线运行、可交互调参的方程式赛车六自由度车身与动态悬架演示。当前版本 `0.4.1`。入口是仓库根目录的 [`index.html`](index.html)，Three.js r149 已内嵌，不依赖网络、构建环境或本地服务器，直接用浏览器打开即可。
 
 ![FS-01 动态底盘台总览](docs/01-overview.png)
 
-0.4.0 的悬挂布置、共享力链路和包络验证见 [悬挂重构说明](docs/suspension-refactor.md)。
+0.4.0 的悬挂布置、共享力链路和包络验证见 [悬挂重构说明](docs/suspension-refactor.md)。0.4.1 收口记录见 [当前验收](docs/plan/acceptance.md)；全部文档的分类与时效见 [文档索引](docs/README.md)。
 
 ## 本期完成内容
 
@@ -14,11 +14,11 @@
 - 四角不等长双横臂、前推杆/后拉杆、车内摇臂与纵向卧式弹簧—阻尼器：硬点实时反解车轮位姿、线圈长度和瞬时运动比；弹簧、阻尼器、摇臂和防倾杆均置于车体包络内，外部只保留叉臂、推/拉杆、横拉杆和后半轴等机构。
 - 前后横向扭杆式防倾杆动态：按左右行程差产生等大反向的附加轮心力，参与车体侧倾、俯仰和升沉方程。
 - 固定步长 2 ms 的半隐式欧拉积分：渲染帧率决定每帧执行多少个子步；低帧率按 0.5 s 积压跨帧排空，低于 4 Hz 进入慢动作，无法排空的输入计入 `droppedTime`。
-- 倾斜平面上的切向库仑摩擦：静摩擦按法向载荷比例分配，维持坡面驻车；超过 `μΣN` 或已经滑移时施加动摩擦，允许车体在平面内纵移、横移和横摆。
+- 倾斜平面上的切向库仑摩擦：静摩擦按法向载荷比例分配，维持坡面驻车；超过 `μΣN` 或已经滑移时施加动摩擦，允许车体在平面内纵移、横移和横摆；低速域内联合处理平动与横摆停止冲量，并防止单步速度反向。
 - 动态试验：暂停/继续、重置姿态、回到平衡，以及垂向、侧倾、俯仰三种短脉冲，用于观察弹簧—阻尼器和防倾杆的瞬态响应。
 - 动态遥测：四角法向载荷、车身姿态与角速度、四角行程与弹簧压缩、阻尼力、防倾杆力、固有频率、惯量、仿真时间与子步数。
 - 车身、车轮、摇臂、推/拉杆、卧式弹簧—阻尼器、防倾杆连接杆和载荷箭头共享同一套动态姿态；平面运动时接地点、标注和地面阴影同步移动。低跳动转向拉杆把 ±25 mm 行程的前/后跳动转向控制在约 0.09°/0.03°。
-- 24 项页面自检（14 项静力/边界 + 10 项动力学），以及 Node 静力 `50` 项、动力学 `104` 项、物理不变量 `31` 项检查和无头 Chrome 浏览器冒烟测试。
+- 24 项页面自检（14 项静力/边界 + 10 项动力学），以及 Node 静力 `51` 项、动力学 `120` 项、物理不变量 `34` 项检查和无头 Chrome 浏览器冒烟测试。
 - 参数持久化、JSON 参数复制、PNG 截图导出；桌面和移动端自适应。
 
 ## 快速开始
@@ -42,12 +42,18 @@ npm run test:dynamics
 npm run test:invariants
 npm run test:runtime
 
+# 构建、门禁与故障注入负例
+npm run test:build
+
 # UI 与 dev-server 边界（UI 需要 Chrome）
 npm run test:ui
 npm run test:dev-server
 
 # 构建产物一致性（不写盘）
 npm run build:check
+
+# 完整门禁：构建检查、Node、严格 Chrome、审计与基线
+npm run ci
 
 # 审计基线（修复前失败清单；修复后应退出 0）
 npm run audit:baseline
@@ -69,9 +75,9 @@ npm run dev
 # 打开 http://127.0.0.1:8731
 ```
 
-构建脚本把 `src/index.template.html`、`src/styles.css`、`src/js/*.js` 和 `vendor/three.min.js` 合并成单个 `index.html`。这也是入口文件体积约 1.0 MiB（1,053,648 B）的原因。
+构建脚本把 `src/index.template.html`、`src/styles.css`、`src/js/*.js` 和 `vendor/three.min.js` 合并成单个 `index.html`。这也是入口文件体积约 1.0 MiB（当前 1,086,555 B）的原因。
 
-Node 版本有两档约束。`package.json` 的 `engines.node` 为 `>=18`，该下限只覆盖非浏览器命令：`npm test`、`npm run test:core`、`npm run test:dynamics`、`npm run test:invariants`、`npm run test:runtime`、`npm run test:dev-server`、`npm run build:check` 与 Node 侧审计脚本。浏览器命令（`npm run test:ui`、`npm run test:browser`、`npm run test:suspension`、`npm run test:camera` 以及 `npm run audit` 的 browser 组）通过 CDP 连接 Chrome，依赖 Node 21+ 提供的全局 `WebSocket`；在 Node 18/20 上不能运行这些命令，也不能把 `engines >=18` 解读为浏览器测试的版本下限。当前验证环境为 Node 24.22.1 与 Chrome 156。
+Node 版本有两档约束。`package.json` 的 `engines.node` 为 `>=18`，该下限只覆盖非浏览器命令：`npm test`、`npm run test:core`、`npm run test:dynamics`、`npm run test:invariants`、`npm run test:runtime`、`npm run test:dev-server`、`npm run test:build`、`npm run build:check` 与 Node 侧审计脚本。浏览器命令（`npm run test:ui`、`npm run test:browser`、`npm run test:suspension`、`npm run test:camera` 以及 `npm run audit` 的 browser 组）通过 CDP 连接 Chrome，依赖 Node 21+ 提供的全局 `WebSocket`；在 Node 18/20 上不能运行这些命令，也不能把 `engines >=18` 解读为浏览器测试的版本下限。统一 `npm run ci` 和 `npm run ci:browser` 将缺少 Chrome 或 WebSocket 视为失败；本地单独运行浏览器套件仍可按提示跳过。当前验证环境为 Node 24.22.1 与 Chrome 156，仓库工作流使用 Node 22 和稳定版 Chrome。
 
 ## 页面操作
 
@@ -97,7 +103,7 @@ Node 版本有两档约束。`package.json` 的 `engines.node` 为 `>=18`，该�
 | --- | --- |
 | 暂停 / 继续 | 冻结或恢复固定步长积分。暂停时仍可观察当前姿态和载荷 |
 | 重置姿态 | 把车体放回当前路面和参数下的静力平衡姿态，并清零速度 |
-| 垂向脉冲 | 在质心处施加 0.12 s 的向下 6800 N 力，激励升沉和俯仰 |
+| 垂向脉冲 | 在质心处施加 0.12 s 的向下 6800 N 力，激励升沉；作用线通过质心，不产生附加绕质心力矩 |
 | 侧倾脉冲 | 在右侧 0.90 m 处施加 0.12 s 的向下 4200 N 力，激励侧倾 |
 | 俯仰脉冲 | 在车身参考点前方 0.95 m 处施加 0.12 s 的向下 6200 N 力；绕质心力臂为 `offset − cgBody`，零姿态俯仰力矩为 −6880.45 N·m |
 | 回到平衡 | 重置姿态并运行 2 s，让阻尼把残余振动衰减掉 |
@@ -186,11 +192,11 @@ f_i = −F_t · N_contact,i / ΣN_contact
 
 ## 静力参考
 
-阶段一的静力求解器仍保留，作为设计基准、初始姿态、动态自检和“水平路面基准”的数据源。水平路面上动态解严格回到设计姿态：四角载荷等于由质心位置分配的静态角重量，总法向力等于 `mg`。倾斜路面上，动态解与静力解的法向载荷差小于 1 N（默认参数和 ±10° 包线内实测最大约 0.8 N），总法向力收敛到 `mg cosβ`。
+阶段一的静力求解器仍保留，作为设计基准、动态自检和“水平路面基准”的数据源。0.4.1 在创建和重置时先安装最终齿条，再以实际接地点、质心力臂和摩擦残差求解初始姿态；在线调整质心时保持车身参考点的位置、姿态和速度连续，设置对象按快照冻结。水平路面上动态解严格回到设计姿态：四角载荷等于由质心位置分配的静态角重量，总法向力等于 `mg`。倾斜路面上，动态解与静力解的法向载荷差小于 1 N（默认参数和 ±10° 包线内实测最大约 0.8 N），总法向力收敛到 `mg cosβ`。
 
 ## 自检与验收
 
-页面内置 24 项自检：14 项静力/边界检查和 10 项动力学检查。打开“？”模型说明时重新运行动力学自检；参数变化后遥测中的“动态自检”显示最近一次结果。
+页面内置 24 项自检：14 项静力/边界检查和 10 项动力学检查。动力学自检在首次打开或参数 revision 变化后按需分片运行，同 revision 复用缓存；参数继续变化会取消旧任务，旧结果不会作为当前设置的结果提交。
 
 静力检查：
 
@@ -222,7 +228,7 @@ f_i = −F_t · N_contact,i / ΣN_contact
 9. 低速驻车。
 10. 滑移不反向。
 
-Node 验证覆盖静力核心 50 项、动力学核心 104 项和物理不变量 31 项（含机构闭合、接触点、运动比、齿条标定与线圈行程一致性）；浏览器测试覆盖暂停/继续、脉冲、低附着滑移、重置、几何重建、阻尼参数和模型说明列表，另有 45 项 UI 可访问性与求解展示检查。`npm run test:suspension` 进一步按真实网格检查内部件包络、卧式倾角、普通/剖视可见性，以及 18°转向叠加脉冲和 3.20/3.70/3.90 m 轴距重建时的杆件闭合和画面—力遥测一致性。默认配置下 30 根连杆、68 个端点；悬架杆长偏差 0.000 mm，横拉杆长度偏差 0.000 mm。
+Node 验证覆盖静力核心 51 项、动力学核心 121 项和物理不变量 34 项（含机构闭合、接触点、运动比、齿条标定、线圈行程、设置快照、转向初始化、复合坡驻车与自由刚体守恒）；运行时、dev-server 和工具门禁分别为 78、20、31 项。浏览器测试覆盖暂停/继续、脉冲、低附着滑移、重置、几何重建、阻尼参数和模型说明列表，另有 64 项 UI、生命周期与可访问性检查。`npm run test:suspension` 进一步按真实网格检查内部件包络、卧式倾角、普通/剖视可见性，以及 18°转向叠加脉冲和 3.20/3.70/3.90 m 轴距重建时的杆件闭合和画面—力遥测一致性。默认配置下 30 根连杆、68 个端点；悬架杆长偏差 0.000 mm，横拉杆长度偏差 0.000 mm。
 
 阶段二验收对照：
 
@@ -296,6 +302,7 @@ tools/
   test-dynamics.mjs        动力学核心验证（Node）
   test-physics-invariants.mjs 物理不变量验证（Node）
   test-runtime.mjs         帧时间、几何代际、自检与资源验证（Node）
+  test-build.mjs           构建、门禁与故障注入负例（Node）
   test-dynamics-browser.mjs 动态交互冒烟测试（headless Chrome，自动跳过）
   test-suspension-packaging.mjs 悬挂包络与动态网格一致性（headless Chrome）
   test-camera.mjs          相机交互冒烟测试（headless Chrome，自动跳过）
@@ -306,7 +313,8 @@ tools/
   capture-docs.mjs         预览截图生成（headless Chrome）
   dev-server.mjs           可选本地静态服务器
   audit/                   修复前审计脚本与 0.2.0 基线
-docs/                      预览图片
+.github/workflows/ci.yml  Node 22 + Chrome 的统一 CI
+docs/                      文档索引、验收记录、历史评审与预览图片
 ```
 
 修改源码后执行 `node tools/build.mjs` 重新生成 `index.html`。不要直接改 `index.html`，它会被构建覆盖。

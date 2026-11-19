@@ -1,5 +1,7 @@
 # Formula Simulator 项目审查报告
 
+> **历史记录｜审查基线：0.2.0 / `fbb401d`。** 本文保留当时的发现、结论和测试计数，不代表这些问题在当前版本仍未修复。当前状态以根目录 [README](../README.md)、[DESIGN](../DESIGN.md) 及 [最新验收](plan/acceptance.md) 为准。
+
 > **审查者：K3.1 Pro**  
 > 报告整理日期：2026-11-11  
 > 审查基线：formula-simulator 0.2.0，commit fbb401d  

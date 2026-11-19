@@ -184,10 +184,152 @@ function simEquilibriumState(reference) {
   };
 }
 
+function simSetupSnapshot(source) {
+  // Simulation references never borrow the live UI settings object.
+  return Object.freeze(cloneState(source));
+}
+
+function simCalibrateRack(sim) {
+  if (!sim.reference.suspension) {
+    sim.rackShift = 0;
+    return 0;
+  }
+  const steer = Number.isFinite(sim.reference.source.steer) ? sim.reference.source.steer : 0;
+  if (Math.abs(steer) < 1e-12) {
+    sim.rackShift = 0;
+    return 0;
+  }
+  const point = simReferencePoint(sim);
+  const st = sim.state;
+  sim.rackShift = suspRackForSteer(
+    sim.reference.suspension.corners,
+    point,
+    new THREE.Quaternion(st.qx, st.qy, st.qz, st.qw),
+    steer * DEG
+  );
+  return sim.rackShift;
+}
+
+function simSetInitialPose(sim, heave, pitch, roll) {
+  const q = simQuatFromEuler(0, pitch, roll);
+  const c = sim.reference.cgBody;
+  const cg = simCgFromBodyPoint([0, heave, 0], q, [c.x, c.y, c.z]);
+  Object.assign(sim.state, {
+    x: cg[0], y: cg[1], z: cg[2],
+    vx: 0, vy: 0, vz: 0,
+    qw: q[0], qx: q[1], qy: q[2], qz: q[3],
+    wx: 0, wy: 0, wz: 0
+  });
+  sim.cornerSeed = [null, null, null, null];
+  sim.cornerRatio = [null, null, null, null];
+  return simEvaluate(sim);
+}
+
+function simInitialResidual(evaluation) {
+  return [evaluation.force[1], evaluation.moment[0], evaluation.moment[2]];
+}
+
+function simSyncInitialReference(sim, evaluation) {
+  const reference = sim.reference;
+  const corners = evaluation.corners;
+  const loads = corners.map((corner) => corner.force);
+  const rawLoads = corners.map((corner) => corner.rawForce);
+  const sumLoads = loads.reduce((sum, value) => sum + value, 0);
+  const frontLoad = loads[0] + loads[1];
+  const leftLoad = loads[0] + loads[2];
+  const denom = sumLoads > 1e-9 ? sumLoads : 1;
+  reference.heave = evaluation.refPos.y;
+  reference.pitch = evaluation.euler.pitch;
+  reference.roll = evaluation.euler.roll;
+  reference.referencePoint = { x: evaluation.refPos.x, y: evaluation.refPos.y, z: evaluation.refPos.z };
+  reference.poseDeg = { pitch: reference.pitch * RAD, roll: reference.roll * RAD };
+  reference.cornerY = corners.map((corner) => corner.cornerY);
+  reference.travelMm = reference.cornerY.map((value) => -value * 1000);
+  reference.rawLoads = rawLoads;
+  reference.loads = loads;
+  reference.sumLoads = sumLoads;
+  reference.frontLoad = frontLoad;
+  reference.rearLoad = sumLoads - frontLoad;
+  reference.leftLoad = leftLoad;
+  reference.rightLoad = sumLoads - leftLoad;
+  reference.maxLoad = Math.max(...loads);
+  reference.minLoad = Math.min(...loads);
+  reference.minRawLoad = Math.min(...rawLoads);
+  reference.liftedCount = rawLoads.filter((value) => value < -1e-6).length;
+  reference.frontShare = frontLoad / denom;
+  reference.rearShare = 1 - reference.frontShare;
+  reference.leftShare = leftLoad / denom;
+  reference.rightShare = 1 - reference.leftShare;
+  reference.normalMomentX = corners.reduce((sum, corner) => sum + corner.force * corner.contact[0], 0);
+  reference.normalMomentZ = corners.reduce((sum, corner) => sum + corner.force * corner.contact[2], 0);
+  reference.forceError = Math.abs(evaluation.force[1]);
+  reference.momentXError = Math.abs(evaluation.moment[0]);
+  reference.momentZError = Math.abs(evaluation.moment[2]);
+  reference.equilibriumOk = reference.forceError < 0.05 && reference.momentXError < 0.05 && reference.momentZError < 0.05;
+  reference.contactOk = reference.liftedCount === 0 && reference.minLoad > 0.01;
+  reference.contactPoints = corners.map((corner) => ({ x: corner.contact[0], y: 0, z: corner.contact[2] }));
+  reference.wheelCenters = corners.map((corner) => ({ x: corner.wheelPos[0], y: corner.wheelPos[1], z: corner.wheelPos[2] }));
+  reference.arbForce = corners.map((corner) => corner.arbForce);
+  reference.cgWorld = { x: evaluation.cg[0], y: evaluation.cg[1], z: evaluation.cg[2] };
+  reference.rackShift = sim.rackShift;
+  sim.initialResidual = {
+    force: reference.forceError,
+    momentX: reference.momentXError,
+    momentZ: reference.momentZError,
+    rackShift: sim.rackShift
+  };
+}
+
+function simInitializeReference(sim) {
+  // The rack is final before any optional settling. Solve h/pitch/roll against
+  // the integrator's own contacts, CG levers and HOLD/SLIP friction residual.
+  simCalibrateRack(sim);
+  for (let outer = 0; outer < 2; outer += 1) {
+    let h = sim.reference.heave;
+    let p = sim.reference.pitch;
+    let r = sim.reference.roll;
+    let evaluation = simSetInitialPose(sim, h, p, r);
+    for (let iter = 0; iter < 10; iter += 1) {
+      const residual = simInitialResidual(evaluation);
+      if (Math.max(...residual.map(Math.abs)) < 1e-6) break;
+      const dh = 1e-5;
+      const da = 1e-6;
+      const eh = simInitialResidual(simSetInitialPose(sim, h + dh, p, r));
+      const ep = simInitialResidual(simSetInitialPose(sim, h, p + da, r));
+      const er = simInitialResidual(simSetInitialPose(sim, h, p, r + da));
+      const J = residual.map((value, i) => [
+        (eh[i] - value) / dh,
+        (ep[i] - value) / da,
+        (er[i] - value) / da
+      ]);
+      const delta = solve3(J, residual.map((value) => -value));
+      if (!delta) break;
+      h += clamp(delta[0], -0.02, 0.02);
+      p += clamp(delta[1], -0.02, 0.02);
+      r += clamp(delta[2], -0.02, 0.02);
+      evaluation = simSetInitialPose(sim, h, p, r);
+    }
+    simSyncInitialReference(sim, evaluation);
+    const previousRack = sim.rackShift;
+    simCalibrateRack(sim);
+    if (Math.abs(sim.rackShift - previousRack) < 1e-10 && outer === 0) {
+      simSyncInitialReference(sim, simSetInitialPose(sim, h, p, r));
+      break;
+    }
+  }
+  const finalEvaluation = simEvaluate(sim);
+  simSyncInitialReference(sim, finalEvaluation);
+  sim.solverDegraded = finalEvaluation.degraded;
+  sim.solverFailed = false;
+  sim.solverFailureSteps = 0;
+  return sim;
+}
+
 function simCreate(source = state, options = {}) {
   const settle = options.settle || 0;
+  const snapshot = simSetupSnapshot(source);
   const sim = {
-    reference: computeStatic(source),
+    reference: computeStatic(snapshot),
     state: null,
     time: 0,
     impulse: null,
@@ -211,24 +353,26 @@ function simCreate(source = state, options = {}) {
     resetCount: 0
   };
   sim.state = simEquilibriumState(sim.reference);
-  setActiveGeometry(source);
+  setActiveGeometry(sim.reference.source);
   sim.geometryRevision = sim.reference.geometryRevision;
-  sim.steerApplied = source.steer;
+  sim.steerApplied = sim.reference.source.steer;
   sim.droppedTime = 0;
   sim.lastFrameDt = 0;
   sim.lastAdvance = 0;
   sim.timeScale = 1;
+  simInitializeReference(sim);
   if (settle > 0) simRunFor(sim, settle);
   return sim;
 }
 
 function simReset(sim, source = state, options = {}) {
   const settle = options.settle || 0;
-  sim.reference = computeStatic(source);
+  const snapshot = simSetupSnapshot(source);
+  sim.reference = computeStatic(snapshot);
   sim.state = simEquilibriumState(sim.reference);
-  setActiveGeometry(source);
+  setActiveGeometry(sim.reference.source);
   sim.geometryRevision = sim.reference.geometryRevision;
-  sim.steerApplied = source.steer;
+  sim.steerApplied = sim.reference.source.steer;
   sim.droppedTime = 0;
   sim.lastFrameDt = 0;
   sim.lastAdvance = 0;
@@ -251,6 +395,7 @@ function simReset(sim, source = state, options = {}) {
     recovered: false
   };
   sim.resetCount += 1;
+  simInitializeReference(sim);
   if (settle > 0) simRunFor(sim, settle);
   return sim;
 }
@@ -261,18 +406,41 @@ function simReset(sim, source = state, options = {}) {
  * and are cleared; the body state and sim.contact are preserved.
  */
 function simRetargetReference(sim, source = state) {
-  const next = computeStatic(source);
-  const previousRevision = sim.reference ? sim.reference.geometryRevision : undefined;
+  const previous = sim.reference;
+  const bodyState = sim.state;
+  const q = [bodyState.qw, bodyState.qx, bodyState.qy, bodyState.qz];
+  const referencePoint = simReferencePoint(sim);
+  const next = computeStatic(simSetupSnapshot(source));
+  const previousRevision = previous ? previous.geometryRevision : undefined;
   const nextRevision = next.geometryRevision;
   if (previousRevision !== undefined && nextRevision !== undefined && previousRevision !== nextRevision) {
     throw new Error('simRetargetReference: geometryRevision mismatch (' + previousRevision + ' -> ' + nextRevision + ')');
   }
+
+  // Preserve reference-point position, orientation and translational velocity.
+  const oldCg = previous.cgBody;
+  const newCg = next.cgBody;
+  const deltaArm = simQuatRotate(q, [newCg.x - oldCg.x, newCg.y - oldCg.y, newCg.z - oldCg.z]);
+  const newArm = simQuatRotate(q, [newCg.x, newCg.y, newCg.z]);
+  const omegaRoad = simQuatRotate(q, [bodyState.wx, bodyState.wy, bodyState.wz]);
+  const deltaVelocity = simCross(omegaRoad, deltaArm);
+  bodyState.x = referencePoint.x + newArm[0];
+  bodyState.y = referencePoint.y + newArm[1];
+  bodyState.z = referencePoint.z + newArm[2];
+  bodyState.vx += deltaVelocity[0];
+  bodyState.vy += deltaVelocity[1];
+  bodyState.vz += deltaVelocity[2];
+
   sim.reference = next;
-  setActiveGeometry(source);
+  setActiveGeometry(next.source);
   sim.geometryRevision = next.geometryRevision;
-  sim.steerApplied = source.steer;
+  sim.steerApplied = next.source.steer;
   sim.cornerSeed = [null, null, null, null];
   sim.cornerRatio = [null, null, null, null];
+  sim.solverDegraded = false;
+  sim.solverFailed = false;
+  sim.solverFailureSteps = 0;
+  simCalibrateRack(sim);
   return sim;
 }
 
@@ -284,21 +452,152 @@ function simApplyImpulse(sim, kind = 'heave') {
   // B2-2: offset is a body-frame point relative to the reference point;
   // forceRoad is the road-frame impulse force, applied unchanged.
   const specs = {
-    heave: { label: '垂向脉冲', forceRoad: [0, -6800, 0], offset: [0, 0, 0] },
+    heave: { label: '垂向脉冲', forceRoad: [0, -6800, 0], atCg: true, offset: [0, 0, 0] },
     roll: { label: '侧倾脉冲', forceRoad: [0, -4200, 0], offset: [0, 0, 0.90] },
     pitch: { label: '俯仰脉冲', forceRoad: [0, -6200, 0], offset: [0.95, 0, 0] }
   };
   const spec = specs[kind];
   if (!spec) return false;
+  const cgBody = sim.reference && sim.reference.cgBody ? sim.reference.cgBody : { x: 0, y: 0, z: 0 };
   sim.impulse = {
     kind,
     label: spec.label,
     forceRoad: spec.forceRoad.slice(),
-    offset: spec.offset.slice(),
+    atCg: spec.atCg === true,
+    // Heave acts at the CG; offset remains relative to the body reference.
+    offset: spec.atCg ? [cgBody.x, cgBody.y, cgBody.z] : spec.offset.slice(),
     until: sim.time + SIM_IMPULSE_SECONDS
   };
   sim.running = true;
   return true;
+}
+
+function simRoadInverseInertia(q, inertia) {
+  const columns = [
+    simQuatRotate(q, [1, 0, 0]),
+    simQuatRotate(q, [0, 1, 0]),
+    simQuatRotate(q, [0, 0, 1])
+  ];
+  const diagonal = [inertia.Ixx, inertia.Iyy, inertia.Izz];
+  const inverse = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+  for (let row = 0; row < 3; row += 1) {
+    for (let col = 0; col < 3; col += 1) {
+      for (let axis = 0; axis < 3; axis += 1) {
+        inverse[row][col] += columns[axis][row] * columns[axis][col] / diagonal[axis];
+      }
+    }
+  }
+  return inverse;
+}
+
+function simSetRoadYawRate(bodyState, q, target) {
+  const omegaRoad = simQuatRotate(q, [bodyState.wx, bodyState.wy, bodyState.wz]);
+  const correction = simQuatRotateInverse(q, [0, target - omegaRoad[1], 0]);
+  bodyState.wx += correction[0];
+  bodyState.wy += correction[1];
+  bodyState.wz += correction[2];
+}
+
+/**
+ * Low-speed static-friction feasibility solve for [vx, vz, yawRoad]. The three
+ * equations are exact translational/angular impulse balances; per-contact
+ * Coulomb circles remain hard bounds. No bodyState.wy yaw approximation is used.
+ */
+function simJointArrestImpulses(sim, corners, cg, externalTangent, externalMoment, dt, omegaRoad) {
+  const bodyState = sim.state;
+  const reference = sim.reference;
+  const mass = reference.mass;
+  const q = [bodyState.qw, bodyState.qx, bodyState.qy, bodyState.qz];
+  const inverseInertia = simRoadInverseInertia(q, reference.inertia);
+  const inverseYY = inverseInertia[1][1];
+  if (!(inverseYY > 0) || !Number.isFinite(inverseYY)) return null;
+  const inertiaMoment = [
+    reference.inertia.Ixx * bodyState.wx,
+    reference.inertia.Iyy * bodyState.wy,
+    reference.inertia.Izz * bodyState.wz
+  ];
+  const gyroBody = simCross([bodyState.wx, bodyState.wy, bodyState.wz], inertiaMoment);
+  const gyroRoad = simQuatRotate(q, [
+    gyroBody[0] / reference.inertia.Ixx,
+    gyroBody[1] / reference.inertia.Iyy,
+    gyroBody[2] / reference.inertia.Izz
+  ]);
+  const externalYawAcceleration = inverseInertia[1][0] * externalMoment[0] +
+    inverseInertia[1][1] * externalMoment[1] + inverseInertia[1][2] * externalMoment[2] - gyroRoad[1];
+  const target = [
+    -(bodyState.vx + externalTangent[0] * dt / mass),
+    -(bodyState.vz + externalTangent[2] * dt / mass),
+    -(omegaRoad[1] + externalYawAcceleration * dt)
+  ];
+  const A = [[], [], []];
+  const limits = [];
+  const mu = Number.isFinite(reference.source.friction) ? reference.source.friction : DEFAULTS.friction;
+  for (const corner of corners) {
+    const rx = corner.contact[0] - cg[0];
+    const ry = corner.contact[1] - cg[1];
+    const rz = corner.contact[2] - cg[2];
+    A[0].push(1 / mass, 0);
+    A[1].push(0, 1 / mass);
+    // Full road-frame inverse inertia: planar forces also create Mx/Mz
+    // through ry, and those moments contribute to road-y acceleration.
+    A[2].push(
+      inverseYY * rz - inverseInertia[1][2] * ry,
+      inverseInertia[1][0] * ry - inverseYY * rx
+    );
+    limits.push(Math.max(0, mu * corner.force * dt));
+  }
+  const AAT = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+  for (let row = 0; row < 3; row += 1) {
+    for (let col = 0; col < 3; col += 1) {
+      for (let k = 0; k < 8; k += 1) AAT[row][col] += A[row][k] * A[col][k];
+    }
+  }
+  const apply = (vector) => A.map((row) => row.reduce((sum, value, k) => sum + value * vector[k], 0));
+  const lambda = solve3(AAT, target);
+  if (!lambda) return null;
+  const impulses = new Array(8).fill(0);
+  for (let k = 0; k < 8; k += 1) {
+    impulses[k] = A[0][k] * lambda[0] + A[1][k] * lambda[1] + A[2][k] * lambda[2];
+  }
+  const withinLimits = () => corners.every((corner, i) =>
+    Math.hypot(impulses[2 * i], impulses[2 * i + 1]) <= limits[i] + 1e-9);
+  let scale = 1;
+  if (!withinLimits()) {
+    // Exact arrest is not feasible within this step. Maximize dissipation of
+    // the joint generalized momentum instead of scaling an inefficient force
+    // loop below the downhill gravity force.
+    const direction = new Array(8).fill(0);
+    for (let k = 0; k < 8; k += 1) {
+      direction[k] = A[0][k] * target[0] + A[1][k] * target[1] + A[2][k] * target[2];
+    }
+    for (let i = 0; i < corners.length; i += 1) {
+      const length = Math.hypot(direction[2 * i], direction[2 * i + 1]);
+      const gain = length > 1e-15 ? limits[i] / length : 0;
+      impulses[2 * i] = direction[2 * i] * gain;
+      impulses[2 * i + 1] = direction[2 * i + 1] * gain;
+    }
+    const applied = apply(impulses);
+    const dissipation = target.reduce((sum, value, i) => sum + value * applied[i], 0);
+    const magnitude = applied.reduce((sum, value) => sum + value * value, 0);
+    if (dissipation <= 0 || magnitude <= 1e-30) return null;
+    // A common scale prevents any component from overshooting the target.
+    scale = Math.min(1, dissipation / magnitude);
+    for (let k = 0; k < impulses.length; k += 1) impulses[k] *= scale;
+  }
+  // The dissipation scale preserves the joint arrest direction, but it does
+  // not by itself prove that every component avoids a sign reversal. Keep the
+  // force allocation intact and report any residual overshoot to the integrator.
+  const applied = apply(impulses);
+  const error = target.map((value, i) => value - applied[i]);
+  // post = -error and pre = -target. Mark overshoot for the integrator's
+  // static-arrest projection instead of silently accepting a sign reversal.
+  const reversePlanar = error[0] * target[0] < -1e-18 || error[1] * target[1] < -1e-18;
+  const reverseYaw = error[2] * target[2] < -1e-18;
+  if (!withinLimits()) return null;
+  const projectedError = error.slice();
+  if (reversePlanar) { projectedError[0] = 0; projectedError[1] = 0; }
+  if (reverseYaw) projectedError[2] = 0;
+  return { impulses, error: projectedError, rawError: error, inverseYY, scale, reversePlanar, reverseYaw };
 }
 
 /* ------------------------------ force evaluation ------------------------------ */
@@ -388,6 +687,7 @@ function simEvaluate(sim, dt = SIM_DT) {
     let lengthDot = 0;
     let ratio = 1;
     let coilSource = 'none';
+    let fallbackReason = null;
     if (geometry && design) {
       const row = design[i];
       solved = suspSolveCorner(geometry[i], bodyPos, bodyQuat, rackShift, sim.cornerSeed[i], true);
@@ -395,7 +695,7 @@ function simEvaluate(sim, dt = SIM_DT) {
       const ratioCheck = simRatioState(sim, i, row, solved.motionRatio);
       if (!ratioCheck.ok || !solved.ok) degraded = true;
       const deltaDot = -cornerVelocityY;
-      if (solved.frame.converged) {
+      if (solved.ok && ratioCheck.ok) {
         const dLdDelta = -ratioCheck.ratio;
         lengthDot = dLdDelta * deltaDot;
         coilLength = solved.coilLength;
@@ -408,11 +708,27 @@ function simEvaluate(sim, dt = SIM_DT) {
         // velocity uses the design slope. Force, telemetry and rendering all
         // consume this projected length; no unrelated linear length is mixed in.
         const dLdDelta = row.dLdDelta;
-        lengthDot = dLdDelta * deltaDot;
-        coilLength = solved.coilLength;
+        // Invalid frame/rocker/ratio closure never enters the force path.
+        const fallbackTravel = clamp(cornerY, -0.08, 0.08);
+        const fallbackSpeed = clamp(cornerVelocityY, -2, 2);
+        lengthDot = -dLdDelta * fallbackSpeed;
+        fallbackReason = !solved.frame.converged ? 'frame' : !solved.rocker.feasible ? 'rocker' : 'ratio';
+        solved.ok = false;
+        const fallbackCoil = suspRockerAngleForCoil(geometry[i], row.length0 - dLdDelta * fallbackTravel, solved.rocker.angle);
+        coilLength = fallbackCoil.length;
+        // The renderer consumes this same equivalent rocker/coil, while the
+        // original linkage remains visibly and observably not closed.
+        solved.rockerAngle = fallbackCoil.angle;
+        solved.seed.rockerAngle = fallbackCoil.angle;
+        solved.rocker = {
+          angle: fallbackCoil.angle,
+          residual: suspRockerResidual(geometry[i], solved.pushPoint, fallbackCoil.angle),
+          feasible: false,
+          branch: 0
+        };
         coilSource = 'fallback';
-        springForce = row.coilRate * (coilLength - row.refLength) * dLdDelta;
-        dampingForce = row.coilDamping * dLdDelta * dLdDelta * deltaDot;
+        springForce = clamp(row.coilRate * (coilLength - row.refLength) * dLdDelta, -20000, 20000);
+        dampingForce = clamp(row.coilDamping * lengthDot * dLdDelta, -20000, 20000);
       }
       ratio = ratioCheck.ratio;
     } else {
@@ -466,6 +782,7 @@ function simEvaluate(sim, dt = SIM_DT) {
       solved,
       coilLength,
       coilSource,
+      fallbackReason,
       lengthDot,
       motionRatio: ratio
     });
@@ -495,11 +812,12 @@ function simEvaluate(sim, dt = SIM_DT) {
   const normalMomentY = accum.momentParts.normal[1];
 
   const impulse = simActiveImpulse(sim);
+  const impulseOffset = impulse && impulse.atCg ? cgBody : impulse ? impulse.offset : null;
   const impulseLeverRoad = impulse
     ? simQuatRotate(q, [
-      impulse.offset[0] - cgBody[0],
-      impulse.offset[1] - cgBody[1],
-      impulse.offset[2] - cgBody[2]
+      impulseOffset[0] - cgBody[0],
+      impulseOffset[1] - cgBody[1],
+      impulseOffset[2] - cgBody[2]
     ])
     : null;
   const externalTangent = [
@@ -512,7 +830,7 @@ function simEvaluate(sim, dt = SIM_DT) {
   const capacity = frictionCoefficient * sumNormal;
   const atRest = Math.abs(bodyState.vx) < SIM_REST_SPEED &&
     Math.abs(bodyState.vz) < SIM_REST_SPEED &&
-    Math.abs(bodyState.wy) < SIM_REST_SPEED;
+    Math.abs(omegaRoad[1]) < SIM_REST_SPEED;
 
   // B2-1: latched HOLD/SLIP contact state. simEvaluate only proposes
   // contactNext; simStep commits it after the integration step.
@@ -528,7 +846,7 @@ function simEvaluate(sim, dt = SIM_DT) {
   let modeChanged = false;
   if (mode === 'HOLD') {
     if (planarSpeed > SIM_ARREST_SPEED) { mode = 'SLIP'; reason = 'speed'; }
-    else if (Math.abs(bodyState.wy) > SIM_ARREST_RATE) { mode = 'SLIP'; reason = 'yaw'; }
+    else if (Math.abs(omegaRoad[1]) > SIM_ARREST_RATE) { mode = 'SLIP'; reason = 'yaw'; }
     else if (maxSlipSpeed > SIM_ARREST_SPEED) { mode = 'SLIP'; reason = 'slip'; }
     else if (sumNormal <= 1e-6 || lifted) { mode = 'SLIP'; reason = 'lift'; }
     else if (demand > capacity) { mode = 'SLIP'; reason = 'demand'; }
@@ -554,6 +872,32 @@ function simEvaluate(sim, dt = SIM_DT) {
         recordFriction(corner, [-externalTangent[0] * share, 0, -externalTangent[2] * share]);
       }
     } else {
+      const impulseMoment = impulse ? [
+        impulseLeverRoad[1] * impulse.forceRoad[2] - impulseLeverRoad[2] * impulse.forceRoad[1],
+        impulseLeverRoad[2] * impulse.forceRoad[0] - impulseLeverRoad[0] * impulse.forceRoad[2],
+        impulseLeverRoad[0] * impulse.forceRoad[1] - impulseLeverRoad[1] * impulse.forceRoad[0]
+      ] : [0, 0, 0];
+      const externalMoment = [
+        accum.momentParts.normal[0] + impulseMoment[0],
+        accum.momentParts.normal[1] + impulseMoment[1],
+        accum.momentParts.normal[2] + impulseMoment[2]
+      ];
+      const lowSpeedKinematics = planarSpeed < 0.08 && Math.abs(omegaRoad[1]) < 0.12 && maxSlipSpeed < 0.2;
+      arrest.lowSpeed = lowSpeedKinematics;
+      const lowSpeed = !lifted && lowSpeedKinematics;
+      const joint = lowSpeed
+        ? simJointArrestImpulses(sim, corners, cg, externalTangent, externalMoment, dt, omegaRoad)
+        : null;
+      if (joint) {
+        for (let i = 0; i < corners.length; i += 1) {
+          recordFriction(corners[i], [joint.impulses[2 * i] / dt, 0, joint.impulses[2 * i + 1] / dt]);
+        }
+        arrest.joint = true;
+        arrest.planar = joint.reversePlanar === true;
+        arrest.yaw = joint.reverseYaw === true;
+        arrest.jointError = joint.error.slice();
+        arrest.jointScale = joint.scale;
+      } else {
       // Near the arrest threshold the per-corner contact velocities are
       // dominated by the yaw term and point in different directions; using
       // them would let the friction impulse accelerate the body again. Below
@@ -633,6 +977,7 @@ function simEvaluate(sim, dt = SIM_DT) {
       arrest.yawImpulse = jY;
       for (let index = 0; index < corners.length; index += 1) {
         recordFriction(corners[index], [raw[index][0] * k, 0, raw[index][2] * k]);
+      }
       }
     }
   }
@@ -715,7 +1060,6 @@ function simIntegrate(sim, dt) {
   if (evaluation.holding) {
     accel[0] = 0;
     accel[2] = 0;
-    alpha[1] = 0;
   }
 
   bodyState.vx += accel[0] * dt;
@@ -728,7 +1072,7 @@ function simIntegrate(sim, dt) {
   if (evaluation.holding) {
     bodyState.vx = 0;
     bodyState.vz = 0;
-    bodyState.wy = 0;
+    simSetRoadYawRate(bodyState, q, evaluation.omegaRoad[1]);
   } else if (evaluation.arrest) {
     // B2-1: the clamped friction impulse is enough to stop the planar or yaw
     // motion this step; project the component to zero instead of overshooting.
@@ -736,7 +1080,19 @@ function simIntegrate(sim, dt) {
       bodyState.vx = 0;
       bodyState.vz = 0;
     }
-    if (evaluation.arrest.yaw) bodyState.wy = 0;
+    if (evaluation.arrest.yaw) simSetRoadYawRate(bodyState, q, 0);
+  }
+
+  // Coulomb friction must not integrate through zero within one low-speed
+  // substep. Check each component independently, including the legacy
+  // per-corner fallback and road-frame yaw rather than bodyState.wy.
+  if (evaluation.sliding && evaluation.arrest && evaluation.arrest.lowSpeed) {
+    if (Math.abs(evaluation.velocity[0]) > 1e-12 && evaluation.velocity[0] * bodyState.vx < 0) bodyState.vx = 0;
+    if (Math.abs(evaluation.velocity[2]) > 1e-12 && evaluation.velocity[2] * bodyState.vz < 0) bodyState.vz = 0;
+    const omegaAfter = simQuatRotate(q, [bodyState.wx, bodyState.wy, bodyState.wz]);
+    if (Math.abs(evaluation.omegaRoad[1]) > 1e-12 && evaluation.omegaRoad[1] * omegaAfter[1] < 0) {
+      simSetRoadYawRate(bodyState, q, 0);
+    }
   }
 
   const linearSpeed = Math.hypot(bodyState.vx, bodyState.vy, bodyState.vz);
@@ -832,7 +1188,7 @@ function simIntegrate(sim, dt) {
     }
     contactNext.slipSpeed = slip;
     const canPark = evaluation.demand <= evaluation.capacity * (1 - SIM_HOLD_HYSTERESIS);
-    if (speed <= SIM_ARREST_SPEED && Math.abs(bodyState.wy) <= SIM_ARREST_RATE &&
+    if (speed <= SIM_ARREST_SPEED && Math.abs(omegaPost[1]) <= SIM_ARREST_RATE &&
         slip <= SIM_ARREST_SPEED && canPark) {
       contactNext.dwell += 1;
     } else {
@@ -846,7 +1202,7 @@ function simIntegrate(sim, dt) {
       contactNext.reason = null;
       bodyState.vx = 0;
       bodyState.vz = 0;
-      bodyState.wy = 0;
+      simSetRoadYawRate(bodyState, qPost, 0);
     }
   }
   sim.flags.holding = contactNext.mode === 'HOLD';
@@ -1024,6 +1380,7 @@ function simBuildModel(sim, source = state) {
       // which path supplied this value.
       coilLength: corner.coilLength,
       coilSource: corner.coilSource,
+      fallbackReason: corner.fallbackReason,
       motionRatio: solvedCorner.motionRatio,
       motionRatioState: solvedCorner.motionRatioState,
       converged: solvedCorner.frame.converged,

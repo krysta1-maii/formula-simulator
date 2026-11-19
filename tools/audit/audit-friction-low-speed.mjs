@@ -15,6 +15,11 @@ function planarSpeed(sim) {
   return Math.hypot(sim.state.vx, sim.state.vz);
 }
 
+function roadYawRate(sim) {
+  const st = sim.state;
+  return api.simQuatRotate([st.qw, st.qx, st.qy, st.qz], [st.wx, st.wy, st.wz])[1];
+}
+
 function retarget(sim, source) {
   if (typeof api.simRetargetReference === 'function') {
     api.simRetargetReference(sim, source);
@@ -96,7 +101,7 @@ function reparkCase() {
   const after100ms = {
     vx: sim.state.vx,
     vz: sim.state.vz,
-    wy: sim.state.wy,
+    yawRoad: roadYawRate(sim),
     mode: modeOf(sim),
     speed: planarSpeed(sim)
   };
@@ -108,7 +113,7 @@ function reparkCase() {
     after11s: {
       vx: sim.state.vx,
       vz: sim.state.vz,
-      wy: sim.state.wy,
+      yawRoad: roadYawRate(sim),
       mode: modeOf(sim),
       displacement: Math.hypot(sim.state.x - x0, sim.state.z - z0)
     }
@@ -158,10 +163,10 @@ await runAudit({ audit: 'friction-low-speed', group: 'contact', title: 'B4.3 低
     repark.after100ms.mode === 'HOLD' &&
       Math.abs(repark.after100ms.vx) <= 1e-12 &&
       Math.abs(repark.after100ms.vz) <= 1e-12 &&
-      Math.abs(repark.after100ms.wy) <= 1e-12 &&
+      Math.abs(repark.after100ms.yawRoad) <= 1e-12 &&
       repark.after11s.displacement < 1e-9,
     repark,
-    'HOLD within 0.1 s, velocities zero, drift < 1e-9 m',
+    'HOLD within 0.1 s, planar velocity and road yaw zero, drift < 1e-9 m',
     '10/10 degree low grip to level mu=0.9'
   );
 });

@@ -1,6 +1,6 @@
 {
   "name": "formula-simulator",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "private": true,
   "description": "方程式赛车动力学模拟器 · 内置卧式悬挂与六自由度车身",
   "type": "module",
@@ -12,7 +12,9 @@
     "test:dynamics": "node tools/test-dynamics.mjs",
     "test:invariants": "node tools/test-physics-invariants.mjs",
     "test:runtime": "node tools/test-runtime.mjs",
-    "ci:node": "npm test && npm run test:invariants && npm run test:runtime && npm run test:dev-server",
+    "test:build": "node tools/test-build.mjs",
+    "ci:node": "npm test && npm run test:invariants && npm run test:runtime && npm run test:dev-server && npm run test:build",
+    "ci": "npm run build:check && npm run ci:node && npm run ci:browser && npm run audit && npm run audit:baseline",
     "bench": "node tools/bench.mjs",
     "test:browser": "node tools/test-dynamics-browser.mjs",
     "test:suspension": "node tools/test-suspension-packaging.mjs",
@@ -29,7 +31,7 @@
     "audit:update": "node tools/audit/run-all.mjs --update-baseline",
     "docs:capture": "node tools/build.mjs && node tools/capture-docs.mjs",
     "dev": "node tools/dev-server.mjs",
-    "ci:browser": "npm run test:browser && npm run test:suspension && npm run test:camera && npm run test:ui"
+    "ci:browser": "npm run build:check && node tools/browser-runner.mjs --ci"
   },
   "engines": {
     "node": ">=18"

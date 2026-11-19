@@ -27,6 +27,54 @@ function check(name, ok, detail = '') {
 
 const snapshot = () => evaluateJson('window.FSApp.getSnapshot()');
 
+function sceneWheelbase(scene) {
+  if (!scene || !Array.isArray(scene.wheelPos) || scene.wheelPos.length < 4) return NaN;
+  const frontX = (scene.wheelPos[0][0] + scene.wheelPos[1][0]) / 2;
+  const rearX = (scene.wheelPos[2][0] + scene.wheelPos[3][0]) / 2;
+  return Math.abs(rearX - frontX);
+}
+
+async function waitForGeometryCommit(target, before, timeoutMs = 20000) {
+  const deadline = Date.now() + timeoutMs;
+  let latest = null;
+  while (Date.now() < deadline) {
+    latest = await snapshot();
+    const geometry = latest.geometry || {};
+    if (geometry.pending === false && geometry.commitCount > before.geometry.commitCount &&
+        Math.abs(latest.state.wheelbase - target) < 1e-9) return latest;
+    await sleep(50);
+  }
+  throw new Error('geometry rebuild did not commit ' + target.toFixed(2) + ' m: ' + JSON.stringify(latest && latest.geometry));
+}
+
+async function checkGeometryChange(target) {
+  const label = target.toFixed(2) + ' m';
+  const before = await snapshot();
+  const requested = await evaluateJson('window.FSApp.setState({ wheelbase: ' + target + ' })');
+  check(label + ' geometry change enters pending state',
+    requested.geometry.pending === true && requested.geometry.commitCount === before.geometry.commitCount,
+    JSON.stringify(requested.geometry));
+  const rebuilt = await waitForGeometryCommit(target, before);
+  const scene = await evaluateJson('window.FSApp.getSceneProbe()');
+  const geometry = rebuilt.geometry;
+  check(label + ' geometry commit clears pending',
+    geometry.pending === false && rebuilt.pendingRebuild === false && geometry.mismatch === false,
+    JSON.stringify(geometry));
+  check(label + ' scene and physics use one geometry revision',
+    Number.isFinite(geometry.sceneRevision) && geometry.sceneRevision === geometry.physicsRevision &&
+      scene.geometryRevision === geometry.sceneRevision && scene.physicsRevision === geometry.physicsRevision &&
+      scene.geometryMismatch === false,
+    'scene=' + geometry.sceneRevision + ' physics=' + geometry.physicsRevision);
+  check(label + ' geometry commit count increments once',
+    geometry.commitCount === before.geometry.commitCount + 1,
+    before.geometry.commitCount + ' -> ' + geometry.commitCount);
+  const actualWheelbase = sceneWheelbase(scene);
+  check(label + ' rendered wheelbase matches the requested geometry',
+    Math.abs(actualWheelbase - target) <= 1e-4,
+    actualWheelbase.toFixed(6) + ' m');
+  check(label + ' geometry rebuild keeps the car grounded', rebuilt.contactOk);
+}
+
 try {
   const chromePath = browserGate('dynamic');
   client = await launchBrowser({ chromePath, pagePath: join(root, 'index.html') });
@@ -143,12 +191,51 @@ try {
   check('parameter changes keep the dynamic state finite', Boolean(damped.sim) && damped.loads.every((value) => Number.isFinite(value)));
   await evaluate('window.FSApp.setState({ dampingF: 0.35 })');
 
-  await evaluate('window.FSApp.setState({ wheelbase: 3.70 })');
-  await sleep(1800);
-  const rebuilt = await snapshot();
-  check('geometry rebuild keeps the car grounded', Math.abs(rebuilt.state.wheelbase - 3.7) < 1e-9 && rebuilt.contactOk, rebuilt.state.wheelbase.toFixed(2) + ' m');
-  await evaluate('window.FSApp.setState({ wheelbase: 3.55 })');
-  await sleep(1200);
+  // 0.3.0 P1-01/P2-04: exercise the real page command path while paused.
+  await evaluate('window.FSApp.setSimRunning(false)');
+  const cgBundle = await evaluateJson(`(function () {
+    const before = window.FSApp.getSnapshot();
+    const after = window.FSApp.setState({ cgHeight: 0.50 });
+    return { before, after, scene: window.FSApp.getSceneProbe() };
+  })()`);
+  const cgShift = Math.hypot(
+    cgBundle.after.bodyPos.x - cgBundle.before.bodyPos.x,
+    cgBundle.after.bodyPos.y - cgBundle.before.bodyPos.y,
+    cgBundle.after.bodyPos.z - cgBundle.before.bodyPos.z
+  );
+  check('cgHeight retarget preserves the reference point in the page', cgShift < 1e-9,
+    (cgShift * 1000).toExponential(2) + ' mm');
+  check('cgHeight retarget keeps loads bounded and solver healthy',
+    cgBundle.after.solverOk && !cgBundle.after.sim.solverFailed && cgBundle.scene.solverState === 'ok' &&
+      Math.max(...cgBundle.after.loads) < 2 * Math.max(...cgBundle.after.levelLoads),
+    Math.max(...cgBundle.after.loads).toFixed(3) + ' N · ' + cgBundle.scene.solverState);
+  await evaluate('window.FSApp.resetDynamics({ settle: 0 })');
+  const cgReset = await snapshot();
+  const cgResetError = Math.max(...cgReset.loads.map((value, index) => Math.abs(value - cgReset.levelLoads[index])));
+  check('reset after cgHeight change restores equilibrium', cgReset.solverOk && cgResetError < 1 &&
+    Math.abs(cgReset.bodyPos.y) < 1e-6, cgResetError.toExponential(2) + ' N');
+
+  await evaluate('window.FSApp.setState({ steer: 18, cgHeight: 0.30 })');
+  await evaluate('window.FSApp.resetDynamics({ settle: 0 })');
+  const steeredReset = await snapshot();
+  const steeredScene = await evaluateJson('window.FSApp.getSceneProbe()');
+  check('steered page reset starts at dynamic equilibrium',
+    steeredReset.forceError < 0.01 && steeredReset.momentXError < 0.01 && steeredReset.momentZError < 0.01 &&
+      Math.abs(steeredScene.rackShiftMm - 32.132963) < 0.001,
+    steeredReset.forceError.toExponential(2) + ' / ' + steeredReset.momentXError.toExponential(2) +
+      ' / ' + steeredReset.momentZError.toExponential(2) + ' N/Nm · rack ' + steeredScene.rackShiftMm.toFixed(6) + ' mm');
+
+  const beforeDefaults = await snapshot();
+  await evaluate("document.getElementById('btnResetAll').click()");
+  const restored = await waitForGeometryCommit(3.55, beforeDefaults);
+  const restoredError = Math.max(...restored.loads.map((value, index) => Math.abs(value - restored.levelLoads[index])));
+  check('restore defaults clears degradation and returns to default equilibrium',
+    Math.abs(restored.state.cgHeight - 0.30) < 1e-12 && restored.solverOk && !restored.sim.solverFailed &&
+      restoredError < 1 && Math.abs(restored.bodyPos.y) < 1e-4,
+    restoredError.toExponential(2) + ' N · solver=' + restored.solverOk);
+
+  await checkGeometryChange(3.70);
+  await checkGeometryChange(3.55);
 
   await evaluate('window.FSApp.openModel()');
   await sleep(1400);

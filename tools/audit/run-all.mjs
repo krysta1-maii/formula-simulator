@@ -2,7 +2,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { BASELINE_PATH, COMMIT, APP_VERSION, compareReportToBaseline, loadBaseline, writeJson } from './_harness.mjs';
 
 const ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
@@ -168,6 +168,34 @@ function compareAllToBaseline(reports, baseline) {
   return { pass: mismatches.length === 0, mismatches };
 }
 
+export function baselineUpdateErrors(reports, errors, expectedCount = reports.length) {
+  const reasons = (errors || []).map((error) => 'error: ' + error);
+  if (!reports.length) reasons.push('no audit reports were produced');
+  if (reports.length !== expectedCount) {
+    reasons.push('incomplete audit set: ' + reports.length + '/' + expectedCount + ' reports');
+  }
+  for (const report of reports) {
+    const label = report.audit || 'unknown-audit';
+    if (report.error) reasons.push(label + ': error: ' + String(report.error).split('\n')[0]);
+    for (const skipped of report.skipped || []) {
+      reasons.push(label + ': skip: ' + skipped.id + ' (' + skipped.reason + ')');
+    }
+    for (const item of report.checks || []) {
+      if (!item.ok) reasons.push(label + ': fail: ' + item.id);
+    }
+    if (report.pass !== true && !report.error && !(report.skipped || []).length &&
+        (report.checks || []).every((item) => item.ok)) {
+      reasons.push(label + ': report did not pass');
+    }
+  }
+  return reasons;
+}
+
+export function baselineExpectationExitCode(aggregate, baseline, baselineError = null) {
+  if (baselineError || aggregate.errors.length) return 2;
+  return aggregate.pass && baseline && baseline.pass ? 0 : 1;
+}
+
 function printHuman(aggregate) {
   const lines = [];
   lines.push('[audit] ' + (aggregate.pass ? 'PASS' : 'FAIL') + '  ' + aggregate.checks.length + ' checks');
@@ -190,68 +218,79 @@ function printHuman(aggregate) {
   console.error(lines.join('\n'));
 }
 
-const args = parseArgs(process.argv.slice(2));
-const scripts = selectedScripts(args.group);
-if (args.list) {
-  for (const script of scripts) console.log(script.file + '  [' + script.groups.join(',') + ']');
-  process.exit(0);
-}
-if (!scripts.length) {
-  console.error('no audit script in group ' + args.group);
-  process.exit(2);
-}
-
-const reports = [];
-const errors = [];
-for (const script of scripts) {
-  const result = runScript(script);
-  if (result.report) reports.push(result.report);
-  if (result.error) errors.push(script.file + ': ' + result.error);
-  if (result.stderr && !args.json) {
-    for (const line of result.stderr.trim().split('\n')) if (line) console.error('  ' + line);
+function main() {
+  const args = parseArgs(process.argv.slice(2));
+  const scripts = selectedScripts(args.group);
+  if (args.list) {
+    for (const script of scripts) console.log(script.file + '  [' + script.groups.join(',') + ']');
+    process.exit(0);
   }
-}
-
-let baseline = null;
-let baselineError = null;
-if (args.expectBaseline) {
-  try {
-    baseline = compareAllToBaseline(reports, loadBaseline(args.baselinePath));
-  } catch (error) {
-    baselineError = error.message;
-  }
-}
-
-let aggregate = {
-  schema: 1,
-  appVersion: APP_VERSION,
-  commit: COMMIT,
-  generatedAt: new Date().toISOString(),
-  group: args.group,
-  errors,
-  audits: reports,
-  checks: reports.flatMap((report) => (report.checks || []).map((item) => Object.assign({}, item, {
-    audit: report.audit,
-    group: report.group
-  }))),
-  baseline
-};
-aggregate.pass = errors.length === 0 && reports.length > 0 && reports.every((report) => report.pass);
-
-if (args.updateBaseline) {
-  if (errors.length) {
-    console.error('cannot update baseline while audit has errors');
+  if (!scripts.length) {
+    console.error('no audit script in group ' + args.group);
     process.exit(2);
   }
-  const snapshot = buildBaseline(reports);
-  writeJson(args.baselinePath, snapshot);
-  console.log('baseline written: ' + args.baselinePath + '  (' + Object.keys(snapshot.checks).length + ' checks, ' + snapshot.knownFailures.length + ' known failures)');
-  process.exit(0);
+  if (args.updateBaseline && existsSync(args.baselinePath)) {
+    console.error('cannot update baseline: target already exists and is read-only: ' + args.baselinePath);
+    console.error('choose a new versioned path with --baseline; historical baselines are never overwritten');
+    process.exit(2);
+  }
+
+  const reports = [];
+  const errors = [];
+  for (const script of scripts) {
+    const result = runScript(script);
+    if (result.report) reports.push(result.report);
+    if (result.error) errors.push(script.file + ': ' + result.error);
+    if (result.stderr && !args.json) {
+      for (const line of result.stderr.trim().split('\n')) if (line) console.error('  ' + line);
+    }
+  }
+
+  let baseline = null;
+  let baselineError = null;
+  if (args.expectBaseline) {
+    try {
+      baseline = compareAllToBaseline(reports, loadBaseline(args.baselinePath));
+    } catch (error) {
+      baselineError = error.message;
+    }
+  }
+
+  const aggregate = {
+    schema: 1,
+    appVersion: APP_VERSION,
+    commit: COMMIT,
+    generatedAt: new Date().toISOString(),
+    group: args.group,
+    errors,
+    audits: reports,
+    checks: reports.flatMap((report) => (report.checks || []).map((item) => Object.assign({}, item, {
+      audit: report.audit,
+      group: report.group
+    }))),
+    baseline
+  };
+  aggregate.pass = errors.length === 0 && reports.length > 0 && reports.every((report) => report.pass);
+
+  if (args.updateBaseline) {
+    const updateErrors = baselineUpdateErrors(reports, errors, scripts.length);
+    if (updateErrors.length) {
+      console.error('cannot update baseline unless every audit passes without errors or skips');
+      for (const reason of updateErrors) console.error('  ' + reason);
+      process.exit(errors.length ? 2 : 1);
+    }
+    const snapshot = buildBaseline(reports);
+    writeJson(args.baselinePath, snapshot);
+    console.log('baseline written: ' + args.baselinePath + '  (' + Object.keys(snapshot.checks).length + ' checks, ' + snapshot.knownFailures.length + ' known failures)');
+    process.exit(0);
+  }
+
+  process.stdout.write(JSON.stringify(aggregate, null, 2) + '\n');
+  if (!args.json) printHuman(aggregate);
+
+  if (args.expectBaseline) process.exitCode = baselineExpectationExitCode(aggregate, baseline, baselineError);
+  else process.exitCode = aggregate.pass ? 0 : errors.length ? 2 : 1;
 }
 
-process.stdout.write(JSON.stringify(aggregate, null, 2) + '\n');
-if (!args.json) printHuman(aggregate);
-
-if (baselineError) process.exitCode = 2;
-else if (args.expectBaseline) process.exitCode = baseline && baseline.pass ? 0 : 1;
-else process.exitCode = aggregate.pass ? 0 : errors.length ? 2 : 1;
+const isMain = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMain) main();

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { mkdtemp, writeFile, symlink, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, symlink, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolveRequestPath, createDevServer } from './dev-server.mjs';
 
@@ -20,7 +20,11 @@ const cases = [
   ['/../fs-secret/x', 403],
   ['/..%2fREADME.md', 403],
   ['/%00', 400],
-  ['/src/../index.html', 200]
+  ['/src/../index.html', 200],
+  ['/.git/config', 403],
+  ['/.env', 403],
+  ['/src/.hidden/file', 403],
+  ['/.%65nv', 403]
 ];
 for (const [url, status] of cases) {
   const result = resolveRequestPath(root, url);
@@ -52,18 +56,31 @@ try {
   await instance.close();
 }
 
+const tempRoot = await mkdtemp(join(tmpdir(), 'fs-dev-server-'));
+await writeFile(join(tempRoot, 'index.html'), '<!doctype html><title>temp</title>', 'utf8');
+await writeFile(join(tempRoot, '.env'), 'SECRET=do-not-serve', 'utf8');
+await mkdir(join(tempRoot, '.git'));
+await writeFile(join(tempRoot, '.git', 'config'), '[core]\n', 'utf8');
 if (process.platform !== 'win32') {
-  const tempRoot = await mkdtemp(join(tmpdir(), 'fs-dev-server-'));
-  await writeFile(join(tempRoot, 'index.html'), '<!doctype html><title>temp</title>', 'utf8');
   await symlink('/etc/passwd', join(tempRoot, 'escape'));
-  const tempServer = await createDevServer({ root: tempRoot, port: 0 });
-  try {
-    const escaped = await fetch('http://' + tempServer.host + ':' + tempServer.port + '/escape');
-    check('symlink outside root is 403', escaped.status === 403, String(escaped.status));
-  } finally {
-    await tempServer.close();
-    await rm(tempRoot, { recursive: true, force: true });
+  await symlink(join(tempRoot, '.env'), join(tempRoot, 'dotfile-alias'));
+}
+const tempServer = await createDevServer({ root: tempRoot, port: 0 });
+try {
+  const base = 'http://' + tempServer.host + ':' + tempServer.port;
+  for (const path of ['/.env', '/.git/config', '/.%65nv']) {
+    const response = await fetch(base + path);
+    check('GET ' + path + ' is 403', response.status === 403, String(response.status));
   }
+  if (process.platform !== 'win32') {
+    const escaped = await fetch(base + '/escape');
+    check('symlink outside root is 403', escaped.status === 403, String(escaped.status));
+    const alias = await fetch(base + '/dotfile-alias');
+    check('symlink to dotfile is 403', alias.status === 403, String(alias.status));
+  }
+} finally {
+  await tempServer.close();
+  await rm(tempRoot, { recursive: true, force: true });
 }
 
 console.log('');

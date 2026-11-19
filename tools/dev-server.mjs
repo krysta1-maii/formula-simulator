@@ -15,7 +15,11 @@ const TYPES = {
   '.json': 'application/json; charset=utf-8'
 };
 
-export function resolveRequestPath(root, requestUrl) {
+function containsDotfile(path) {
+  return String(path).split(/[\\/]+/).some((part) => part.startsWith('.'));
+}
+
+export function resolveRequestPath(root, requestUrl, { allowDotfiles = false } = {}) {
   let pathname;
   try {
     pathname = decodeURIComponent((requestUrl || '/').split('?')[0]);
@@ -28,6 +32,9 @@ export function resolveRequestPath(root, requestUrl) {
   const rel = relative(root, target);
   if (!rel || rel.startsWith('..') || isAbsolute(rel)) {
     return { status: 403, reason: 'outside-root' };
+  }
+  if (!allowDotfiles && containsDotfile(rel)) {
+    return { status: 403, reason: 'dotfile' };
   }
   return { status: 200, path: target, rel };
 }
@@ -43,7 +50,7 @@ function send(res, status, body, headers = {}) {
   else res.end(payload);
 }
 
-export async function createDevServer({ root = ROOT, port = 0, host = '127.0.0.1' } = {}) {
+export async function createDevServer({ root = ROOT, port = 0, host = '127.0.0.1', allowDotfiles = false } = {}) {
   const realRoot = await realpath(root);
   const server = createServer(async (req, res) => {
     const method = (req.method || 'GET').toUpperCase();
@@ -51,7 +58,7 @@ export async function createDevServer({ root = ROOT, port = 0, host = '127.0.0.1
       send(res, 405, 'Method not allowed', { Allow: 'GET, HEAD' });
       return;
     }
-    const resolved = resolveRequestPath(root, req.url || '/');
+    const resolved = resolveRequestPath(root, req.url || '/', { allowDotfiles });
     if (resolved.status !== 200) {
       send(res, resolved.status, resolved.status === 400 ? 'Bad request' : 'Forbidden');
       return;
@@ -59,7 +66,7 @@ export async function createDevServer({ root = ROOT, port = 0, host = '127.0.0.1
     try {
       const actual = await realpath(resolved.path);
       const rel = relative(realRoot, actual);
-      if (rel.startsWith('..') || isAbsolute(rel)) {
+      if (rel.startsWith('..') || isAbsolute(rel) || (!allowDotfiles && containsDotfile(rel))) {
         send(res, 403, 'Forbidden');
         return;
       }

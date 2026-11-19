@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { browserGate } from './browser-runner.mjs';
+import { assertBuildCurrent } from './check-build.mjs';
 
 const chromePath = browserGate('capture', { required: false });
 
@@ -104,6 +105,7 @@ async function closePage(client) {
 
 
 const main = async () => {
+  await assertBuildCurrent({ root, target: 'index.html' });
   const client = await openPage(1440, 900);
   const { evaluate, capture, send } = client;
 

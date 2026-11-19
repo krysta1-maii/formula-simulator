@@ -11,7 +11,10 @@ const UI = {
     staticTests: null,
     dynamicTests: null,
     dynamicRevision: 0,
+    dynamicSetupRevision: 0,
     dynamicRunning: false,
+    dynamicJob: null,
+    dynamicToken: 0,
     runs: { static: 0, dynamic: 0 }
   },
   checkRows: {},
@@ -25,7 +28,12 @@ const UI = {
   elements: {},
   modalReturnFocus: null,
   modalInert: null,
-  solverState: 'ok'
+  solverState: 'ok',
+  listeners: [],
+  mediaListeners: [],
+  modalFocusTimer: 0,
+  resizeTimer: 0,
+  disposed: false
 };
 
 const PANEL_TABINDEX = new WeakMap();
@@ -57,6 +65,17 @@ const INSPECT_VIEWS = [
 const $ = (selector, parent = document) => parent.querySelector(selector);
 const $$ = (selector, parent = document) => Array.from(parent.querySelectorAll(selector));
 const _partWorld = new THREE.Vector3();
+
+function listenUI(target, type, handler, options) {
+  target.addEventListener(type, handler, options);
+  UI.listeners.push({ target, type, handler, options });
+}
+
+function listenUIMedia(query, handler) {
+  if (query.addEventListener) query.addEventListener('change', handler);
+  else if (query.addListener) query.addListener(handler);
+  UI.mediaListeners.push({ query, handler });
+}
 
 function formatOutputValue(param, value) {
   switch (param) {
@@ -131,7 +150,9 @@ function syncControlsFromState() {
     if (input.type === 'range') input.setAttribute('aria-valuetext', formatOutputValue(param, state[param]));
   });
   $$('.unit-toggle button').forEach((button) => {
-    button.classList.toggle('is-active', button.dataset.units === state.units);
+    const selected = button.dataset.units === state.units;
+    button.classList.toggle('is-active', selected);
+    button.setAttribute('aria-pressed', String(selected));
   });
   const xrayButton = document.getElementById('btnXray');
   if (xrayButton) {
@@ -160,6 +181,7 @@ function updateRoadChips() {
       Math.abs(state.bank - target.bank) < 0.001 &&
       (target.friction == null || Math.abs(state.friction - target.friction) < 0.001);
     button.classList.toggle('is-active', Boolean(matches));
+    button.setAttribute('aria-pressed', String(Boolean(matches)));
   });
 }
 
@@ -179,7 +201,9 @@ function applyUnit(unit) {
   if (unit !== 'N' && unit !== 'kg') return;
   state.units = unit;
   $$('.unit-toggle button').forEach((button) => {
-    button.classList.toggle('is-active', button.dataset.units === unit);
+    const selected = button.dataset.units === unit;
+    button.classList.toggle('is-active', selected);
+    button.setAttribute('aria-pressed', String(selected));
   });
   persistState();
   refreshAll({ rebuild: false });
@@ -340,12 +364,16 @@ async function copyConfig() {
 }
 
 function showToast(message) {
+  if (UI.disposed) return;
   const toast = document.getElementById('toast');
   if (!toast) return;
   toast.textContent = message;
   toast.classList.add('is-visible');
   window.clearTimeout(UI.toastTimer);
-  UI.toastTimer = window.setTimeout(() => toast.classList.remove('is-visible'), 2400);
+  UI.toastTimer = window.setTimeout(() => {
+    UI.toastTimer = 0;
+    if (!UI.disposed) toast.classList.remove('is-visible');
+  }, 2400);
 }
 
 function isCompact() {
@@ -455,6 +483,7 @@ function setPanel(panelId, open, { exclusive = false } = {}) {
   panel.classList.toggle('is-open', open);
   setPanelInert(panel, !open);
   updatePanelUI();
+  if (S.initialized && !UI.disposed) resizeScene();
 }
 
 function togglePanel(panelId) {
@@ -465,6 +494,7 @@ function togglePanel(panelId) {
 }
 
 function openModelModal() {
+  if (UI.disposed) return;
   const modal = document.getElementById('modelModal');
   if (!modal) return;
   UI.modalReturnFocus = document.activeElement;
@@ -472,7 +502,10 @@ function openModelModal() {
   setModalBackgroundInert();
   document.body.classList.add('modal-open');
   refreshSelfTests();
-  window.setTimeout(() => {
+  window.clearTimeout(UI.modalFocusTimer);
+  UI.modalFocusTimer = window.setTimeout(() => {
+    UI.modalFocusTimer = 0;
+    if (UI.disposed || modal.hidden) return;
     const items = modalFocusables(modal);
     const target = modal.querySelector('button[data-close-modal]') || items[0];
     if (target) target.focus();
@@ -490,15 +523,70 @@ function closeModelModal() {
   }
 }
 
+function cancelDynamicSelfTests() {
+  const cache = UI.selfTestCache;
+  cache.dynamicToken += 1;
+  if (cache.dynamicJob) cache.dynamicJob.cancel();
+  cache.dynamicJob = null;
+  cache.dynamicRunning = false;
+  cache.dynamicTests = null;
+  cache.dynamicRevision = 0;
+  UI.dynamicTests = [];
+}
+
+function startDynamicSelfTestJob(setup, { isCurrent, onDone, onDiscard }) {
+  const iterator = simDynamicSelfTestSteps(setup);
+  const tests = [];
+  let timer = 0;
+  let stopped = false;
+  const cancel = () => {
+    if (stopped) return;
+    stopped = true;
+    window.clearTimeout(timer);
+    if (typeof iterator.return === 'function') iterator.return();
+  };
+  const discard = () => {
+    cancel();
+    if (onDiscard) onDiscard();
+  };
+  const pump = () => {
+    timer = 0;
+    if (stopped) return;
+    if (!isCurrent()) {
+      discard();
+      return;
+    }
+    const startedAt = performance.now();
+    while (!stopped) {
+      if (!isCurrent()) {
+        discard();
+        return;
+      }
+      const step = iterator.next();
+      if (step.done) {
+        stopped = true;
+        if (onDone) onDone(step.value || tests);
+        return;
+      }
+      tests.push(step.value);
+      if (performance.now() - startedAt >= 50) {
+        timer = window.setTimeout(pump, 0);
+        return;
+      }
+    }
+  };
+  pump();
+  return { cancel };
+}
+
 function ensureStaticSelfTests({ force = false } = {}) {
   const revision = noteSetupChange(state);
   if (force || UI.selfTestCache.revision !== revision || !UI.selfTestCache.staticTests) {
     UI.selfTestCache.staticTests = runSelfTests(state);
     UI.selfTestCache.revision = revision;
     UI.selfTestCache.runs.static += 1;
-    if (UI.selfTestCache.dynamicRevision !== revision) {
-      UI.selfTestCache.dynamicTests = null;
-      UI.selfTestCache.dynamicRevision = 0;
+    if (UI.selfTestCache.dynamicRevision !== revision || UI.selfTestCache.dynamicRunning) {
+      cancelDynamicSelfTests();
     }
   }
   UI.selfTests = UI.selfTestCache.staticTests;
@@ -506,34 +594,58 @@ function ensureStaticSelfTests({ force = false } = {}) {
 }
 
 function ensureDynamicSelfTests({ force = false, onDone = null } = {}) {
+  if (UI.disposed) return null;
+  const cache = UI.selfTestCache;
   const revision = noteSetupChange(state);
-  if (!force && UI.selfTestCache.dynamicTests && UI.selfTestCache.dynamicRevision === revision) {
-    if (onDone) onDone(UI.selfTestCache.dynamicTests);
-    return UI.selfTestCache.dynamicTests;
+  if (!force && cache.dynamicTests && cache.dynamicRevision === revision) {
+    if (onDone) onDone(cache.dynamicTests);
+    return cache.dynamicTests;
   }
-  if (UI.selfTestCache.dynamicRunning) return null;
-  UI.selfTestCache.dynamicRunning = true;
-  UI.selfTestCache.dynamicTests = null;
+  if (!force && cache.dynamicRunning && cache.dynamicJob && cache.dynamicJob.revision === revision) return null;
+  if (cache.dynamicJob || cache.dynamicTests) cancelDynamicSelfTests();
+  const setup = cloneState(state);
   const startedRevision = revision;
-  runDynamicSelfTestsChunked(state, {
-    onTest: (test, count) => {
-      UI.dynamicTests = UI.dynamicTests || [];
-      UI.dynamicTests.push(test);
-    },
+  const token = cache.dynamicToken + 1;
+  cache.dynamicToken = token;
+  cache.dynamicRunning = true;
+  cache.dynamicSetupRevision = startedRevision;
+  cache.dynamicTests = null;
+  cache.dynamicRevision = 0;
+  UI.dynamicTests = [];
+  const isCurrent = () => !UI.disposed && cache.dynamicToken === token && noteSetupChange(state) === startedRevision;
+  const discard = () => {
+    if (cache.dynamicToken !== token) return;
+    cache.dynamicJob = null;
+    cache.dynamicRunning = false;
+    cache.dynamicTests = null;
+    cache.dynamicRevision = 0;
+    UI.dynamicTests = [];
+  };
+  const job = startDynamicSelfTestJob(setup, {
+    isCurrent,
+    onDiscard: discard,
     onDone: (tests) => {
-      UI.selfTestCache.dynamicRunning = false;
-      UI.selfTestCache.dynamicTests = tests;
-      UI.selfTestCache.dynamicRevision = startedRevision;
-      UI.selfTestCache.runs.dynamic += 1;
+      if (!isCurrent()) {
+        discard();
+        return;
+      }
+      cache.dynamicJob = null;
+      cache.dynamicRunning = false;
+      cache.dynamicTests = tests;
+      cache.dynamicRevision = startedRevision;
+      cache.runs.dynamic += 1;
       UI.dynamicTests = tests;
       if (onDone) onDone(tests);
       refreshSelfTests({ dynamic: false });
     }
   });
+  job.revision = startedRevision;
+  if (cache.dynamicRunning && cache.dynamicToken === token) cache.dynamicJob = job;
   return null;
 }
 
 function refreshSelfTests({ dynamic = true, force = false } = {}) {
+  if (UI.disposed) return UI.selfTests;
   const staticTests = ensureStaticSelfTests({ force });
   if (dynamic && (force || !UI.selfTestCache.dynamicTests || UI.selfTestCache.dynamicRevision !== UI.selfTestCache.revision)) {
     ensureDynamicSelfTests({ force, onDone: () => refreshSelfTests({ dynamic: false }) });
@@ -544,16 +656,19 @@ function refreshSelfTests({ dynamic = true, force = false } = {}) {
   const passed = tests.filter((test) => test.ok).length;
   const total = tests.length;
 
+  const dynamicState = dynamicTests.length
+    ? `动态 ${dynamicTests.filter((test) => test.ok).length} / ${dynamicTests.length}`
+    : (UI.selfTestCache.dynamicRunning ? '动态运行中' : '动态待运行');
   const rightStatus = document.getElementById('selfTestStatus');
-  if (rightStatus) rightStatus.textContent = `${passed} / ${total} 通过`;
+  if (rightStatus) rightStatus.textContent = `静力 ${staticTests.filter((test) => test.ok).length} / ${staticTests.length} · ${dynamicState}`;
 
   const solverState = UI.lastModel ? solverStateOf(UI.lastModel) : 'ok';
   const solverWarn = solverState !== 'ok';
   const solverText = solverState === 'failed' ? '求解失败' : solverState === 'degraded' ? '求解降级' : '求解正常';
   const summary = document.getElementById('selfTestSummary');
   if (summary) {
-    summary.textContent = `${passed} / ${total} 项通过 · 静态 ${staticTests.length} / 动态 ${dynamicTests.length}${solverWarn ? ' · ' + solverText : ''}`;
-    summary.style.color = passed === total && !solverWarn ? 'var(--ok)' : 'var(--warn)';
+    summary.textContent = `${passed} / ${total} 项通过 · 静态 ${staticTests.length} / ${dynamicState}${solverWarn ? ' · ' + solverText : ''}`;
+    summary.style.color = passed === total && !solverWarn && dynamicTests.length ? 'var(--ok)' : 'var(--warn)';
   }
 
   const list = document.getElementById('selfTestList');
@@ -638,6 +753,7 @@ function updateLabelPositions() {
   if (!UI.cornerLabels.length || !S.initialized) return;
   const showLoadLabels = Boolean(state.showLoads && state.showLabels);
   const anchors = S.labelAnchors || [];
+  const safe = cameraSafeArea();
   for (let i = 0; i < UI.cornerLabels.length; i += 1) {
     const label = UI.cornerLabels[i];
     const anchor = anchors[i];
@@ -651,7 +767,11 @@ function updateLabelPositions() {
       continue;
     }
     label.element.classList.remove('is-hidden');
-    label.element.style.transform = `translate(-50%, -50%) translate(${projected.x.toFixed(1)}px, ${projected.y.toFixed(1)}px)`;
+    const halfWidth = label.element.offsetWidth / 2;
+    const halfHeight = label.element.offsetHeight / 2;
+    const x = clamp(projected.x, safe.left + halfWidth + 3, safe.right - halfWidth - 3);
+    const y = clamp(projected.y, safe.top + halfHeight + 3, safe.bottom - halfHeight - 3);
+    label.element.style.transform = `translate(-50%, -50%) translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
   }
 
   if (UI.cgLabel) {
@@ -700,7 +820,8 @@ function updateLabelPositions() {
       return;
     }
     label.element.classList.remove('is-hidden');
-    const x = (projected.x + label.offsetX).toFixed(1);
+    const halfWidth = label.element.offsetWidth / 2;
+    const x = clamp(projected.x + label.offsetX, safe.left + halfWidth + 3, safe.right - halfWidth - 3).toFixed(1);
     label.element.style.transform = `translate(-50%, ${label.offset}%) translate(${x}px, ${projected.y.toFixed(1)}px)`;
   });
 }
@@ -1007,7 +1128,7 @@ function refreshTelemetry(model) {
     const dynamicPassed = dynamicTests.filter((test) => test.ok).length;
     setText(
       'selfTestStatus',
-      `静力 ${passed} / ${tests.length}${dynamicTests.length ? ` · 动态 ${dynamicPassed} / ${dynamicTests.length}` : ''} · ${solverStateOf(model) === 'failed' ? '求解失败' : solverStateOf(model) === 'degraded' ? '求解降级' : '求解正常'}`
+      `静力 ${passed} / ${tests.length}${dynamicTests.length ? ` · 动态 ${dynamicPassed} / ${dynamicTests.length}` : ' · 动态待运行'} · ${solverStateOf(model) === 'failed' ? '求解失败' : solverStateOf(model) === 'degraded' ? '求解降级' : '求解正常'}`
     );
   }
 
@@ -1064,7 +1185,9 @@ function refreshTelemetry(model) {
 
 function syncCameraButtonActive(name) {
   $$('[data-camera]').forEach((button) => {
-    button.classList.toggle('is-active', button.dataset.camera === name);
+    const selected = button.dataset.camera === name;
+    button.classList.toggle('is-active', selected);
+    button.setAttribute('aria-pressed', String(selected));
   });
 }
 
@@ -1088,6 +1211,7 @@ function resetInspectButton() {
   const button = document.getElementById('btnInspect');
   if (button) {
     button.classList.remove('is-active');
+    button.setAttribute('aria-pressed', 'false');
     button.innerHTML = '<span class="tool-glyph">⌬</span>机构';
   }
 }
@@ -1103,6 +1227,7 @@ function cycleInspectView() {
   const button = document.getElementById('btnInspect');
   if (button) {
     button.classList.add('is-active');
+    button.setAttribute('aria-pressed', 'true');
     button.innerHTML = `<span class="tool-glyph">⌬</span>机构 · ${view.label}`;
   }
   showToast(`${view.toast} · 按 R 返回总览`);
@@ -1124,7 +1249,7 @@ function bindControls() {
   $$('[data-param]').forEach((input) => {
     const param = input.dataset.param;
     if (input.type === 'checkbox') {
-      input.addEventListener('change', () => {
+      listenUI(input, 'change', () => {
         applyStateChange(param, input.checked, { rebuild: false });
         if (param === 'xray') {
           const button = document.getElementById('btnXray');
@@ -1136,7 +1261,7 @@ function bindControls() {
       });
       return;
     }
-    input.addEventListener('input', () => {
+    listenUI(input, 'input', () => {
       const value = Number(input.value);
       if (!Number.isFinite(value)) return;
       const rebuild = input.dataset.rebuild === '1';
@@ -1152,38 +1277,38 @@ function bindControls() {
   });
 
   $$('[data-road-preset]').forEach((button) => {
-    button.addEventListener('click', () => applyRoadPreset(button.dataset.roadPreset));
+    listenUI(button, 'click', () => applyRoadPreset(button.dataset.roadPreset));
   });
 
   $$('.unit-toggle button').forEach((button) => {
-    button.addEventListener('click', () => applyUnit(button.dataset.units));
+    listenUI(button, 'click', () => applyUnit(button.dataset.units));
   });
 
   const btnScreenshot = document.getElementById('btnScreenshot');
-  if (btnScreenshot) btnScreenshot.addEventListener('click', requestScreenshot);
+  if (btnScreenshot) listenUI(btnScreenshot, 'click', requestScreenshot);
   const btnScreenshotBottom = document.getElementById('btnScreenshotBottom');
-  if (btnScreenshotBottom) btnScreenshotBottom.addEventListener('click', requestScreenshot);
+  if (btnScreenshotBottom) listenUI(btnScreenshotBottom, 'click', requestScreenshot);
 
   const btnReset = document.getElementById('btnResetAll');
-  if (btnReset) btnReset.addEventListener('click', resetAll);
+  if (btnReset) listenUI(btnReset, 'click', resetAll);
   const btnCopy = document.getElementById('btnCopyConfig');
-  if (btnCopy) btnCopy.addEventListener('click', copyConfig);
+  if (btnCopy) listenUI(btnCopy, 'click', copyConfig);
   const btnLevel = document.getElementById('btnLevelSnapshot');
-  if (btnLevel) btnLevel.addEventListener('click', () => applyRoadPreset('level'));
+  if (btnLevel) listenUI(btnLevel, 'click', () => applyRoadPreset('level'));
 
   const btnXray = document.getElementById('btnXray');
-  if (btnXray) btnXray.addEventListener('click', () => setXray(!state.xray));
+  if (btnXray) listenUI(btnXray, 'click', () => setXray(!state.xray));
   const btnAuto = document.getElementById('btnAutoRotate');
-  if (btnAuto) btnAuto.addEventListener('click', () => setAutoRotate(!autoRotate));
+  if (btnAuto) listenUI(btnAuto, 'click', () => setAutoRotate(!autoRotate));
   const btnInspect = document.getElementById('btnInspect');
-  if (btnInspect) btnInspect.addEventListener('click', cycleInspectView);
+  if (btnInspect) listenUI(btnInspect, 'click', cycleInspectView);
 
   const btnSimToggle = document.getElementById('btnSimToggle');
-  if (btnSimToggle) btnSimToggle.addEventListener('click', simulationToggle);
+  if (btnSimToggle) listenUI(btnSimToggle, 'click', simulationToggle);
   const btnSimReset = document.getElementById('btnSimReset');
-  if (btnSimReset) btnSimReset.addEventListener('click', () => simulationReset({ settle: 0 }));
+  if (btnSimReset) listenUI(btnSimReset, 'click', () => simulationReset({ settle: 0 }));
   const btnSimSettle = document.getElementById('btnSimSettle');
-  if (btnSimSettle) btnSimSettle.addEventListener('click', () => simulationReset({ settle: 2, toast: '已回到静力平衡姿态' }));
+  if (btnSimSettle) listenUI(btnSimSettle, 'click', () => simulationReset({ settle: 2, toast: '已回到静力平衡姿态' }));
   const impulseButtons = [
     ['btnImpulseHeave', 'heave'],
     ['btnImpulseRoll', 'roll'],
@@ -1191,45 +1316,45 @@ function bindControls() {
   ];
   for (const [id, kind] of impulseButtons) {
     const button = document.getElementById(id);
-    if (button) button.addEventListener('click', () => simulationImpulse(kind));
+    if (button) listenUI(button, 'click', () => simulationImpulse(kind));
   }
 
   const btnResetView = document.getElementById('btnResetView');
-  if (btnResetView) btnResetView.addEventListener('click', () => {
+  if (btnResetView) listenUI(btnResetView, 'click', () => {
     resetCamera();
     resetInspectButton();
     showToast('相机已重置');
   });
 
   const btnOrtho = document.getElementById('btnOrtho');
-  if (btnOrtho) btnOrtho.addEventListener('click', () => {
+  if (btnOrtho) listenUI(btnOrtho, 'click', () => {
     setOrtho(CAMERA.projection !== 'orthographic');
   });
 
   $$('[data-camera]').forEach((button) => {
-    button.addEventListener('click', () => {
+    listenUI(button, 'click', () => {
       resetInspectButton();
       setCameraPreset(button.dataset.camera);
     });
   });
 
   const btnToggleControls = document.getElementById('btnToggleControls');
-  if (btnToggleControls) btnToggleControls.addEventListener('click', () => togglePanel('panelControls'));
+  if (btnToggleControls) listenUI(btnToggleControls, 'click', () => togglePanel('panelControls'));
   const btnToggleTelemetry = document.getElementById('btnToggleTelemetry');
-  if (btnToggleTelemetry) btnToggleTelemetry.addEventListener('click', () => togglePanel('panelTelemetry'));
+  if (btnToggleTelemetry) listenUI(btnToggleTelemetry, 'click', () => togglePanel('panelTelemetry'));
   $$('[data-close-panel]').forEach((button) => {
-    button.addEventListener('click', () => setPanel(button.dataset.closePanel, false));
+    listenUI(button, 'click', () => setPanel(button.dataset.closePanel, false));
   });
   const scrim = document.getElementById('mobileScrim');
-  if (scrim) scrim.addEventListener('click', () => {
+  if (scrim) listenUI(scrim, 'click', () => {
     setPanel('panelControls', false);
     setPanel('panelTelemetry', false);
   });
 
   const btnHelp = document.getElementById('btnHelp');
-  if (btnHelp) btnHelp.addEventListener('click', openModelModal);
+  if (btnHelp) listenUI(btnHelp, 'click', openModelModal);
   $$('[data-close-modal]').forEach((element) => {
-    element.addEventListener('click', closeModelModal);
+    listenUI(element, 'click', closeModelModal);
   });
 
   bindKeyboard();
@@ -1243,7 +1368,7 @@ function shortcutTargetBlocked(target) {
 }
 
 function bindKeyboard() {
-  window.addEventListener('keydown', (event) => {
+  listenUI(window, 'keydown', (event) => {
     const tag = event.target && event.target.tagName ? event.target.tagName.toLowerCase() : '';
     const isTyping = tag === 'input' || tag === 'textarea' || tag === 'select';
     const modal = document.getElementById('modelModal');
@@ -1347,20 +1472,19 @@ function bindWindowChrome() {
     }
     updatePanelUI();
   };
-  if (compactQuery.addEventListener) compactQuery.addEventListener('change', onCompactChange);
-  else if (compactQuery.addListener) compactQuery.addListener(onCompactChange);
+  listenUIMedia(compactQuery, onCompactChange);
 
-  let resizeTimer = 0;
-  window.addEventListener('resize', () => {
-    window.clearTimeout(resizeTimer);
-    resizeTimer = window.setTimeout(() => {
-      updatePanelUI();
+  listenUI(window, 'resize', () => {
+    window.clearTimeout(UI.resizeTimer);
+    UI.resizeTimer = window.setTimeout(() => {
+      UI.resizeTimer = 0;
+      if (!UI.disposed) updatePanelUI();
     }, 80);
   });
 }
 
 function initUI() {
-  if (UI.initialized) return;
+  if (UI.initialized || UI.disposed) return;
   createAnnotationLabels();
   bindControls();
   syncControlsFromState();
@@ -1378,6 +1502,38 @@ function initUI() {
   syncCameraButtonActive(CAMERA.preset || '');
   syncCameraModeButtons();
   UI.initialized = true;
+}
+
+function teardownUI() {
+  if (UI.disposed) return;
+  UI.disposed = true;
+  cancelDynamicSelfTests();
+  window.clearTimeout(UI.toastTimer);
+  window.clearTimeout(UI.modalFocusTimer);
+  window.clearTimeout(UI.resizeTimer);
+  UI.toastTimer = 0;
+  UI.modalFocusTimer = 0;
+  UI.resizeTimer = 0;
+  for (const entry of UI.listeners.splice(0)) {
+    entry.target.removeEventListener(entry.type, entry.handler, entry.options);
+  }
+  for (const entry of UI.mediaListeners.splice(0)) {
+    if (entry.query.removeEventListener) entry.query.removeEventListener('change', entry.handler);
+    else if (entry.query.removeListener) entry.query.removeListener(entry.handler);
+  }
+  const modal = document.getElementById('modelModal');
+  if (modal) modal.hidden = true;
+  document.body.classList.remove('modal-open');
+  restoreModalBackgroundInert();
+  UI.modalReturnFocus = null;
+  CAMERA.onChange = null;
+  if (UI.labelLayer) UI.labelLayer.textContent = '';
+  UI.labelLayer = null;
+  UI.cornerLabels = [];
+  UI.partLabels = [];
+  UI.cgLabel = null;
+  UI.projLabel = null;
+  UI.initialized = false;
 }
 
 UI.refreshTelemetry = refreshTelemetry;

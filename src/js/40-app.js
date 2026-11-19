@@ -30,6 +30,11 @@ let firstFrameRendered = false;
 let loaderShownAt = 0;
 let lastFrameTime = 0;
 let screenshotCount = 0;
+let frameRequest = 0;
+let loaderTimer = 0;
+let lastFrameDt = 0;
+let appDisposed = false;
+let appSuspended = false;
 
 function liveModel() {
   if (!SIM) return computeStatic(state);
@@ -51,6 +56,7 @@ function calibrateRack(sim, steerDeg) {
 }
 
 function updateSceneFromModel(model) {
+  if (appDisposed || !S.scene || !S.roadGroup || !S.carRoot) return;
   if (typeof applyXray === 'function') applyXray();
   S.roadGroup.quaternion.copy(model.frame.q);
   S.roadGroup.updateMatrixWorld(true);
@@ -69,7 +75,7 @@ function requestRebuild(reason = 'explicit') {
 }
 
 function processPendingRebuild(now) {
-  if (!PENDING.rebuild) return;
+  if (appDisposed || !booted || !PENDING.rebuild) return;
   if (now - PENDING.lastBuildAt < 85) return;
   PENDING.lastBuildAt = now;
   try {
@@ -77,7 +83,6 @@ function processPendingRebuild(now) {
     simReset(SIM, state, { settle: 0.5 });
     SIM.advanceCarry = 0;
     stampReference(SIM, state);
-    SIM.rackShift = calibrateRack(SIM, state.steer);
     const model = simBuildModel(SIM, state);
     buildCar(model);
     applyXray();
@@ -105,7 +110,7 @@ function processPendingRebuild(now) {
 }
 
 function refreshAll({ rebuild = false, reason = 'params' } = {}) {
-  if (!booted) return;
+  if (!booted || appDisposed) return;
   if (PENDING.rebuild) { PENDING.lastPolicy = 'pending'; return; }
   const staleGeometry = !SIM || geometryRevisionFor(state) !== SIM.geometryRevision;
   if (rebuild || staleGeometry) {
@@ -506,6 +511,12 @@ function bindGlobalAPI() {
         pendingRebuild: PENDING.rebuild,
         setupRevision: typeof SETUP_REVISION === 'number' ? SETUP_REVISION : 0,
         selfTestRuns: UI.selfTestCache && UI.selfTestCache.runs ? Object.assign({}, UI.selfTestCache.runs) : { static: 0, dynamic: 0 },
+        selfTestDynamic: {
+          running: Boolean(UI.selfTestCache.dynamicRunning),
+          revision: UI.selfTestCache.dynamicRevision,
+          setupRevision: UI.selfTestCache.dynamicSetupRevision,
+          token: UI.selfTestCache.dynamicToken
+        },
         geometry: {
           sceneRevision: CAR.geometryRevision || null,
           physicsRevision: SIM && SIM.reference ? SIM.reference.geometryRevision : null,
@@ -527,7 +538,13 @@ function bindGlobalAPI() {
           lastBuild: CAR.assets.lastBuild ? Object.assign({}, CAR.assets.lastBuild) : null,
           lastTeardown: CAR.assets.lastTeardown ? Object.assign({}, CAR.assets.lastTeardown) : null
         } : null,
-        frameCount: UI.frameCount || 0
+        frameCount: UI.frameCount || 0,
+        lifecycle: {
+          disposed: appDisposed,
+          suspended: appSuspended,
+          frameScheduled: Boolean(frameRequest),
+          lastFrameDt
+        }
       };
     },
     setState: (patch, options = {}) => {
@@ -571,7 +588,6 @@ function bindGlobalAPI() {
       simReset(SIM, state, { settle });
       SIM.advanceCarry = 0;
       stampReference(SIM, state);
-      SIM.rackShift = calibrateRack(SIM, state.steer);
       const model = simBuildModel(SIM, state);
       updateSceneFromModel(model);
       UI.refreshTelemetry(model);
@@ -621,11 +637,12 @@ function bindGlobalAPI() {
       loadArrowHeights: (S.loadArrows || []).map((entry) => entry.arrow.shaft.scale.y + entry.arrow.head),
       geometryRevision: CAR.geometryRevision || null,
       physicsRevision: SIM && SIM.reference ? SIM.reference.geometryRevision : null,
-      geometryMismatch: Boolean(CAR.diag.geometryMismatch)
+      geometryMismatch: Boolean(CAR.diag.geometryMismatch),
+      cameraFraming: cameraFramingProbe()
     }),
     runSelfTests: () => runSelfTests(state),
     runDynamicSelfTests: () => runDynamicSelfTests(state),
-    dispose: teardownScene,
+    dispose: disposeApp,
     getAssetStats: () => ({
       totals: CAR.assets ? Object.assign({}, CAR.assets.totals) : null,
       lastBuild: CAR.assets && CAR.assets.lastBuild ? Object.assign({}, CAR.assets.lastBuild) : null,
@@ -638,18 +655,30 @@ function bindGlobalAPI() {
   };
 }
 
+function scheduleFrame() {
+  if (frameRequest || appDisposed || appSuspended || !booted) return;
+  frameRequest = requestAnimationFrame(animate);
+}
+
+function cancelFrame() {
+  if (frameRequest) cancelAnimationFrame(frameRequest);
+  frameRequest = 0;
+}
+
 function animate(now) {
-  // requestAnimationFrame timestamps are monotonic frame-clock values, but the
-  // first callback may carry a timestamp from before the expensive boot. Never
-  // seed the frame clock with performance.now(), and clamp anomalous deltas.
+  frameRequest = 0;
+  if (appDisposed || appSuspended || !booted || !S.renderer || !S.scene || !S.camera) return;
+  // A BFCache restore starts a fresh frame clock instead of integrating the
+  // time spent outside the active page. The first callback therefore has dt=0.
   const frameDt = lastFrameTime ? Math.max(0, (now - lastFrameTime) / 1000) : 0;
   lastFrameTime = now;
+  lastFrameDt = frameDt;
 
   UI.frameCount = (UI.frameCount || 0) + 1;
   updateCamera(Math.min(frameDt, 0.05));
   processPendingRebuild(now);
 
-  if (booted && SIM) {
+  if (SIM) {
     const steps = simAdvance(SIM, frameDt);
     if (steps > 0 || !UI.lastDynamicUpdate) {
       const model = simBuildModel(SIM, state);
@@ -662,16 +691,16 @@ function animate(now) {
     }
   }
 
-  // Camera and scene matrices are current before projecting the DOM labels.
   S.scene.updateMatrixWorld(false);
   if (UI.initialized) UI.updateLabelPositions();
-
   S.renderer.render(S.scene, S.camera);
 
   if (!firstFrameRendered) {
     firstFrameRendered = true;
     const wait = Math.max(0, 480 - (now - loaderShownAt));
-    window.setTimeout(() => {
+    loaderTimer = window.setTimeout(() => {
+      loaderTimer = 0;
+      if (appDisposed) return;
       const loading = document.getElementById('loading');
       if (loading) loading.classList.add('is-done');
       document.documentElement.dataset.fsReady = '1';
@@ -679,7 +708,43 @@ function animate(now) {
     }, wait);
   }
 
-  requestAnimationFrame(animate);
+  scheduleFrame();
+}
+
+function onPageHide(event) {
+  if (event.persisted) {
+    appSuspended = true;
+    cancelFrame();
+    lastFrameTime = 0;
+    lastFrameDt = 0;
+    return;
+  }
+  disposeApp();
+}
+
+function onPageShow(event) {
+  if (!event.persisted || appDisposed) return;
+  appSuspended = false;
+  lastFrameTime = 0;
+  lastFrameDt = 0;
+  scheduleFrame();
+}
+
+function disposeApp() {
+  if (appDisposed) return CAR.assets.lastTeardown;
+  appDisposed = true;
+  appSuspended = false;
+  booted = false;
+  cancelFrame();
+  window.clearTimeout(loaderTimer);
+  loaderTimer = 0;
+  window.removeEventListener('pagehide', onPageHide);
+  window.removeEventListener('pageshow', onPageShow);
+  PENDING.rebuild = false;
+  teardownUI();
+  const result = teardownScene();
+  if (window.FSApp) window.FSApp.ready = false;
+  return result;
 }
 
 function boot() {
@@ -692,7 +757,6 @@ function boot() {
     initScene();
     SIM = simCreate(state, { settle: 1.8 });
     stampReference(SIM, state);
-    SIM.rackShift = calibrateRack(SIM, state.steer);
     const initialModel = simBuildModel(SIM, state);
     S.roadGroup.quaternion.copy(initialModel.frame.q);
     S.roadGroup.updateMatrixWorld(true);
@@ -705,13 +769,13 @@ function boot() {
     syncControlsFromState();
     persistState();
     bindGlobalAPI();
-    window.addEventListener('pagehide', () => {
-      if (typeof teardownScene === 'function') teardownScene();
-    }, { once: true });
+    window.addEventListener('pagehide', onPageHide);
+    window.addEventListener('pageshow', onPageShow);
 
     booted = true;
     lastFrameTime = 0;
-    requestAnimationFrame(animate);
+    lastFrameDt = 0;
+    scheduleFrame();
 
     console.info('[FS-01] stage 02 dynamic chassis v' + APP_VERSION + ' ready');
   } catch (error) {

@@ -1,8 +1,9 @@
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { assertBuildCurrent } from './check-build.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const CANDIDATES = [
@@ -32,12 +33,13 @@ export function findChrome() {
   return CANDIDATES.find((candidate) => existsSync(candidate)) || null;
 }
 
-function requiredChrome() {
-  return process.env.FS_REQUIRE_CHROME === '1' || process.env.FS_REQUIRE_CHROME === 'true';
+export function requiredChrome() {
+  return process.env.FS_REQUIRE_CHROME === '1' || process.env.FS_REQUIRE_CHROME === 'true' ||
+    process.env.CI === '1' || process.env.CI === 'true';
 }
 
 export function browserGate(label, { required = requiredChrome() } = {}) {
-  const explicitSkip = process.env.FS_SKIP_BROWSER === '1';
+  const explicitSkip = process.env.FS_SKIP_BROWSER === '1' || process.env.FS_SKIP_BROWSER === 'true';
   if (explicitSkip && required) {
     console.error('FAIL ' + label + ': FS_SKIP_BROWSER=1 conflicts with FS_REQUIRE_CHROME=1');
     process.exit(1);
@@ -105,9 +107,11 @@ export async function launchBrowser({
   pagePath = join(ROOT, 'index.html'),
   width = 1280,
   height = 900,
-  timeoutMs = 90000
+  timeoutMs = 90000,
+  verifyBuild = true
 } = {}) {
   if (!chromePath) throw new BrowserEnvError('no Chrome/Chromium path');
+  const artifact = verifyBuild ? await assertBuildCurrent({ root: ROOT, target: pagePath }) : null;
   const profile = mkdtempSync(join(tmpdir(), 'fs-browser-'));
   const pageUrl = pathToFileURL(pagePath).href;
   const child = spawn(chromePath, [
@@ -217,12 +221,42 @@ export async function launchBrowser({
     if (!ready) throw new BrowserEnvError('FSApp did not become ready');
     await sleep(600);
 
-    return { send, evaluate, evaluateJson, pageErrors, networkRequests, close: cleanup, port };
+    return {
+      send, evaluate, evaluateJson, pageErrors, networkRequests, close: cleanup, port,
+      artifactSha256: artifact ? artifact.expectedHash : null
+    };
   } catch (error) {
     await cleanup();
     if (error instanceof BrowserEnvError) throw error;
     const tail = stderr ? '; chrome stderr: ' + stderr.trim().split('\n').slice(-5).join(' | ') : '';
     throw new BrowserEnvError(error.message + tail);
+  }
+}
+
+export function runCiBrowser() {
+  const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+  const scripts = ['test:browser', 'test:suspension', 'test:camera', 'test:ui'];
+  for (const script of scripts) {
+    const result = spawnSync(npm, ['run', script], {
+      cwd: ROOT,
+      stdio: 'inherit',
+      env: Object.assign({}, process.env, { FS_REQUIRE_CHROME: '1' })
+    });
+    if (result.error) {
+      console.error('FAIL ci:browser: ' + result.error.message);
+      return 1;
+    }
+    if (result.status !== 0) return result.status === null ? 1 : result.status;
+  }
+  return 0;
+}
+
+const isMain = process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url;
+if (isMain) {
+  if (process.argv.includes('--ci')) process.exitCode = runCiBrowser();
+  else {
+    console.error('usage: node tools/browser-runner.mjs --ci');
+    process.exitCode = 2;
   }
 }
 

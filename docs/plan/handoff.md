@@ -1,5 +1,7 @@
 # 施工交接文档（Handoff）
 
+> **历史记录｜基线：0.3.0 B6 交接快照。** 本文保留暂停时的版本、工作区、测试和待办状态，尤其第 2–4 节不是当前导航。当前状态以根目录 [README](../../README.md)、[DESIGN](../../DESIGN.md) 及 [最新验收](acceptance.md) 为准。
+
 > 状态更新（2026-11-19，B6 收尾会话）：第 4.1 节的阻塞项已全部闭合——`index.html` 已按 0.3.0 源码重建并通过严格门禁（1,021,578 B、sha256 668c59ea6f53369b673fc577c65bb9e7036eceab7e13080b3d562e203143f246、页脚 v0.3.0）；`APP_VERSION` 已同步为 0.3.0；浏览器回归、UI 稳定性连跑与审计基线均已复跑。M6 结论与证据见 `docs/plan/acceptance.md`、`docs/plan/notes/b6-verification.md`、`docs/plan/notes/b6-ui-stability.md`；独立复核见 `docs/plan/notes/b6-final-review.md`。本文第 4 节保留为施工记录；文中 44 项 UI、20 项 camera 等旧计数以 `docs/plan/acceptance.md` 的最终口径为准（UI 45 项、camera 19 项）。
 
 | 项目 | 内容 |

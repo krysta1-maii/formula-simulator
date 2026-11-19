@@ -1,5 +1,7 @@
 # Formula Simulator 代码审查报告
 
+> **历史记录｜审查基线：0.2.0 / `fbb401d`。** 本文保留当时的审查结论和测试计数，不改写也不用于判定当前版本。当前状态以根目录 [README](../README.md)、[DESIGN](../DESIGN.md) 及 [最新验收](plan/acceptance.md) 为准。
+
 | 项目 | 内容 |
 | --- | --- |
 | 审查对象 | `formula-simulator` · FS-01 动态底盘台 |

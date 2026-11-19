@@ -2,7 +2,7 @@
 import { readFile, unlink } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { renderIndexHtml, build } from './build.mjs';
 
@@ -16,16 +16,12 @@ export async function verifyIndexHtml({ root = ROOT, target = 'index.html' } = {
   const { html } = await renderIndexHtml({ root });
   const expectedHash = sha256(html);
   const expectedBytes = Buffer.byteLength(html, 'utf8');
-  const absolute = resolve(process.cwd(), target);
+  const absolute = isAbsolute(target) ? resolve(target) : resolve(root, target);
   let actual = null;
   try {
-    actual = await readFile(join(root, target), 'utf8');
-  } catch (error) {
-    try {
-      actual = await readFile(absolute, 'utf8');
-    } catch (_) {
-      return { ok: false, reason: 'missing', target: absolute, expectedHash, expectedBytes };
-    }
+    actual = await readFile(absolute, 'utf8');
+  } catch (_) {
+    return { ok: false, reason: 'missing', target: absolute, expectedHash, expectedBytes };
   }
   return {
     ok: actual === html,
@@ -35,6 +31,18 @@ export async function verifyIndexHtml({ root = ROOT, target = 'index.html' } = {
     actualBytes: Buffer.byteLength(actual, 'utf8'),
     expectedBytes
   };
+}
+
+export async function assertBuildCurrent({ root = ROOT, target = 'index.html' } = {}) {
+  const result = await verifyIndexHtml({ root, target });
+  if (result.ok) return result;
+  const actual = result.actualHash ? result.actualHash + ' / ' + result.actualBytes + ' B' : result.reason;
+  throw new Error(
+    'built artifact does not match current sources: ' + result.target +
+    '\n  expected ' + result.expectedHash + ' / ' + result.expectedBytes + ' B' +
+    '\n  actual   ' + actual +
+    '\n  run npm run build before launching browser tests'
+  );
 }
 
 const isMain = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);

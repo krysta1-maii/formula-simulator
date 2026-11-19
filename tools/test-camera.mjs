@@ -8,6 +8,9 @@
  */
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { tmpdir } from 'node:os';
+import { unlink } from 'node:fs/promises';
+import { build } from './build.mjs';
 import { browserGate, launchBrowser, BrowserEnvError } from './browser-runner.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -31,6 +34,25 @@ function near(actual, expected, epsilon = 1e-5) {
 
 const camera = () => evaluateJson('window.FSApp.getSnapshot().camera');
 const buttonPressed = (id) => evaluate("document.getElementById('" + id + "').getAttribute('aria-pressed')");
+
+async function waitFor(expression, timeoutMs = 4000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await evaluate('Boolean(' + expression + ')').catch(() => false)) return true;
+    await sleep(50);
+  }
+  return false;
+}
+
+async function press(key, code, vk, modifiers = 0) {
+  const event = { key, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk, modifiers };
+  await send('Input.dispatchKeyEvent', Object.assign({ type: 'keyDown' }, event));
+  await send('Input.dispatchKeyEvent', Object.assign({ type: 'keyUp' }, event));
+}
+
+async function projectedCarBounds() {
+  return evaluateJson('window.FSApp.getSceneProbe().cameraFraming');
+}
 
 async function drag(dx, dy) {
   const rect = await evaluateJson("(function () { var r = document.querySelector('#viewport canvas').getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; })()");
@@ -61,7 +83,9 @@ async function drag(dx, dy) {
 
 try {
   const chromePath = browserGate('camera');
-  client = await launchBrowser({ chromePath, pagePath: join(root, 'index.html') });
+const artifact = join(tmpdir(), 'fs-camera-' + process.pid + '.html');
+await build({ out: artifact });
+  client = await launchBrowser({ chromePath, pagePath: artifact, width: 1280, height: 900 });
   ({ send, evaluate, evaluateJson, pageErrors } = client);
   await send('Runtime.enable');
   await send('Page.enable');
@@ -76,7 +100,27 @@ try {
 
   const initial = await camera();
   check('default is three-quarter perspective', initial.preset === 'threeQuarter' && initial.projection === 'perspective');
-  check('default orbit angles', near(initial.theta, 0.62) && near(initial.phi, 1.22) && near(initial.zoom, 5.79), JSON.stringify(initial));
+  check('default orbit angles', near(initial.theta, 0.62) && near(initial.phi, 1.22) && initial.zoom >= 5.79, JSON.stringify(initial));
+
+  await evaluate("document.querySelector('#viewport canvas').focus()");
+  await press('ArrowRight', 'ArrowRight', 39);
+  const orbited = await waitFor('window.FSApp.getSnapshot().camera.theta > ' + (initial.theta + 0.04));
+  const afterKeyOrbit = await camera();
+  check('canvas ArrowRight provides keyboard orbit', orbited && afterKeyOrbit.theta > initial.theta + 0.04, initial.theta.toFixed(3) + ' -> ' + afterKeyOrbit.theta.toFixed(3));
+  const focusStyle = await evaluateJson("(function () { var c = document.querySelector('#viewport canvas'); var s = getComputedStyle(c); return { focused: document.activeElement === c, visible: c.matches(':focus-visible'), outline: s.outlineStyle, width: s.outlineWidth }; })()");
+  check('canvas keyboard focus has a visible ring', focusStyle.focused && focusStyle.visible && focusStyle.outline !== 'none' && parseFloat(focusStyle.width) >= 2, JSON.stringify(focusStyle));
+  const beforeKeyPan = await camera();
+  await press('ArrowRight', 'ArrowRight', 39, 8);
+  await waitFor('Math.hypot(window.FSApp.getSnapshot().camera.target[0] - ' + beforeKeyPan.target[0] + ', window.FSApp.getSnapshot().camera.target[2] - ' + beforeKeyPan.target[2] + ') > 0.02');
+  const afterKeyPan = await camera();
+  const panDistance = Math.hypot(afterKeyPan.target[0] - beforeKeyPan.target[0], afterKeyPan.target[1] - beforeKeyPan.target[1], afterKeyPan.target[2] - beforeKeyPan.target[2]);
+  check('Shift+ArrowRight provides keyboard pan', panDistance > 0.02, 'target moved ' + panDistance.toFixed(3) + ' m');
+  const beforeKeyZoom = await camera();
+  await press('PageUp', 'PageUp', 33);
+  await waitFor('window.FSApp.getSnapshot().camera.zoom < ' + (beforeKeyZoom.zoom - 0.1));
+  const afterKeyZoom = await camera();
+  check('PageUp provides keyboard zoom', afterKeyZoom.zoom < beforeKeyZoom.zoom - 0.1, beforeKeyZoom.zoom.toFixed(3) + ' -> ' + afterKeyZoom.zoom.toFixed(3));
+  await evaluate("window.FSApp.setCameraPreset('threeQuarter', true)");
 
   for (const preset of [
     { name: 'side', theta: Math.PI / 2, phi: Math.PI / 2, zoom: 6 },
@@ -87,16 +131,18 @@ try {
     await evaluate("window.FSApp.setCameraPreset('" + preset.name + "', true)");
     const state = await camera();
     check(
-      preset.name + ' is an exact orthographic elevation',
+      preset.name + ' has exact axis angles and safe-area zoom',
       near(state.theta, preset.theta, 1e-6) &&
         near(state.phi, preset.phi, 1e-6) &&
-        near(state.zoom, preset.zoom, 1e-6) &&
+        state.zoom >= preset.zoom - 1e-6 &&
         state.projection === 'orthographic' &&
         state.preset === preset.name,
       JSON.stringify(state)
     );
   }
   check('axis preset marks the toolbar button', (await buttonPressed('btnOrtho')) === 'true');
+  const cameraAria = await evaluateJson("[].map.call(document.querySelectorAll('[data-camera]'), function (b) { return { name: b.dataset.camera, pressed: b.getAttribute('aria-pressed') }; })");
+  check('camera selection exposes aria-pressed', cameraAria.find(function (b) { return b.name === 'top'; }).pressed === 'true' && cameraAria.filter(function (b) { return b.pressed === 'true'; }).length === 1, JSON.stringify(cameraAria));
 
   await evaluate("window.FSApp.setCameraPreset('side', true)");
   await evaluate("document.getElementById('btnAutoRotate').click()");
@@ -141,6 +187,30 @@ try {
   await sleep(300);
   check('orthographic button toggles back', (await camera()).projection === 'perspective');
 
+  for (const name of ['threeQuarter', 'side', 'front', 'rear', 'top']) {
+    await evaluate("window.FSApp.setCameraPreset('" + name + "', true)");
+    const bounds = await projectedCarBounds();
+    const inside = bounds.left >= bounds.safe.left - 2 && bounds.right <= bounds.safe.right + 2 && bounds.top >= bounds.safe.top - 2 && bounds.bottom <= bounds.safe.bottom + 2;
+    check('1280 panels leave ' + name + ' car framing unobscured', inside && bounds.samples > 1000, JSON.stringify({ bounds: { left: bounds.left, right: bounds.right, top: bounds.top, bottom: bounds.bottom }, safe: bounds.safe }));
+  }
+  await evaluate("window.FSApp.setState({ showLoads: true, showLabels: true })");
+  await sleep(1200);
+  const labelFit = await evaluateJson("(function () { var panels = [document.getElementById('panelControls').getBoundingClientRect(), document.getElementById('panelTelemetry').getBoundingClientRect()]; var rows = [].map.call(document.querySelectorAll('.load-label:not(.is-hidden)'), function (el) { var r = el.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, clear: panels.every(function (p) { return r.right <= p.left || r.left >= p.right || r.bottom <= p.top || r.top >= p.bottom; }) }; }); return { count: rows.length, clear: rows.every(function (r) { return r.clear; }) }; })()");
+  check('1280 load labels avoid both open panels', labelFit.count === 4 && labelFit.clear, JSON.stringify(labelFit));
+  await evaluate("window.FSApp.setState({ showLabels: false })");
+  for (const width of [390, 320]) {
+    await send('Emulation.setDeviceMetricsOverride', { width, height: 844, deviceScaleFactor: 1, mobile: false });
+    await sleep(500);
+    for (const name of ['portrait', 'threeQuarter']) {
+      await evaluate("window.FSApp.setCameraPreset('" + name + "', true)");
+      const bounds = await projectedCarBounds();
+      const inside = bounds.left >= -1 && bounds.right <= width + 1 && bounds.left >= bounds.safe.left - 2 && bounds.right <= bounds.safe.right + 2 && bounds.top >= bounds.safe.top - 2 && bounds.bottom <= bounds.safe.bottom + 2;
+      check(width + 'px ' + name + ' fits the safe portrait framing', inside, JSON.stringify({ bounds: { left: bounds.left, right: bounds.right, top: bounds.top, bottom: bounds.bottom }, safe: bounds.safe }));
+    }
+    const bar = await evaluateJson("(function () { var b = document.querySelector('.bottom-bar'); return { client: b.clientWidth, scroll: b.scrollWidth }; })()");
+    check(width + 'px bottom toolbar has no hidden overflow', bar.scroll <= bar.client + 1, JSON.stringify(bar));
+  }
+
   check('no page errors', pageErrors.length === 0, pageErrors.join(' | '));
 } catch (error) {
   failures += 1;
@@ -148,6 +218,7 @@ try {
   console.error('FAIL camera test:', error && error.message ? error.message : error);
 } finally {
   if (client) await client.close();
+  try { await unlink(artifact); } catch (_) { /* noop */ }
 }
 
 console.log('');

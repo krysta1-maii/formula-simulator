@@ -10,7 +10,7 @@ new Function('module', 'exports', 'globalThis', read('vendor/three.min.js') + '\
   .call(threeModule.exports, threeModule, threeModule.exports, globalThis);
 const THREE = threeModule.exports;
 
-const factory = new Function('THREE', 'localStorage', read('src/js/00-core.js') + '\n' + read('src/js/03-suspension.js') + '\nreturn { computeStatic, computeRoadFrame, runSelfTests, DEFAULTS, NUM_LIMITS };');
+const factory = new Function('THREE', 'localStorage', read('src/js/00-core.js') + '\n' + read('src/js/03-suspension.js') + '\nreturn { APP_VERSION, computeStatic, computeRoadFrame, runSelfTests, DEFAULTS, NUM_LIMITS };');
 const core = factory(THREE, { getItem: () => null, setItem: () => {} });
 const { computeStatic, runSelfTests, DEFAULTS, NUM_LIMITS } = core;
 const GRAVITY = 9.80665;
@@ -45,6 +45,7 @@ function randomBetween(random, lo, hi) {
 }
 
 console.log('FS-01 core verification');
+check('application version is 0.4.1', core.APP_VERSION === '0.4.1', core.APP_VERSION);
 
 console.log('\n[1] built-in self-tests');
 const selfTests = runSelfTests(DEFAULTS);

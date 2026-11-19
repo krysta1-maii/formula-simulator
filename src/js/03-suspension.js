@@ -425,6 +425,31 @@ function suspCoilLength(corner, angle) {
   return suspRockerPoint(corner, corner.rocker.damperArm, angle).distanceTo(corner.body.damper);
 }
 
+/** Close the visible rocker to a bounded equivalent coil length. */
+function suspRockerAngleForCoil(corner, requestedLength, seed) {
+  const pivot = corner.rocker.pivot;
+  const arm = corner.rocker.damperArm;
+  const targetPoint = corner.body.damper;
+  const rho = Math.hypot(arm.x, arm.y);
+  const phi = Math.atan2(arm.y, arm.x);
+  const ux = targetPoint.x - pivot.x;
+  const uy = targetPoint.y - pivot.y;
+  const uz = targetPoint.z - (pivot.z + arm.z);
+  const a = Math.hypot(ux, uy);
+  const minLength = Math.sqrt(uz * uz + Math.max(0, a - rho) ** 2);
+  const maxLength = Math.sqrt(uz * uz + (a + rho) ** 2);
+  const target = clamp(Number.isFinite(requestedLength) ? requestedLength : minLength, minLength, maxLength);
+  const seedAngle = Number.isFinite(seed) ? seed : corner.rocker.baseAngle;
+  const D2 = target * target - uz * uz;
+  const c = a > 1e-12 && rho > 1e-12 ? (rho * rho + a * a - D2) / (2 * rho * a) : 1;
+  const psi = Math.acos(clamp(c, -1, 1));
+  const base = Math.atan2(uy, ux) - phi;
+  const candidates = [base + psi, base - psi];
+  const angle = Math.abs(candidates[0] - seedAngle) <= Math.abs(candidates[1] - seedAngle)
+    ? candidates[0] : candidates[1];
+  return { angle, length: suspCoilLength(corner, angle), target };
+}
+
 /**
  * Analytic motion ratio. The linkage constraints depend on the reference-point
  * height y through f(q; y) = 0 with df/dy = [0, 0, 1]; the implicit derivative
@@ -539,7 +564,7 @@ function suspSolveCorner(corner, bodyPos, bodyQuat, rackShift, seed, withRatio) 
   const wheelPosRoad = wheelPosBody.clone().applyQuaternion(bodyQuat).add(bodyOrigin);
   const contactRoad = contactBody.clone().applyQuaternion(bodyQuat).add(bodyOrigin);
   let pushPoint = state.P.clone();
-  if (!raw.converged && Number.isFinite(contactRoad.y)) {
+  if (!ok && Number.isFinite(contactRoad.y)) {
     // A failed frame solve must not leak an off-plane contact or a second,
     // unrelated coil length into forces and rendering. Translate the complete
     // upright so its contact lies on the road, then close the rocker and coil

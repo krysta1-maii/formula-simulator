@@ -164,7 +164,7 @@ try {
   const { send, evaluate, evaluateJson, pageErrors, networkRequests } = client;
 
   setGroup('viewport');
-  const sizes = [[844, 390], [667, 375], [1024, 400], [1280, 720]];
+  const sizes = [[844, 390], [667, 375], [1024, 400], [1280, 720], [390, 844], [320, 844]];
   for (const [width, height] of sizes) {
     await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
     await waitForViewport(client, width, height);
@@ -173,6 +173,14 @@ try {
     const inView = (rect) => Boolean(rect) && rect.display !== 'none' && rect.top >= -1 && rect.bottom <= metrics.innerHeight + 1 && rect.left >= -1 && rect.right <= metrics.innerWidth + 1;
     check(label + ' has no page overflow', metrics.scrollWidth <= metrics.innerWidth + 1 && metrics.scrollHeight <= metrics.innerHeight + 1, metrics.scrollWidth + 'x' + metrics.scrollHeight);
     check(label + ' layout fits the viewport', Boolean(metrics.app) && Math.abs(metrics.app.height - metrics.innerHeight) <= 1 && inView(metrics.topbar) && inView(metrics.bottomBar), JSON.stringify({ app: metrics.app && metrics.app.height, topbar: metrics.topbar, bottomBar: metrics.bottomBar }));
+    if (width <= 420) {
+      const toolbar = await evaluateJson("(function () { var b = document.querySelector('.bottom-bar'); var buttons = [].map.call(b.querySelectorAll('button'), function (el) { var r = el.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom }; }); return { client: b.clientWidth, scroll: b.scrollWidth, allVisible: buttons.every(function (r) { return r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight; }) }; })()");
+      check(label + ' toolbar has no overflow and exposes every button', toolbar.scroll <= toolbar.client + 1 && toolbar.allVisible, JSON.stringify(toolbar));
+    }
+    if (width === 1280) {
+      const overlap = await evaluateJson("(function () { var h = document.querySelector('.viewport-hint'); var b = document.querySelector('.bottom-bar').getBoundingClientRect(); if (getComputedStyle(h).display === 'none') return { hidden: true, overlap: false }; var r = h.getBoundingClientRect(); return { hidden: false, overlap: !(r.right <= b.left || r.left >= b.right || r.bottom <= b.top || r.top >= b.bottom) }; })()");
+      check('1280 viewport hint never overlaps the toolbar', overlap.hidden || !overlap.overlap, JSON.stringify(overlap));
+    }
     if (width === 844 && height === 390) {
       const netHeight = metrics.bottomBar.top - metrics.topbar.bottom;
       check('844x390 leaves at least 55% for the scene', netHeight >= metrics.innerHeight * 0.55, netHeight.toFixed(1) + ' / ' + metrics.innerHeight);
@@ -188,6 +196,21 @@ try {
   await send('Emulation.clearDeviceMetricsOverride');
   await waitFor(client, 'innerWidth === 1280');
   await sleep(150);
+
+  await ensurePanelOpen(client, 'panelTelemetry');
+  const checkLayout = await evaluateJson("(function () { var row = document.querySelector('#checkList .check-item'); var n = row.querySelector('.check-name'); var v = row.querySelector('.check-val'); return { nameWidth: n.getBoundingClientRect().width, nameHeight: n.getBoundingClientRect().height, valueOverflow: v.scrollWidth > v.clientWidth + 1, rowOverflow: row.scrollWidth > row.clientWidth + 1 }; })()");
+  check('1280 self-check name is readable and values do not squeeze it', checkLayout.nameWidth >= 100 && checkLayout.nameHeight <= 24 && !checkLayout.valueOverflow && !checkLayout.rowOverflow, JSON.stringify(checkLayout));
+  await evaluate("document.querySelector('[data-road-preset=slope]').click()");
+  const roadAria = await evaluateJson("[].map.call(document.querySelectorAll('[data-road-preset]'), function (b) { return { id: b.dataset.roadPreset, pressed: b.getAttribute('aria-pressed') }; })");
+  check('road preset exposes its selected state', roadAria.find(function (b) { return b.id === 'slope'; }).pressed === 'true' && roadAria.filter(function (b) { return b.pressed === 'true'; }).length === 1, JSON.stringify(roadAria));
+  await evaluate("document.querySelector('[data-road-preset=level]').click()");
+  await evaluate("document.querySelector('[data-units=kg]').click()");
+  const unitAria = await evaluate("document.querySelector('[data-units=kg]').getAttribute('aria-pressed') + '/' + document.querySelector('[data-units=N]').getAttribute('aria-pressed')");
+  check('unit selection exposes aria-pressed', unitAria === 'true/false', unitAria);
+  await evaluate("document.querySelector('[data-units=N]').click()");
+  const contrast = await evaluateJson("(function () { function rgb(el) { return (getComputedStyle(el).color.match(/[0-9.]+/g) || []).slice(0, 3).map(Number); } function lum(c) { return c.map(function (v) { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }).reduce(function (s, v, i) { return s + v * [0.2126, 0.7152, 0.0722][i]; }, 0); } var bg = lum([12, 16, 23]); return ['.label-note', '.range-scale', '.data-list dt', '.motion-strip span', '.topbar-stat', '.viewport-hint'].map(function (selector) { var el = document.querySelector(selector); var ratio = (lum(rgb(el)) + 0.05) / (bg + 0.05); return { selector: selector, ratio: ratio }; }); })()");
+  check('functional labels meet 4.5:1 text contrast', contrast.every(function (row) { return row.ratio >= 4.5; }), JSON.stringify(contrast));
+  check('template footer reports 0.4.1', (await evaluate("document.querySelector('.modal-foot span').textContent")).indexOf('v0.4.1') >= 0);
 
   setGroup('keyboard');
   await evaluate('window.FSApp.setSimRunning(false)');
@@ -362,6 +385,21 @@ try {
   await waitFor(client, "document.querySelectorAll('#selfTestList li').length >= 24", 4000);
   const modalItems = await evaluate("document.querySelectorAll('#selfTestList li').length");
   check('self-tests expose 10 dynamic and 24 total entries', dynamicTests >= 10 && modalItems >= 24, dynamicTests + ' dynamic / ' + modalItems + ' total');
+  const beforeStale = await evaluateJson('window.FSApp.getSnapshot()');
+  await evaluate('window.FSApp.setState({ mass: 650 })');
+  await evaluate('window.FSApp.openModel()');
+  const startedDynamic = await evaluateJson('window.FSApp.getSnapshot()');
+  await evaluate('window.FSApp.setState({ mass: 651 })');
+  const discardedDynamic = await evaluateJson('window.FSApp.getSnapshot()');
+  await sleep(500);
+  const afterStale = await evaluateJson('window.FSApp.getSnapshot()');
+  check('dynamic self-test starts with a setup revision snapshot', startedDynamic.selfTestDynamic.running && startedDynamic.selfTestDynamic.setupRevision === startedDynamic.setupRevision, JSON.stringify(startedDynamic.selfTestDynamic));
+  check('stale dynamic revision is cancelled without committing results', discardedDynamic.setupRevision > startedDynamic.setupRevision && !afterStale.selfTestDynamic.running && afterStale.selfTestDynamic.revision !== afterStale.setupRevision && afterStale.selfTestRuns.dynamic === beforeStale.selfTestRuns.dynamic, JSON.stringify({ before: startedDynamic.selfTestDynamic, after: afterStale.selfTestDynamic, runs: afterStale.selfTestRuns }));
+  await evaluate('window.FSApp.closeModel()');
+  await evaluate('window.FSApp.openModel()');
+  await waitFor(client, 'window.FSApp.getSnapshot().selfTestDynamic.revision === window.FSApp.getSnapshot().setupRevision', 4000);
+  const currentDynamic = await evaluateJson('window.FSApp.getSnapshot()');
+  check('new setup revision reruns and commits dynamic self-tests', currentDynamic.selfTestDynamic.revision === currentDynamic.setupRevision && currentDynamic.selfTestRuns.dynamic === beforeStale.selfTestRuns.dynamic + 1, JSON.stringify(currentDynamic.selfTestDynamic));
   await evaluate('window.FSApp.closeModel()');
   await evaluate("document.getElementById('btnToggleTelemetry').click()");
   await sleep(300);
@@ -408,6 +446,21 @@ try {
   const external = networkRequests.filter(function (url) { return !/^(file:|data:)/.test(url); });
   check('reload keeps every request local', readyAfterReload === true && networkRequests.length > 0 && external.length === 0, networkRequests.length + ' requests, ' + external.join(' | '));
   check('no page errors after reload', pageErrors.length === 0, pageErrors.join(' | '));
+  setGroup('lifecycle');
+  const beforeCache = await evaluateJson('window.FSApp.getSnapshot()');
+  await evaluate("window.__bfCanvas = document.querySelector('#viewport canvas'); window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }))");
+  const cached = await evaluateJson('window.FSApp.getSnapshot()');
+  await sleep(350);
+  const cachedLater = await evaluateJson('window.FSApp.getSnapshot()');
+  check('persisted pagehide preserves the scene and cancels RAF', cached.lifecycle.suspended && !cached.lifecycle.frameScheduled && cached.frameCount === cachedLater.frameCount && (await evaluate("document.querySelector('#viewport canvas') === window.__bfCanvas && Boolean(window.FSApp.getAssetStats().renderer)")), JSON.stringify(cached.lifecycle));
+  const restored = await evaluate("new Promise(function (resolve) { window.addEventListener('pageshow', function () { requestAnimationFrame(function () { resolve(window.FSApp.getSnapshot()); }); }, { once: true }); window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })); })");
+  check('pageshow resumes RAF with a reset frame clock', !restored.lifecycle.suspended && restored.lifecycle.lastFrameDt === 0 && restored.lifecycle.frameScheduled && restored.frameCount === cachedLater.frameCount + 1, JSON.stringify(restored.lifecycle));
+  const disposal = await evaluateJson("(function () { var before = window.FSApp.getSnapshot(); var first = window.FSApp.dispose(); var second = window.FSApp.dispose(); var after = window.FSApp.getSnapshot(); return { same: first === second, ready: window.FSApp.ready, before: before.frameCount, after: after.frameCount, lifecycle: after.lifecycle, renderer: window.FSApp.getAssetStats().renderer, canvases: document.querySelectorAll('#viewport canvas').length, teardown: window.FSApp.getAssetStats().lastTeardown }; })()");
+  await sleep(350);
+  const disposedLater = await evaluateJson('window.FSApp.getSnapshot()');
+  await evaluate("window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })); window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }))");
+  check('dispose is idempotent and fully releases the renderer', disposal.same && disposal.ready === false && disposal.renderer === null && disposal.canvases === 0 && disposal.lifecycle.disposed && !disposal.lifecycle.frameScheduled && Boolean(disposal.teardown), JSON.stringify(disposal));
+  check('no frames or lifecycle exceptions occur after dispose', disposedLater.frameCount === disposal.after && disposedLater.lifecycle.disposed && pageErrors.length === 0, JSON.stringify({ before: disposal.after, after: disposedLater.frameCount, errors: pageErrors }));
 } catch (error) {
   failures += 1;
   if (error instanceof BrowserEnvError) envFailure += 1;

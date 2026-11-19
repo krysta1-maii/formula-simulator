@@ -18,7 +18,7 @@
   --text: #e9edf2;
   --text-soft: #b9c3cf;
   --muted: #8290a3;
-  --faint: #596678;
+  --faint: #7c8a9d;
   --accent: #ff6738;
   --accent-bright: #ff865d;
   --accent-soft: rgba(255, 103, 56, 0.13);
@@ -82,6 +82,11 @@ button { cursor: pointer; }
   outline: none;
   touch-action: none;
   cursor: grab;
+}
+#viewport canvas:focus-visible {
+  outline: 2px solid var(--accent-bright);
+  outline-offset: -4px;
+  box-shadow: inset 0 0 0 4px rgba(255, 134, 93, 0.22);
 }
 #viewport canvas.is-dragging { cursor: grabbing; }
 #viewport canvas.is-panning { cursor: move; }
@@ -785,9 +790,10 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 6px 
 .motion-strip small { color: var(--faint); font-family: var(--mono); font-size: 7px; }
 .checks { margin-top: 12px; display: flex; flex-direction: column; gap: 2px; }
 .check-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  align-items: start;
+  gap: 2px 8px;
   padding: 7px 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.045);
 }
@@ -807,8 +813,9 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 6px 
 .check-item.is-ok .check-icon { color: var(--ok); border-color: rgba(94, 226, 160, 0.3); background: rgba(94, 226, 160, 0.07); }
 .check-item.is-warn .check-icon { color: var(--warn); border-color: rgba(255, 190, 92, 0.32); background: rgba(255, 190, 92, 0.07); }
 .check-item.is-error .check-icon { color: var(--danger); border-color: rgba(255, 116, 116, 0.34); background: rgba(255, 116, 116, 0.08); }
-.check-item .check-name { flex: 1; color: var(--text-soft); font-size: 9.5px; }
-.check-item .check-val { color: var(--muted); font-family: var(--mono); font-size: 9px; letter-spacing: 0.01em; text-align: right; font-variant-numeric: tabular-nums; }
+.check-item .check-icon { grid-column: 1; grid-row: 1 / span 2; }
+.check-item .check-name { grid-column: 2; min-width: 0; color: var(--text-soft); font-size: 10px; line-height: 1.4; }
+.check-item .check-val { grid-column: 2; min-width: 0; color: var(--muted); font-family: var(--mono); font-size: 9px; line-height: 1.45; letter-spacing: 0.01em; text-align: left; white-space: normal; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 .check-item.is-ok .check-val { color: rgba(94, 226, 160, 0.82); }
 .check-item.is-warn .check-val { color: rgba(255, 190, 92, 0.8); }
 .check-item.is-error .check-val { color: rgba(255, 116, 116, 0.86); }
@@ -887,7 +894,7 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 6px 
   display: flex;
   align-items: center;
   gap: 13px;
-  color: rgba(156, 170, 188, 0.45);
+  color: var(--muted);
   font-family: var(--mono);
   font-size: 8px;
   letter-spacing: 0.04em;
@@ -1005,9 +1012,9 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 6px 
 .acceptance-item p { margin: 0; color: var(--faint); font-size: 9px; line-height: 1.6; }
 .selftest-summary { margin-bottom: 8px; color: var(--ok); font-family: var(--mono); font-size: 10px; letter-spacing: 0.02em; }
 .selftest-list { margin: 0; padding: 0; list-style: none; }
-.selftest-list li { display: flex; gap: 8px; align-items: baseline; padding: 4px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.05); color: var(--text-soft); font-size: 9.5px; }
-.selftest-list li .st-mark { color: var(--ok); font-family: var(--mono); font-size: 9px; }
-.selftest-list li .st-detail { margin-left: auto; color: var(--faint); font-family: var(--mono); font-size: 8px; white-space: nowrap; }
+.selftest-list li { display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 2px 8px; align-items: baseline; padding: 5px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.05); color: var(--text-soft); font-size: 10px; }
+.selftest-list li .st-mark { grid-column: 1; grid-row: 1 / span 2; color: var(--ok); font-family: var(--mono); font-size: 9px; }
+.selftest-list li .st-detail { grid-column: 2; min-width: 0; margin-left: 0; color: var(--faint); font-family: var(--mono); font-size: 9px; line-height: 1.5; white-space: normal; overflow-wrap: anywhere; }
 .selftest-list li.is-fail .st-mark { color: var(--danger); }
 .selftest-list li.is-fail { color: var(--warn); }
 .key-list { margin: 0; padding: 0; list-style: none; }
@@ -1035,6 +1042,9 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 6px 
 .mobile-scrim { position: fixed; inset: 0; z-index: 25; background: rgba(2, 5, 8, 0.54); backdrop-filter: blur(2px); }
 
 /* ---------------- responsive ---------------- */
+@media (max-width: 1500px) {
+  .viewport-hint { display: none; }
+}
 @media (max-width: 1380px) {
   .topbar-stat-hide { display: none; }
   .panel-left { width: 322px; }
@@ -1097,6 +1107,20 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 6px 
   .toast { bottom: 62px; font-size: 9px; max-width: calc(100vw - 24px); text-align: center; }
 }
 @media (max-width: 420px) {
+  .bottom-bar {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    height: auto;
+    min-height: 72px;
+    padding: 6px;
+    gap: 4px 6px;
+    overflow: visible;
+  }
+  .bottom-bar .camera-group { grid-column: 1 / -1; justify-content: center; }
+  .bottom-bar > .tool-group:not(.camera-group) { justify-content: center; }
+  .bottom-bar > .tool-sep { display: none; }
+  .panel { bottom: 94px; }
+  .toast { bottom: 94px; }
   .corner-grid { gap: 6px; }
   .corner-card { padding: 9px 9px 8px; }
   .corner-value b { font-size: 17px; }
@@ -1127,6 +1151,10 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 6px 
 }
 @media (max-height: 560px) and (max-width: 980px) {
   .bottom-bar { left: 10px; right: 10px; transform: none; max-width: none; bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
+}
+@media (max-width: 420px) {
+  .bottom-bar { height: auto; }
+  .panel { bottom: 94px; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; scroll-behavior: auto !important; }
@@ -1205,11 +1233,11 @@ button:focus-visible, summary:focus-visible, .chip:focus-visible, .tool-btn:focu
           <span class="section-hint">WORLD GRAVITY ↓</span>
         </div>
         <div class="preset-row" role="group" aria-label="路面预设">
-          <button type="button" class="chip is-active" data-road-preset="level">水平</button>
-          <button type="button" class="chip" data-road-preset="slope">纵坡 8°</button>
-          <button type="button" class="chip" data-road-preset="bank">横坡 7°</button>
-          <button type="button" class="chip" data-road-preset="mixed">复合坡</button>
-          <button type="button" class="chip" data-road-preset="lowGrip">低附着滑移</button>
+          <button type="button" class="chip is-active" data-road-preset="level" aria-pressed="true">水平</button>
+          <button type="button" class="chip" data-road-preset="slope" aria-pressed="false">纵坡 8°</button>
+          <button type="button" class="chip" data-road-preset="bank" aria-pressed="false">横坡 7°</button>
+          <button type="button" class="chip" data-road-preset="mixed" aria-pressed="false">复合坡</button>
+          <button type="button" class="chip" data-road-preset="lowGrip" aria-pressed="false">低附着滑移</button>
         </div>
 
         <div class="control">
@@ -1444,8 +1472,8 @@ button:focus-visible, summary:focus-visible, .chip:focus-visible, .tool-btn:focu
       </div>
       <div class="panel-head-right">
         <div class="unit-toggle" role="group" aria-label="载荷单位">
-          <button type="button" class="is-active" data-units="N">N</button>
-          <button type="button" data-units="kg">kg</button>
+          <button type="button" class="is-active" data-units="N" aria-pressed="true">N</button>
+          <button type="button" data-units="kg" aria-pressed="false">kg</button>
         </div>
         <button type="button" class="panel-close" data-close-panel="panelTelemetry" aria-label="收起遥测面板">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
@@ -1554,12 +1582,12 @@ button:focus-visible, summary:focus-visible, .chip:focus-visible, .tool-btn:focu
 
   <div class="bottom-bar" role="toolbar" aria-label="视角与显示工具">
     <div class="tool-group camera-group" role="group" aria-label="相机预设">
-      <button type="button" class="tool-btn is-active" data-camera="threeQuarter">三分之四</button>
-      <button type="button" class="tool-btn" data-camera="side">侧视</button>
-      <button type="button" class="tool-btn" data-camera="front">前视</button>
-      <button type="button" class="tool-btn" data-camera="rear">后视</button>
-      <button type="button" class="tool-btn" data-camera="top">顶视</button>
-      <button type="button" class="tool-btn" id="btnInspect" title="机构剖视 (M)"><span class="tool-glyph">⌬</span>机构</button>
+      <button type="button" class="tool-btn is-active" data-camera="threeQuarter" aria-pressed="true">三分之四</button>
+      <button type="button" class="tool-btn" data-camera="side" aria-pressed="false">侧视</button>
+      <button type="button" class="tool-btn" data-camera="front" aria-pressed="false">前视</button>
+      <button type="button" class="tool-btn" data-camera="rear" aria-pressed="false">后视</button>
+      <button type="button" class="tool-btn" data-camera="top" aria-pressed="false">顶视</button>
+      <button type="button" class="tool-btn" id="btnInspect" title="机构剖视 (M)" aria-pressed="false"><span class="tool-glyph">⌬</span>机构</button>
     </div>
     <span class="tool-sep"></span>
     <div class="tool-group">
@@ -1658,12 +1686,14 @@ button:focus-visible, summary:focus-visible, .chip:focus-visible, .tool-btn:focu
           <section>
             <h3><span>04</span>模型自检</h3>
             <div class="selftest-summary" id="selfTestSummary">未运行</div>
+            <p class="muted-note">动态自检在首次打开或参数 revision 变化后按需分片执行；参数不变时复用缓存，旧 revision 的运行结果会取消或丢弃。</p>
             <ul class="selftest-list" id="selfTestList"></ul>
           </section>
           <section>
             <h3><span>05</span>操作与约定</h3>
             <ul class="key-list">
               <li><span>拖动</span> 环绕观察（场景跟随指针），滚轮以光标为中心缩放，右键/中键或 Shift+拖动平移，双击重置</li>
+              <li><span>画布键盘</span> 聚焦画布后，方向键旋转，Shift+方向键平移，+ / − 或 PageUp / PageDown 缩放</li>
               <li><span>1 – 5</span> 切换三分之四、侧视、前视、后视、顶视；三视使用水平正交投影，顶视为正交俯视，<span>O</span> 切换投影，<span>R</span> 重置视角</li>
               <li><span>取景</span> 视线不滚转，相机不低于台面水平面；手动缩放范围 0.9 – 14 m 可视高度，窄屏按车宽自动退距</li>
               <li><span>X</span> 切换车身剖视，<span>M</span> 机构剖视（转向 → 传动 → 前/后防倾杆），<span>R</span> 返回总览</li>
@@ -1676,7 +1706,7 @@ button:focus-visible, summary:focus-visible, .chip:focus-visible, .tool-btn:focu
           </section>
         </div>
         <div class="modal-foot">
-          <span>Formula Simulator · 阶段二演示 v0.3.0 · <a href="DESIGN.md" target="_blank" rel="noopener">DESIGN.md</a></span>
+          <span>Formula Simulator · 阶段二演示 v0.4.1 · <a href="DESIGN.md" target="_blank" rel="noopener">DESIGN.md</a></span>
           <span>六自由度 / 弹簧阻尼器 / 扭杆防倾杆 / 固定步长</span>
         </div>
       </div>
@@ -1704,7 +1734,7 @@ const GRAVITY = 9.80665;
 const DEG = Math.PI / 180;
 const RAD = 180 / Math.PI;
 const STORAGE_KEY = 'fs01.dynamic.setup.v1';
-const APP_VERSION = '0.4.0';
+const APP_VERSION = '0.4.1';
 
 const CORNERS = [
   { key: 'FL', zh: '左前', axle: 'front', side: 'left', zSign: -1 },
@@ -2911,6 +2941,31 @@ function suspCoilLength(corner, angle) {
   return suspRockerPoint(corner, corner.rocker.damperArm, angle).distanceTo(corner.body.damper);
 }
 
+/** Close the visible rocker to a bounded equivalent coil length. */
+function suspRockerAngleForCoil(corner, requestedLength, seed) {
+  const pivot = corner.rocker.pivot;
+  const arm = corner.rocker.damperArm;
+  const targetPoint = corner.body.damper;
+  const rho = Math.hypot(arm.x, arm.y);
+  const phi = Math.atan2(arm.y, arm.x);
+  const ux = targetPoint.x - pivot.x;
+  const uy = targetPoint.y - pivot.y;
+  const uz = targetPoint.z - (pivot.z + arm.z);
+  const a = Math.hypot(ux, uy);
+  const minLength = Math.sqrt(uz * uz + Math.max(0, a - rho) ** 2);
+  const maxLength = Math.sqrt(uz * uz + (a + rho) ** 2);
+  const target = clamp(Number.isFinite(requestedLength) ? requestedLength : minLength, minLength, maxLength);
+  const seedAngle = Number.isFinite(seed) ? seed : corner.rocker.baseAngle;
+  const D2 = target * target - uz * uz;
+  const c = a > 1e-12 && rho > 1e-12 ? (rho * rho + a * a - D2) / (2 * rho * a) : 1;
+  const psi = Math.acos(clamp(c, -1, 1));
+  const base = Math.atan2(uy, ux) - phi;
+  const candidates = [base + psi, base - psi];
+  const angle = Math.abs(candidates[0] - seedAngle) <= Math.abs(candidates[1] - seedAngle)
+    ? candidates[0] : candidates[1];
+  return { angle, length: suspCoilLength(corner, angle), target };
+}
+
 /**
  * Analytic motion ratio. The linkage constraints depend on the reference-point
  * height y through f(q; y) = 0 with df/dy = [0, 0, 1]; the implicit derivative
@@ -3025,7 +3080,7 @@ function suspSolveCorner(corner, bodyPos, bodyQuat, rackShift, seed, withRatio) 
   const wheelPosRoad = wheelPosBody.clone().applyQuaternion(bodyQuat).add(bodyOrigin);
   const contactRoad = contactBody.clone().applyQuaternion(bodyQuat).add(bodyOrigin);
   let pushPoint = state.P.clone();
-  if (!raw.converged && Number.isFinite(contactRoad.y)) {
+  if (!ok && Number.isFinite(contactRoad.y)) {
     // A failed frame solve must not leak an off-plane contact or a second,
     // unrelated coil length into forces and rendering. Translate the complete
     // upright so its contact lies on the road, then close the rocker and coil
@@ -3379,10 +3434,152 @@ function simEquilibriumState(reference) {
   };
 }
 
+function simSetupSnapshot(source) {
+  // Simulation references never borrow the live UI settings object.
+  return Object.freeze(cloneState(source));
+}
+
+function simCalibrateRack(sim) {
+  if (!sim.reference.suspension) {
+    sim.rackShift = 0;
+    return 0;
+  }
+  const steer = Number.isFinite(sim.reference.source.steer) ? sim.reference.source.steer : 0;
+  if (Math.abs(steer) < 1e-12) {
+    sim.rackShift = 0;
+    return 0;
+  }
+  const point = simReferencePoint(sim);
+  const st = sim.state;
+  sim.rackShift = suspRackForSteer(
+    sim.reference.suspension.corners,
+    point,
+    new THREE.Quaternion(st.qx, st.qy, st.qz, st.qw),
+    steer * DEG
+  );
+  return sim.rackShift;
+}
+
+function simSetInitialPose(sim, heave, pitch, roll) {
+  const q = simQuatFromEuler(0, pitch, roll);
+  const c = sim.reference.cgBody;
+  const cg = simCgFromBodyPoint([0, heave, 0], q, [c.x, c.y, c.z]);
+  Object.assign(sim.state, {
+    x: cg[0], y: cg[1], z: cg[2],
+    vx: 0, vy: 0, vz: 0,
+    qw: q[0], qx: q[1], qy: q[2], qz: q[3],
+    wx: 0, wy: 0, wz: 0
+  });
+  sim.cornerSeed = [null, null, null, null];
+  sim.cornerRatio = [null, null, null, null];
+  return simEvaluate(sim);
+}
+
+function simInitialResidual(evaluation) {
+  return [evaluation.force[1], evaluation.moment[0], evaluation.moment[2]];
+}
+
+function simSyncInitialReference(sim, evaluation) {
+  const reference = sim.reference;
+  const corners = evaluation.corners;
+  const loads = corners.map((corner) => corner.force);
+  const rawLoads = corners.map((corner) => corner.rawForce);
+  const sumLoads = loads.reduce((sum, value) => sum + value, 0);
+  const frontLoad = loads[0] + loads[1];
+  const leftLoad = loads[0] + loads[2];
+  const denom = sumLoads > 1e-9 ? sumLoads : 1;
+  reference.heave = evaluation.refPos.y;
+  reference.pitch = evaluation.euler.pitch;
+  reference.roll = evaluation.euler.roll;
+  reference.referencePoint = { x: evaluation.refPos.x, y: evaluation.refPos.y, z: evaluation.refPos.z };
+  reference.poseDeg = { pitch: reference.pitch * RAD, roll: reference.roll * RAD };
+  reference.cornerY = corners.map((corner) => corner.cornerY);
+  reference.travelMm = reference.cornerY.map((value) => -value * 1000);
+  reference.rawLoads = rawLoads;
+  reference.loads = loads;
+  reference.sumLoads = sumLoads;
+  reference.frontLoad = frontLoad;
+  reference.rearLoad = sumLoads - frontLoad;
+  reference.leftLoad = leftLoad;
+  reference.rightLoad = sumLoads - leftLoad;
+  reference.maxLoad = Math.max(...loads);
+  reference.minLoad = Math.min(...loads);
+  reference.minRawLoad = Math.min(...rawLoads);
+  reference.liftedCount = rawLoads.filter((value) => value < -1e-6).length;
+  reference.frontShare = frontLoad / denom;
+  reference.rearShare = 1 - reference.frontShare;
+  reference.leftShare = leftLoad / denom;
+  reference.rightShare = 1 - reference.leftShare;
+  reference.normalMomentX = corners.reduce((sum, corner) => sum + corner.force * corner.contact[0], 0);
+  reference.normalMomentZ = corners.reduce((sum, corner) => sum + corner.force * corner.contact[2], 0);
+  reference.forceError = Math.abs(evaluation.force[1]);
+  reference.momentXError = Math.abs(evaluation.moment[0]);
+  reference.momentZError = Math.abs(evaluation.moment[2]);
+  reference.equilibriumOk = reference.forceError < 0.05 && reference.momentXError < 0.05 && reference.momentZError < 0.05;
+  reference.contactOk = reference.liftedCount === 0 && reference.minLoad > 0.01;
+  reference.contactPoints = corners.map((corner) => ({ x: corner.contact[0], y: 0, z: corner.contact[2] }));
+  reference.wheelCenters = corners.map((corner) => ({ x: corner.wheelPos[0], y: corner.wheelPos[1], z: corner.wheelPos[2] }));
+  reference.arbForce = corners.map((corner) => corner.arbForce);
+  reference.cgWorld = { x: evaluation.cg[0], y: evaluation.cg[1], z: evaluation.cg[2] };
+  reference.rackShift = sim.rackShift;
+  sim.initialResidual = {
+    force: reference.forceError,
+    momentX: reference.momentXError,
+    momentZ: reference.momentZError,
+    rackShift: sim.rackShift
+  };
+}
+
+function simInitializeReference(sim) {
+  // The rack is final before any optional settling. Solve h/pitch/roll against
+  // the integrator's own contacts, CG levers and HOLD/SLIP friction residual.
+  simCalibrateRack(sim);
+  for (let outer = 0; outer < 2; outer += 1) {
+    let h = sim.reference.heave;
+    let p = sim.reference.pitch;
+    let r = sim.reference.roll;
+    let evaluation = simSetInitialPose(sim, h, p, r);
+    for (let iter = 0; iter < 10; iter += 1) {
+      const residual = simInitialResidual(evaluation);
+      if (Math.max(...residual.map(Math.abs)) < 1e-6) break;
+      const dh = 1e-5;
+      const da = 1e-6;
+      const eh = simInitialResidual(simSetInitialPose(sim, h + dh, p, r));
+      const ep = simInitialResidual(simSetInitialPose(sim, h, p + da, r));
+      const er = simInitialResidual(simSetInitialPose(sim, h, p, r + da));
+      const J = residual.map((value, i) => [
+        (eh[i] - value) / dh,
+        (ep[i] - value) / da,
+        (er[i] - value) / da
+      ]);
+      const delta = solve3(J, residual.map((value) => -value));
+      if (!delta) break;
+      h += clamp(delta[0], -0.02, 0.02);
+      p += clamp(delta[1], -0.02, 0.02);
+      r += clamp(delta[2], -0.02, 0.02);
+      evaluation = simSetInitialPose(sim, h, p, r);
+    }
+    simSyncInitialReference(sim, evaluation);
+    const previousRack = sim.rackShift;
+    simCalibrateRack(sim);
+    if (Math.abs(sim.rackShift - previousRack) < 1e-10 && outer === 0) {
+      simSyncInitialReference(sim, simSetInitialPose(sim, h, p, r));
+      break;
+    }
+  }
+  const finalEvaluation = simEvaluate(sim);
+  simSyncInitialReference(sim, finalEvaluation);
+  sim.solverDegraded = finalEvaluation.degraded;
+  sim.solverFailed = false;
+  sim.solverFailureSteps = 0;
+  return sim;
+}
+
 function simCreate(source = state, options = {}) {
   const settle = options.settle || 0;
+  const snapshot = simSetupSnapshot(source);
   const sim = {
-    reference: computeStatic(source),
+    reference: computeStatic(snapshot),
     state: null,
     time: 0,
     impulse: null,
@@ -3406,24 +3603,26 @@ function simCreate(source = state, options = {}) {
     resetCount: 0
   };
   sim.state = simEquilibriumState(sim.reference);
-  setActiveGeometry(source);
+  setActiveGeometry(sim.reference.source);
   sim.geometryRevision = sim.reference.geometryRevision;
-  sim.steerApplied = source.steer;
+  sim.steerApplied = sim.reference.source.steer;
   sim.droppedTime = 0;
   sim.lastFrameDt = 0;
   sim.lastAdvance = 0;
   sim.timeScale = 1;
+  simInitializeReference(sim);
   if (settle > 0) simRunFor(sim, settle);
   return sim;
 }
 
 function simReset(sim, source = state, options = {}) {
   const settle = options.settle || 0;
-  sim.reference = computeStatic(source);
+  const snapshot = simSetupSnapshot(source);
+  sim.reference = computeStatic(snapshot);
   sim.state = simEquilibriumState(sim.reference);
-  setActiveGeometry(source);
+  setActiveGeometry(sim.reference.source);
   sim.geometryRevision = sim.reference.geometryRevision;
-  sim.steerApplied = source.steer;
+  sim.steerApplied = sim.reference.source.steer;
   sim.droppedTime = 0;
   sim.lastFrameDt = 0;
   sim.lastAdvance = 0;
@@ -3446,6 +3645,7 @@ function simReset(sim, source = state, options = {}) {
     recovered: false
   };
   sim.resetCount += 1;
+  simInitializeReference(sim);
   if (settle > 0) simRunFor(sim, settle);
   return sim;
 }
@@ -3456,18 +3656,41 @@ function simReset(sim, source = state, options = {}) {
  * and are cleared; the body state and sim.contact are preserved.
  */
 function simRetargetReference(sim, source = state) {
-  const next = computeStatic(source);
-  const previousRevision = sim.reference ? sim.reference.geometryRevision : undefined;
+  const previous = sim.reference;
+  const bodyState = sim.state;
+  const q = [bodyState.qw, bodyState.qx, bodyState.qy, bodyState.qz];
+  const referencePoint = simReferencePoint(sim);
+  const next = computeStatic(simSetupSnapshot(source));
+  const previousRevision = previous ? previous.geometryRevision : undefined;
   const nextRevision = next.geometryRevision;
   if (previousRevision !== undefined && nextRevision !== undefined && previousRevision !== nextRevision) {
     throw new Error('simRetargetReference: geometryRevision mismatch (' + previousRevision + ' -> ' + nextRevision + ')');
   }
+
+  // Preserve reference-point position, orientation and translational velocity.
+  const oldCg = previous.cgBody;
+  const newCg = next.cgBody;
+  const deltaArm = simQuatRotate(q, [newCg.x - oldCg.x, newCg.y - oldCg.y, newCg.z - oldCg.z]);
+  const newArm = simQuatRotate(q, [newCg.x, newCg.y, newCg.z]);
+  const omegaRoad = simQuatRotate(q, [bodyState.wx, bodyState.wy, bodyState.wz]);
+  const deltaVelocity = simCross(omegaRoad, deltaArm);
+  bodyState.x = referencePoint.x + newArm[0];
+  bodyState.y = referencePoint.y + newArm[1];
+  bodyState.z = referencePoint.z + newArm[2];
+  bodyState.vx += deltaVelocity[0];
+  bodyState.vy += deltaVelocity[1];
+  bodyState.vz += deltaVelocity[2];
+
   sim.reference = next;
-  setActiveGeometry(source);
+  setActiveGeometry(next.source);
   sim.geometryRevision = next.geometryRevision;
-  sim.steerApplied = source.steer;
+  sim.steerApplied = next.source.steer;
   sim.cornerSeed = [null, null, null, null];
   sim.cornerRatio = [null, null, null, null];
+  sim.solverDegraded = false;
+  sim.solverFailed = false;
+  sim.solverFailureSteps = 0;
+  simCalibrateRack(sim);
   return sim;
 }
 
@@ -3479,21 +3702,152 @@ function simApplyImpulse(sim, kind = 'heave') {
   // B2-2: offset is a body-frame point relative to the reference point;
   // forceRoad is the road-frame impulse force, applied unchanged.
   const specs = {
-    heave: { label: '垂向脉冲', forceRoad: [0, -6800, 0], offset: [0, 0, 0] },
+    heave: { label: '垂向脉冲', forceRoad: [0, -6800, 0], atCg: true, offset: [0, 0, 0] },
     roll: { label: '侧倾脉冲', forceRoad: [0, -4200, 0], offset: [0, 0, 0.90] },
     pitch: { label: '俯仰脉冲', forceRoad: [0, -6200, 0], offset: [0.95, 0, 0] }
   };
   const spec = specs[kind];
   if (!spec) return false;
+  const cgBody = sim.reference && sim.reference.cgBody ? sim.reference.cgBody : { x: 0, y: 0, z: 0 };
   sim.impulse = {
     kind,
     label: spec.label,
     forceRoad: spec.forceRoad.slice(),
-    offset: spec.offset.slice(),
+    atCg: spec.atCg === true,
+    // Heave acts at the CG; offset remains relative to the body reference.
+    offset: spec.atCg ? [cgBody.x, cgBody.y, cgBody.z] : spec.offset.slice(),
     until: sim.time + SIM_IMPULSE_SECONDS
   };
   sim.running = true;
   return true;
+}
+
+function simRoadInverseInertia(q, inertia) {
+  const columns = [
+    simQuatRotate(q, [1, 0, 0]),
+    simQuatRotate(q, [0, 1, 0]),
+    simQuatRotate(q, [0, 0, 1])
+  ];
+  const diagonal = [inertia.Ixx, inertia.Iyy, inertia.Izz];
+  const inverse = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+  for (let row = 0; row < 3; row += 1) {
+    for (let col = 0; col < 3; col += 1) {
+      for (let axis = 0; axis < 3; axis += 1) {
+        inverse[row][col] += columns[axis][row] * columns[axis][col] / diagonal[axis];
+      }
+    }
+  }
+  return inverse;
+}
+
+function simSetRoadYawRate(bodyState, q, target) {
+  const omegaRoad = simQuatRotate(q, [bodyState.wx, bodyState.wy, bodyState.wz]);
+  const correction = simQuatRotateInverse(q, [0, target - omegaRoad[1], 0]);
+  bodyState.wx += correction[0];
+  bodyState.wy += correction[1];
+  bodyState.wz += correction[2];
+}
+
+/**
+ * Low-speed static-friction feasibility solve for [vx, vz, yawRoad]. The three
+ * equations are exact translational/angular impulse balances; per-contact
+ * Coulomb circles remain hard bounds. No bodyState.wy yaw approximation is used.
+ */
+function simJointArrestImpulses(sim, corners, cg, externalTangent, externalMoment, dt, omegaRoad) {
+  const bodyState = sim.state;
+  const reference = sim.reference;
+  const mass = reference.mass;
+  const q = [bodyState.qw, bodyState.qx, bodyState.qy, bodyState.qz];
+  const inverseInertia = simRoadInverseInertia(q, reference.inertia);
+  const inverseYY = inverseInertia[1][1];
+  if (!(inverseYY > 0) || !Number.isFinite(inverseYY)) return null;
+  const inertiaMoment = [
+    reference.inertia.Ixx * bodyState.wx,
+    reference.inertia.Iyy * bodyState.wy,
+    reference.inertia.Izz * bodyState.wz
+  ];
+  const gyroBody = simCross([bodyState.wx, bodyState.wy, bodyState.wz], inertiaMoment);
+  const gyroRoad = simQuatRotate(q, [
+    gyroBody[0] / reference.inertia.Ixx,
+    gyroBody[1] / reference.inertia.Iyy,
+    gyroBody[2] / reference.inertia.Izz
+  ]);
+  const externalYawAcceleration = inverseInertia[1][0] * externalMoment[0] +
+    inverseInertia[1][1] * externalMoment[1] + inverseInertia[1][2] * externalMoment[2] - gyroRoad[1];
+  const target = [
+    -(bodyState.vx + externalTangent[0] * dt / mass),
+    -(bodyState.vz + externalTangent[2] * dt / mass),
+    -(omegaRoad[1] + externalYawAcceleration * dt)
+  ];
+  const A = [[], [], []];
+  const limits = [];
+  const mu = Number.isFinite(reference.source.friction) ? reference.source.friction : DEFAULTS.friction;
+  for (const corner of corners) {
+    const rx = corner.contact[0] - cg[0];
+    const ry = corner.contact[1] - cg[1];
+    const rz = corner.contact[2] - cg[2];
+    A[0].push(1 / mass, 0);
+    A[1].push(0, 1 / mass);
+    // Full road-frame inverse inertia: planar forces also create Mx/Mz
+    // through ry, and those moments contribute to road-y acceleration.
+    A[2].push(
+      inverseYY * rz - inverseInertia[1][2] * ry,
+      inverseInertia[1][0] * ry - inverseYY * rx
+    );
+    limits.push(Math.max(0, mu * corner.force * dt));
+  }
+  const AAT = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+  for (let row = 0; row < 3; row += 1) {
+    for (let col = 0; col < 3; col += 1) {
+      for (let k = 0; k < 8; k += 1) AAT[row][col] += A[row][k] * A[col][k];
+    }
+  }
+  const apply = (vector) => A.map((row) => row.reduce((sum, value, k) => sum + value * vector[k], 0));
+  const lambda = solve3(AAT, target);
+  if (!lambda) return null;
+  const impulses = new Array(8).fill(0);
+  for (let k = 0; k < 8; k += 1) {
+    impulses[k] = A[0][k] * lambda[0] + A[1][k] * lambda[1] + A[2][k] * lambda[2];
+  }
+  const withinLimits = () => corners.every((corner, i) =>
+    Math.hypot(impulses[2 * i], impulses[2 * i + 1]) <= limits[i] + 1e-9);
+  let scale = 1;
+  if (!withinLimits()) {
+    // Exact arrest is not feasible within this step. Maximize dissipation of
+    // the joint generalized momentum instead of scaling an inefficient force
+    // loop below the downhill gravity force.
+    const direction = new Array(8).fill(0);
+    for (let k = 0; k < 8; k += 1) {
+      direction[k] = A[0][k] * target[0] + A[1][k] * target[1] + A[2][k] * target[2];
+    }
+    for (let i = 0; i < corners.length; i += 1) {
+      const length = Math.hypot(direction[2 * i], direction[2 * i + 1]);
+      const gain = length > 1e-15 ? limits[i] / length : 0;
+      impulses[2 * i] = direction[2 * i] * gain;
+      impulses[2 * i + 1] = direction[2 * i + 1] * gain;
+    }
+    const applied = apply(impulses);
+    const dissipation = target.reduce((sum, value, i) => sum + value * applied[i], 0);
+    const magnitude = applied.reduce((sum, value) => sum + value * value, 0);
+    if (dissipation <= 0 || magnitude <= 1e-30) return null;
+    // A common scale prevents any component from overshooting the target.
+    scale = Math.min(1, dissipation / magnitude);
+    for (let k = 0; k < impulses.length; k += 1) impulses[k] *= scale;
+  }
+  // The dissipation scale preserves the joint arrest direction, but it does
+  // not by itself prove that every component avoids a sign reversal. Keep the
+  // force allocation intact and report any residual overshoot to the integrator.
+  const applied = apply(impulses);
+  const error = target.map((value, i) => value - applied[i]);
+  // post = -error and pre = -target. Mark overshoot for the integrator's
+  // static-arrest projection instead of silently accepting a sign reversal.
+  const reversePlanar = error[0] * target[0] < -1e-18 || error[1] * target[1] < -1e-18;
+  const reverseYaw = error[2] * target[2] < -1e-18;
+  if (!withinLimits()) return null;
+  const projectedError = error.slice();
+  if (reversePlanar) { projectedError[0] = 0; projectedError[1] = 0; }
+  if (reverseYaw) projectedError[2] = 0;
+  return { impulses, error: projectedError, rawError: error, inverseYY, scale, reversePlanar, reverseYaw };
 }
 
 /* ------------------------------ force evaluation ------------------------------ */
@@ -3583,6 +3937,7 @@ function simEvaluate(sim, dt = SIM_DT) {
     let lengthDot = 0;
     let ratio = 1;
     let coilSource = 'none';
+    let fallbackReason = null;
     if (geometry && design) {
       const row = design[i];
       solved = suspSolveCorner(geometry[i], bodyPos, bodyQuat, rackShift, sim.cornerSeed[i], true);
@@ -3590,7 +3945,7 @@ function simEvaluate(sim, dt = SIM_DT) {
       const ratioCheck = simRatioState(sim, i, row, solved.motionRatio);
       if (!ratioCheck.ok || !solved.ok) degraded = true;
       const deltaDot = -cornerVelocityY;
-      if (solved.frame.converged) {
+      if (solved.ok && ratioCheck.ok) {
         const dLdDelta = -ratioCheck.ratio;
         lengthDot = dLdDelta * deltaDot;
         coilLength = solved.coilLength;
@@ -3603,11 +3958,27 @@ function simEvaluate(sim, dt = SIM_DT) {
         // velocity uses the design slope. Force, telemetry and rendering all
         // consume this projected length; no unrelated linear length is mixed in.
         const dLdDelta = row.dLdDelta;
-        lengthDot = dLdDelta * deltaDot;
-        coilLength = solved.coilLength;
+        // Invalid frame/rocker/ratio closure never enters the force path.
+        const fallbackTravel = clamp(cornerY, -0.08, 0.08);
+        const fallbackSpeed = clamp(cornerVelocityY, -2, 2);
+        lengthDot = -dLdDelta * fallbackSpeed;
+        fallbackReason = !solved.frame.converged ? 'frame' : !solved.rocker.feasible ? 'rocker' : 'ratio';
+        solved.ok = false;
+        const fallbackCoil = suspRockerAngleForCoil(geometry[i], row.length0 - dLdDelta * fallbackTravel, solved.rocker.angle);
+        coilLength = fallbackCoil.length;
+        // The renderer consumes this same equivalent rocker/coil, while the
+        // original linkage remains visibly and observably not closed.
+        solved.rockerAngle = fallbackCoil.angle;
+        solved.seed.rockerAngle = fallbackCoil.angle;
+        solved.rocker = {
+          angle: fallbackCoil.angle,
+          residual: suspRockerResidual(geometry[i], solved.pushPoint, fallbackCoil.angle),
+          feasible: false,
+          branch: 0
+        };
         coilSource = 'fallback';
-        springForce = row.coilRate * (coilLength - row.refLength) * dLdDelta;
-        dampingForce = row.coilDamping * dLdDelta * dLdDelta * deltaDot;
+        springForce = clamp(row.coilRate * (coilLength - row.refLength) * dLdDelta, -20000, 20000);
+        dampingForce = clamp(row.coilDamping * lengthDot * dLdDelta, -20000, 20000);
       }
       ratio = ratioCheck.ratio;
     } else {
@@ -3661,6 +4032,7 @@ function simEvaluate(sim, dt = SIM_DT) {
       solved,
       coilLength,
       coilSource,
+      fallbackReason,
       lengthDot,
       motionRatio: ratio
     });
@@ -3690,11 +4062,12 @@ function simEvaluate(sim, dt = SIM_DT) {
   const normalMomentY = accum.momentParts.normal[1];
 
   const impulse = simActiveImpulse(sim);
+  const impulseOffset = impulse && impulse.atCg ? cgBody : impulse ? impulse.offset : null;
   const impulseLeverRoad = impulse
     ? simQuatRotate(q, [
-      impulse.offset[0] - cgBody[0],
-      impulse.offset[1] - cgBody[1],
-      impulse.offset[2] - cgBody[2]
+      impulseOffset[0] - cgBody[0],
+      impulseOffset[1] - cgBody[1],
+      impulseOffset[2] - cgBody[2]
     ])
     : null;
   const externalTangent = [
@@ -3707,7 +4080,7 @@ function simEvaluate(sim, dt = SIM_DT) {
   const capacity = frictionCoefficient * sumNormal;
   const atRest = Math.abs(bodyState.vx) < SIM_REST_SPEED &&
     Math.abs(bodyState.vz) < SIM_REST_SPEED &&
-    Math.abs(bodyState.wy) < SIM_REST_SPEED;
+    Math.abs(omegaRoad[1]) < SIM_REST_SPEED;
 
   // B2-1: latched HOLD/SLIP contact state. simEvaluate only proposes
   // contactNext; simStep commits it after the integration step.
@@ -3723,7 +4096,7 @@ function simEvaluate(sim, dt = SIM_DT) {
   let modeChanged = false;
   if (mode === 'HOLD') {
     if (planarSpeed > SIM_ARREST_SPEED) { mode = 'SLIP'; reason = 'speed'; }
-    else if (Math.abs(bodyState.wy) > SIM_ARREST_RATE) { mode = 'SLIP'; reason = 'yaw'; }
+    else if (Math.abs(omegaRoad[1]) > SIM_ARREST_RATE) { mode = 'SLIP'; reason = 'yaw'; }
     else if (maxSlipSpeed > SIM_ARREST_SPEED) { mode = 'SLIP'; reason = 'slip'; }
     else if (sumNormal <= 1e-6 || lifted) { mode = 'SLIP'; reason = 'lift'; }
     else if (demand > capacity) { mode = 'SLIP'; reason = 'demand'; }
@@ -3749,6 +4122,32 @@ function simEvaluate(sim, dt = SIM_DT) {
         recordFriction(corner, [-externalTangent[0] * share, 0, -externalTangent[2] * share]);
       }
     } else {
+      const impulseMoment = impulse ? [
+        impulseLeverRoad[1] * impulse.forceRoad[2] - impulseLeverRoad[2] * impulse.forceRoad[1],
+        impulseLeverRoad[2] * impulse.forceRoad[0] - impulseLeverRoad[0] * impulse.forceRoad[2],
+        impulseLeverRoad[0] * impulse.forceRoad[1] - impulseLeverRoad[1] * impulse.forceRoad[0]
+      ] : [0, 0, 0];
+      const externalMoment = [
+        accum.momentParts.normal[0] + impulseMoment[0],
+        accum.momentParts.normal[1] + impulseMoment[1],
+        accum.momentParts.normal[2] + impulseMoment[2]
+      ];
+      const lowSpeedKinematics = planarSpeed < 0.08 && Math.abs(omegaRoad[1]) < 0.12 && maxSlipSpeed < 0.2;
+      arrest.lowSpeed = lowSpeedKinematics;
+      const lowSpeed = !lifted && lowSpeedKinematics;
+      const joint = lowSpeed
+        ? simJointArrestImpulses(sim, corners, cg, externalTangent, externalMoment, dt, omegaRoad)
+        : null;
+      if (joint) {
+        for (let i = 0; i < corners.length; i += 1) {
+          recordFriction(corners[i], [joint.impulses[2 * i] / dt, 0, joint.impulses[2 * i + 1] / dt]);
+        }
+        arrest.joint = true;
+        arrest.planar = joint.reversePlanar === true;
+        arrest.yaw = joint.reverseYaw === true;
+        arrest.jointError = joint.error.slice();
+        arrest.jointScale = joint.scale;
+      } else {
       // Near the arrest threshold the per-corner contact velocities are
       // dominated by the yaw term and point in different directions; using
       // them would let the friction impulse accelerate the body again. Below
@@ -3828,6 +4227,7 @@ function simEvaluate(sim, dt = SIM_DT) {
       arrest.yawImpulse = jY;
       for (let index = 0; index < corners.length; index += 1) {
         recordFriction(corners[index], [raw[index][0] * k, 0, raw[index][2] * k]);
+      }
       }
     }
   }
@@ -3910,7 +4310,6 @@ function simIntegrate(sim, dt) {
   if (evaluation.holding) {
     accel[0] = 0;
     accel[2] = 0;
-    alpha[1] = 0;
   }
 
   bodyState.vx += accel[0] * dt;
@@ -3923,7 +4322,7 @@ function simIntegrate(sim, dt) {
   if (evaluation.holding) {
     bodyState.vx = 0;
     bodyState.vz = 0;
-    bodyState.wy = 0;
+    simSetRoadYawRate(bodyState, q, evaluation.omegaRoad[1]);
   } else if (evaluation.arrest) {
     // B2-1: the clamped friction impulse is enough to stop the planar or yaw
     // motion this step; project the component to zero instead of overshooting.
@@ -3931,7 +4330,19 @@ function simIntegrate(sim, dt) {
       bodyState.vx = 0;
       bodyState.vz = 0;
     }
-    if (evaluation.arrest.yaw) bodyState.wy = 0;
+    if (evaluation.arrest.yaw) simSetRoadYawRate(bodyState, q, 0);
+  }
+
+  // Coulomb friction must not integrate through zero within one low-speed
+  // substep. Check each component independently, including the legacy
+  // per-corner fallback and road-frame yaw rather than bodyState.wy.
+  if (evaluation.sliding && evaluation.arrest && evaluation.arrest.lowSpeed) {
+    if (Math.abs(evaluation.velocity[0]) > 1e-12 && evaluation.velocity[0] * bodyState.vx < 0) bodyState.vx = 0;
+    if (Math.abs(evaluation.velocity[2]) > 1e-12 && evaluation.velocity[2] * bodyState.vz < 0) bodyState.vz = 0;
+    const omegaAfter = simQuatRotate(q, [bodyState.wx, bodyState.wy, bodyState.wz]);
+    if (Math.abs(evaluation.omegaRoad[1]) > 1e-12 && evaluation.omegaRoad[1] * omegaAfter[1] < 0) {
+      simSetRoadYawRate(bodyState, q, 0);
+    }
   }
 
   const linearSpeed = Math.hypot(bodyState.vx, bodyState.vy, bodyState.vz);
@@ -4027,7 +4438,7 @@ function simIntegrate(sim, dt) {
     }
     contactNext.slipSpeed = slip;
     const canPark = evaluation.demand <= evaluation.capacity * (1 - SIM_HOLD_HYSTERESIS);
-    if (speed <= SIM_ARREST_SPEED && Math.abs(bodyState.wy) <= SIM_ARREST_RATE &&
+    if (speed <= SIM_ARREST_SPEED && Math.abs(omegaPost[1]) <= SIM_ARREST_RATE &&
         slip <= SIM_ARREST_SPEED && canPark) {
       contactNext.dwell += 1;
     } else {
@@ -4041,7 +4452,7 @@ function simIntegrate(sim, dt) {
       contactNext.reason = null;
       bodyState.vx = 0;
       bodyState.vz = 0;
-      bodyState.wy = 0;
+      simSetRoadYawRate(bodyState, qPost, 0);
     }
   }
   sim.flags.holding = contactNext.mode === 'HOLD';
@@ -4219,6 +4630,7 @@ function simBuildModel(sim, source = state) {
       // which path supplied this value.
       coilLength: corner.coilLength,
       coilSource: corner.coilSource,
+      fallbackReason: corner.fallbackReason,
       motionRatio: solvedCorner.motionRatio,
       motionRatioState: solvedCorner.motionRatioState,
       converged: solvedCorner.frame.converged,
@@ -4559,7 +4971,10 @@ const S = {
   cgWorld: new THREE.Vector3(),
   projWorld: new THREE.Vector3(),
   plate: null,
-  teardownDone: false
+  teardownDone: false,
+  listeners: [],
+  resizeObserver: null,
+  portraitChange: null
 };
 
 const MAT = {};
@@ -4576,12 +4991,12 @@ const TEX = {};
  *           above this value, otherwise the long car overflows the screen.
  */
 const CAMERA_PRESETS = {
-  threeQuarter: { theta: 0.62, phi: 1.22, zoom: 5.79, target: [0, 0.55, 0], projection: 'perspective' },
+  threeQuarter: { theta: 0.62, phi: 1.22, zoom: 5.79, fitWidth: 6.2, target: [0, 0.55, 0], projection: 'perspective' },
   side: { theta: Math.PI / 2, phi: Math.PI / 2, zoom: 6.0, fitWidth: 6.3, target: [0, 0.55, 0], projection: 'orthographic' },
   front: { theta: 0, phi: Math.PI / 2, zoom: 2.45, fitWidth: 3.1, target: [0, 0.55, 0], projection: 'orthographic' },
   rear: { theta: Math.PI, phi: Math.PI / 2, zoom: 2.45, fitWidth: 3.1, target: [0, 0.55, 0], projection: 'orthographic' },
   top: { theta: Math.PI / 2, phi: 0.002, zoom: 6.0, fitWidth: 6.3, target: [0, 0.55, 0], projection: 'orthographic' },
-  portrait: { theta: 0.26, phi: 1.18, zoom: 8.05, target: [0, 0.55, 0], projection: 'perspective' },
+  portrait: { theta: 0.26, phi: 1.18, zoom: 8.05, fitWidth: 5.0, target: [0, 0.55, 0], projection: 'perspective' },
   inspectSteering: { theta: 0.55, phi: 0.72, zoom: 1.82, target: [1.675, 0.30, 0], arc: 0.22 },
   inspectDrivetrain: { theta: 2.40, phi: 0.70, zoom: 1.82, target: [-1.40, 0.34, 0], arc: 0.22 },
   inspectArb: { theta: 0.15, phi: 0.72, zoom: 1.95, target: [1.53, 0.43, 0], arc: 0.22 },
@@ -5695,9 +6110,70 @@ const CAMERA_ORTHO_DISTANCE = 12;
 const CAMERA_TARGET_MIN = new THREE.Vector3(-4.2, -0.6, -3.6);
 const CAMERA_TARGET_MAX = new THREE.Vector3(4.2, 2.6, 3.6);
 
+function cameraSafeArea() {
+  const width = S.host ? Math.max(1, S.host.clientWidth) : 1280;
+  const height = S.host ? Math.max(1, S.host.clientHeight) : 720;
+  const hostRect = S.host ? S.host.getBoundingClientRect() : { left: 0, top: 0 };
+  let left = 12;
+  let right = width - 12;
+  let top = 12;
+  let bottom = height - 12;
+  const topbar = document.querySelector('.topbar');
+  const bottomBar = document.querySelector('.bottom-bar');
+  if (topbar) top = Math.max(top, topbar.getBoundingClientRect().bottom - hostRect.top + 8);
+  if (bottomBar) bottom = Math.min(bottom, bottomBar.getBoundingClientRect().top - hostRect.top - 8);
+
+  // Compact panels are modal drawers. Desktop panels instead define the
+  // unobscured camera viewport, including room for labels at its edges.
+  if (window.innerWidth > 980) {
+    const controls = document.getElementById('panelControls');
+    const telemetry = document.getElementById('panelTelemetry');
+    if (controls && controls.classList.contains('is-open')) {
+      left = Math.max(left, controls.getBoundingClientRect().right - hostRect.left + 12);
+    }
+    if (telemetry && telemetry.classList.contains('is-open')) {
+      right = Math.min(right, telemetry.getBoundingClientRect().left - hostRect.left - 12);
+    }
+  }
+  if (right - left < 120) {
+    const center = (left + right) / 2;
+    left = Math.max(0, center - 60);
+    right = Math.min(width, center + 60);
+  }
+  return {
+    left,
+    top,
+    right,
+    bottom,
+    width: Math.max(1, right - left),
+    height: Math.max(1, bottom - top),
+    canvasWidth: width,
+    canvasHeight: height
+  };
+}
+
 function cameraAspect() {
-  if (!S.host) return 16 / 9;
-  return Math.max(0.2, S.host.clientWidth / Math.max(1, S.host.clientHeight));
+  const area = cameraSafeArea();
+  return Math.max(0.2, area.width / area.height);
+}
+
+function applyCameraSafeArea() {
+  const area = cameraSafeArea();
+  for (const camera of [S.cameraPersp, S.cameraOrtho]) {
+    if (!camera) continue;
+    // The virtual camera covers only the safe rectangle. Negative view offsets
+    // expand its projection onto the full canvas without changing pixel scale.
+    camera.setViewOffset(
+      area.width,
+      area.height,
+      -area.left,
+      -area.top,
+      area.canvasWidth,
+      area.canvasHeight
+    );
+  }
+  updateOrthoFrustum();
+  if (S.cameraPersp) S.cameraPersp.updateProjectionMatrix();
 }
 
 /** Perspective distance that shows exactly CAMERA.zoom metres at the target. */
@@ -5800,6 +6276,7 @@ function applyCameraView(view) {
 function setCameraPreset(name, immediate = false) {
   const preset = CAMERA_PRESETS[name];
   if (!preset) return;
+  if (S.initialized) applyCameraSafeArea();
   if (preset.projection && preset.projection !== CAMERA.projection) {
     setCameraProjection(preset.projection, { silent: true });
   }
@@ -5870,6 +6347,7 @@ function clearCameraPreset() {
  * of the car toward the viewer instead of always zooming the orbit centre.
  */
 function zoomCameraAt(clientX, clientY, factor) {
+  if (!S.renderer || !S.camera) return;
   const rect = S.renderer.domElement.getBoundingClientRect();
   const before = CAMERA.goalZoom;
   const after = clamp(before * factor, CAMERA_MIN_ZOOM, CAMERA_MAX_ZOOM);
@@ -5877,13 +6355,16 @@ function zoomCameraAt(clientX, clientY, factor) {
   const ratio = after / before;
   const ndcX = ((clientX - rect.left) / Math.max(1, rect.width)) * 2 - 1;
   const ndcY = 1 - ((clientY - rect.top) / Math.max(1, rect.height)) * 2;
-  const right = new THREE.Vector3().setFromMatrixColumn(S.camera.matrix, 0);
-  const up = new THREE.Vector3().setFromMatrixColumn(S.camera.matrix, 1);
-  const halfHeight = before / 2;
-  const halfWidth = halfHeight * (rect.width / Math.max(1, rect.height));
-  const pivot = CAMERA.goalTarget.clone()
-    .addScaledVector(right, ndcX * halfWidth)
-    .addScaledVector(up, ndcY * halfHeight);
+  const origin = CAMERA.projection === 'orthographic'
+    ? new THREE.Vector3(ndcX, ndcY, -1).unproject(S.camera)
+    : S.camera.position.clone();
+  const cursorWorld = new THREE.Vector3(ndcX, ndcY, 0.5).unproject(S.camera);
+  const direction = cursorWorld.sub(origin).normalize();
+  const normal = S.camera.getWorldDirection(new THREE.Vector3());
+  const denominator = direction.dot(normal);
+  if (Math.abs(denominator) < 1e-8) return;
+  const distance = CAMERA.goalTarget.clone().sub(origin).dot(normal) / denominator;
+  const pivot = origin.addScaledVector(direction, distance);
   const offset = pivot.sub(CAMERA.goalTarget);
   CAMERA.goalZoom = after;
   CAMERA.goalTarget.addScaledVector(offset, 1 - ratio);
@@ -5891,8 +6372,9 @@ function zoomCameraAt(clientX, clientY, factor) {
 }
 
 function panCameraBy(dx, dy) {
-  const rect = S.renderer.domElement.getBoundingClientRect();
-  const worldPerPixel = CAMERA.goalZoom / Math.max(1, rect.height);
+  if (!S.camera) return;
+  const area = cameraSafeArea();
+  const worldPerPixel = CAMERA.goalZoom / Math.max(1, area.height);
   const right = new THREE.Vector3().setFromMatrixColumn(S.camera.matrix, 0);
   const up = new THREE.Vector3().setFromMatrixColumn(S.camera.matrix, 1);
   CAMERA.goalTarget.addScaledVector(right, -dx * worldPerPixel);
@@ -5900,9 +6382,14 @@ function panCameraBy(dx, dy) {
   clampCameraTarget(CAMERA.goalTarget);
 }
 
+function listenScene(target, type, handler, options) {
+  target.addEventListener(type, handler, options);
+  S.listeners.push({ target, type, handler, options });
+}
+
 function initCameraControls() {
   const el = S.renderer.domElement;
-  el.addEventListener('contextmenu', (event) => event.preventDefault());
+  listenScene(el, 'contextmenu', (event) => event.preventDefault());
 
   const pointerPair = () => Array.from(CAMERA.pointers.values());
   const pointerDistance = () => {
@@ -6002,11 +6489,11 @@ function initCameraControls() {
     }
   };
 
-  el.addEventListener('pointerdown', onPointerDown);
-  el.addEventListener('pointermove', onPointerMove);
-  el.addEventListener('pointerup', onPointerUp);
-  el.addEventListener('pointercancel', onPointerUp);
-  window.addEventListener('blur', () => {
+  listenScene(el, 'pointerdown', onPointerDown);
+  listenScene(el, 'pointermove', onPointerMove);
+  listenScene(el, 'pointerup', onPointerUp);
+  listenScene(el, 'pointercancel', onPointerUp);
+  listenScene(window, 'blur', () => {
     // A window switch can swallow pointerup; drop stale pointers so the next
     // gesture starts in a single-pointer state.
     CAMERA.pointers.clear();
@@ -6016,7 +6503,7 @@ function initCameraControls() {
     el.classList.remove('is-panning');
   });
 
-  el.addEventListener('wheel', (event) => {
+  listenScene(el, 'wheel', (event) => {
     event.preventDefault();
     if (!CAMERA.enabled) return;
     const delta = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY;
@@ -6026,7 +6513,37 @@ function initCameraControls() {
     zoomCameraAt(event.clientX, event.clientY, clamp(factor, 0.7, 1.4));
   }, { passive: false });
 
-  el.addEventListener('dblclick', () => resetCamera());
+  listenScene(el, 'dblclick', () => resetCamera());
+
+  listenScene(el, 'keydown', (event) => {
+    if (!CAMERA.enabled || event.ctrlKey || event.metaKey || event.altKey || event.defaultPrevented) return;
+    const key = event.key;
+    const area = cameraSafeArea();
+    const rect = el.getBoundingClientRect();
+    const centerX = rect.left + area.left + area.width / 2;
+    const centerY = rect.top + area.top + area.height / 2;
+    if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(key)) {
+      markCameraManual();
+      if (event.shiftKey) {
+        const dx = key === 'ArrowLeft' ? -48 : key === 'ArrowRight' ? 48 : 0;
+        const dy = key === 'ArrowUp' ? -48 : key === 'ArrowDown' ? 48 : 0;
+        panCameraBy(dx, dy);
+      } else {
+        if (key === 'ArrowLeft') CAMERA.goalTheta -= 0.12;
+        if (key === 'ArrowRight') CAMERA.goalTheta += 0.12;
+        if (key === 'ArrowUp') CAMERA.goalPhi = clamp(CAMERA.goalPhi - 0.10, CAMERA_PHI_MIN, CAMERA_PHI_MAX);
+        if (key === 'ArrowDown') CAMERA.goalPhi = clamp(CAMERA.goalPhi + 0.10, CAMERA_PHI_MIN, CAMERA_PHI_MAX);
+      }
+      event.preventDefault();
+      event.stopPropagation();
+    } else if (['+', '=', '-', '_', 'PageUp', 'PageDown'].includes(key)) {
+      markCameraManual();
+      const zoomIn = key === '+' || key === '=' || key === 'PageUp';
+      zoomCameraAt(centerX, centerY, zoomIn ? 0.88 : 1.14);
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  });
 }
 
 function updateCamera(dt) {
@@ -6076,11 +6593,7 @@ function resizeScene() {
   const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
   S.renderer.setPixelRatio(pixelRatio);
   S.renderer.setSize(width, height, true);
-  if (S.cameraPersp) {
-    S.cameraPersp.aspect = width / height;
-    S.cameraPersp.updateProjectionMatrix();
-  }
-  updateOrthoFrustum();
+  applyCameraSafeArea();
   // Keep an untouched axis view fitted when the viewport changes shape.
   if (S.initialized && CAMERA.preset && !CAMERA.userMoved && !CAMERA.transition) {
     const preset = CAMERA_PRESETS[CAMERA.preset];
@@ -6096,6 +6609,36 @@ function resizeScene() {
       }
     }
   }
+}
+
+function cameraFramingProbe() {
+  const empty = { left: 0, right: 0, top: 0, bottom: 0, samples: 0, safe: cameraSafeArea() };
+  if (!S.carRoot || !S.camera || !S.scene) return empty;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let samples = 0;
+  const point = new THREE.Vector3();
+  const canvas = S.renderer.domElement;
+  const width = canvas.clientWidth;
+  const height = canvas.clientHeight;
+  S.scene.updateMatrixWorld(true);
+  S.carRoot.traverse((object) => {
+    if (!object.isMesh || !object.geometry || !object.geometry.attributes.position) return;
+    const positions = object.geometry.attributes.position;
+    for (let i = 0; i < positions.count; i += 1) {
+      point.fromBufferAttribute(positions, i).applyMatrix4(object.matrixWorld).project(S.camera);
+      const x = (point.x * 0.5 + 0.5) * width;
+      const y = (-point.y * 0.5 + 0.5) * height;
+      minX = Math.min(minX, x);
+      maxX = Math.max(maxX, x);
+      minY = Math.min(minY, y);
+      maxY = Math.max(maxY, y);
+      samples += 1;
+    }
+  });
+  return { left: minX, right: maxX, top: minY, bottom: maxY, samples, safe: cameraSafeArea() };
 }
 
 function projectWorld(world, out = { x: 0, y: 0, visible: false }) {
@@ -6127,7 +6670,8 @@ function initScene() {
   S.renderer.toneMappingExposure = 0.72;
   S.renderer.shadowMap.enabled = true;
   S.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  S.renderer.domElement.setAttribute('aria-label', '方程式赛车三维动态底盘台');
+  S.renderer.domElement.setAttribute('aria-label', '方程式赛车三维动态底盘台；方向键旋转，Shift 加方向键平移，加减键或 PageUp、PageDown 缩放');
+  S.renderer.domElement.setAttribute('aria-keyshortcuts', 'ArrowLeft ArrowRight ArrowUp ArrowDown Shift+ArrowLeft Shift+ArrowRight Shift+ArrowUp Shift+ArrowDown + - PageUp PageDown');
   S.renderer.domElement.setAttribute('tabindex', '0');
   S.host.appendChild(S.renderer.domElement);
 
@@ -6161,9 +6705,9 @@ function initScene() {
   buildOverlay();
   initCameraControls();
 
-  const resizeObserver = new ResizeObserver(() => resizeScene());
-  resizeObserver.observe(S.host);
-  window.addEventListener('resize', resizeScene);
+  S.resizeObserver = new ResizeObserver(() => resizeScene());
+  S.resizeObserver.observe(S.host);
+  listenScene(window, 'resize', resizeScene);
 
   resizeScene();
 
@@ -6171,7 +6715,7 @@ function initScene() {
   // visible; desktop starts at the standard three-quarter view.
   if (PORTRAIT_QUERY.matches) setCameraPreset('portrait', true);
   else setCameraPreset('threeQuarter', true);
-  const onPortraitChange = (event) => {
+  S.portraitChange = (event) => {
     // A deliberate axis view is re-fitted to the new viewport; the default
     // view swaps between the desktop and portrait framing.
     if (CAMERA.preset && CAMERA.preset !== 'portrait' && CAMERA.preset !== 'threeQuarter') {
@@ -6180,8 +6724,8 @@ function initScene() {
       setCameraPreset(event.matches ? 'portrait' : 'threeQuarter');
     }
   };
-  if (PORTRAIT_QUERY.addEventListener) PORTRAIT_QUERY.addEventListener('change', onPortraitChange);
-  else if (PORTRAIT_QUERY.addListener) PORTRAIT_QUERY.addListener(onPortraitChange);
+  if (PORTRAIT_QUERY.addEventListener) PORTRAIT_QUERY.addEventListener('change', S.portraitChange);
+  else if (PORTRAIT_QUERY.addListener) PORTRAIT_QUERY.addListener(S.portraitChange);
 
   updateCamera(0.016);
   S.initialized = true;
@@ -6192,6 +6736,23 @@ function initScene() {
 function teardownScene() {
   if (S.teardownDone) return CAR.assets.lastTeardown;
   S.teardownDone = true;
+  for (const entry of S.listeners.splice(0)) {
+    entry.target.removeEventListener(entry.type, entry.handler, entry.options);
+  }
+  if (S.resizeObserver) {
+    S.resizeObserver.disconnect();
+    S.resizeObserver = null;
+  }
+  if (S.portraitChange) {
+    if (PORTRAIT_QUERY.removeEventListener) PORTRAIT_QUERY.removeEventListener('change', S.portraitChange);
+    else if (PORTRAIT_QUERY.removeListener) PORTRAIT_QUERY.removeListener(S.portraitChange);
+    S.portraitChange = null;
+  }
+  CAMERA.onChange = null;
+  CAMERA.transition = null;
+  CAMERA.dragging = null;
+  CAMERA.pinch = null;
+  CAMERA.pointers.clear();
   CAR.built = false;
   const rendererMemoryBefore = S.renderer && S.renderer.info
     ? {
@@ -6201,7 +6762,7 @@ function teardownScene() {
       }
     : null;
   let rendererMemoryAfter = null;
-  const groupStats = disposeGroupChildren(S.scene, { materials: true, textures: true });
+  const groupStats = disposeGroupChildren(S.scene, { materials: true, textures: true, updateLastBuild: false });
   let sharedMaterialsDisposed = 0;
   let cachedMaterialsDisposed = 0;
   let sharedGeometriesDisposed = 0;
@@ -6263,6 +6824,10 @@ function teardownScene() {
 
   CAR.shared = {};
   CAR.decalCache.clear();
+  CAR.assets.instanceMaterials.clear();
+  clearCarReferences();
+  for (const key of Object.keys(MAT)) delete MAT[key];
+  for (const key of Object.keys(TEX)) delete TEX[key];
   S.scene = null;
   S.renderer = null;
   S.camera = null;
@@ -6277,6 +6842,9 @@ function teardownScene() {
   S.labelAnchors = [];
   S.labels = {};
   S.keyLight = null;
+  S.overheadLight = null;
+  S.plate = null;
+  S.contactBlob = null;
   S.host = null;
   S.initialized = false;
   return CAR.assets.lastTeardown;
@@ -6500,6 +7068,40 @@ function finishCarBuild(model) {
   }
 }
 
+function clearCarReferences() {
+  CAR.dynamicGroup = null;
+  CAR.bodyworkGroup = null;
+  CAR.internalGroup = null;
+  CAR.skinMountGroup = null;
+  CAR.shellMeshes = [];
+  CAR.wheels = [];
+  CAR.corners = [];
+  CAR.links = [];
+  CAR.joints = [];
+  CAR.driveshafts = [];
+  CAR.springs = [];
+  CAR.rockers = [];
+  CAR.arbs = [];
+  CAR.bodyHardpoints = [];
+  CAR.steeringWheel = null;
+  CAR.mechanics = {
+    steeringRack: false,
+    steeringColumn: false,
+    differential: false,
+    arbFront: false,
+    arbRear: false,
+    rackGroup: null,
+    steeringPoint: null,
+    columnPoint: null,
+    diffPoint: null,
+    arbPoints: {}
+  };
+  CAR.dims = null;
+  CAR.geometryRevision = 0;
+  CAR.diag.geometryRevision = 0;
+  CAR.built = false;
+}
+
 function disposeResourceOnce(resource) {
   if (!resource) return false;
   if (!resource.userData) resource.userData = {};
@@ -6570,7 +7172,7 @@ function disposeGroupChildren(group, options = {}) {
   CAR.assets.totals.instanceMaterialDisposed += materialDisposed;
   CAR.assets.totals.sceneMaterialsDisposed += sceneMaterialsDisposed;
   CAR.assets.totals.textureDisposed += textureDisposed;
-  if (CAR.assets.lastBuild) {
+  if (options.updateLastBuild !== false && CAR.assets.lastBuild) {
     CAR.assets.lastBuild.geometryDisposed += geometryDisposed;
     CAR.assets.lastBuild.textureDisposed += textureDisposed;
     CAR.assets.lastBuild.instanceMaterialDisposed += materialDisposed;
@@ -9247,7 +9849,10 @@ const UI = {
     staticTests: null,
     dynamicTests: null,
     dynamicRevision: 0,
+    dynamicSetupRevision: 0,
     dynamicRunning: false,
+    dynamicJob: null,
+    dynamicToken: 0,
     runs: { static: 0, dynamic: 0 }
   },
   checkRows: {},
@@ -9261,7 +9866,12 @@ const UI = {
   elements: {},
   modalReturnFocus: null,
   modalInert: null,
-  solverState: 'ok'
+  solverState: 'ok',
+  listeners: [],
+  mediaListeners: [],
+  modalFocusTimer: 0,
+  resizeTimer: 0,
+  disposed: false
 };
 
 const PANEL_TABINDEX = new WeakMap();
@@ -9293,6 +9903,17 @@ const INSPECT_VIEWS = [
 const $ = (selector, parent = document) => parent.querySelector(selector);
 const $$ = (selector, parent = document) => Array.from(parent.querySelectorAll(selector));
 const _partWorld = new THREE.Vector3();
+
+function listenUI(target, type, handler, options) {
+  target.addEventListener(type, handler, options);
+  UI.listeners.push({ target, type, handler, options });
+}
+
+function listenUIMedia(query, handler) {
+  if (query.addEventListener) query.addEventListener('change', handler);
+  else if (query.addListener) query.addListener(handler);
+  UI.mediaListeners.push({ query, handler });
+}
 
 function formatOutputValue(param, value) {
   switch (param) {
@@ -9367,7 +9988,9 @@ function syncControlsFromState() {
     if (input.type === 'range') input.setAttribute('aria-valuetext', formatOutputValue(param, state[param]));
   });
   $$('.unit-toggle button').forEach((button) => {
-    button.classList.toggle('is-active', button.dataset.units === state.units);
+    const selected = button.dataset.units === state.units;
+    button.classList.toggle('is-active', selected);
+    button.setAttribute('aria-pressed', String(selected));
   });
   const xrayButton = document.getElementById('btnXray');
   if (xrayButton) {
@@ -9396,6 +10019,7 @@ function updateRoadChips() {
       Math.abs(state.bank - target.bank) < 0.001 &&
       (target.friction == null || Math.abs(state.friction - target.friction) < 0.001);
     button.classList.toggle('is-active', Boolean(matches));
+    button.setAttribute('aria-pressed', String(Boolean(matches)));
   });
 }
 
@@ -9415,7 +10039,9 @@ function applyUnit(unit) {
   if (unit !== 'N' && unit !== 'kg') return;
   state.units = unit;
   $$('.unit-toggle button').forEach((button) => {
-    button.classList.toggle('is-active', button.dataset.units === unit);
+    const selected = button.dataset.units === unit;
+    button.classList.toggle('is-active', selected);
+    button.setAttribute('aria-pressed', String(selected));
   });
   persistState();
   refreshAll({ rebuild: false });
@@ -9576,12 +10202,16 @@ async function copyConfig() {
 }
 
 function showToast(message) {
+  if (UI.disposed) return;
   const toast = document.getElementById('toast');
   if (!toast) return;
   toast.textContent = message;
   toast.classList.add('is-visible');
   window.clearTimeout(UI.toastTimer);
-  UI.toastTimer = window.setTimeout(() => toast.classList.remove('is-visible'), 2400);
+  UI.toastTimer = window.setTimeout(() => {
+    UI.toastTimer = 0;
+    if (!UI.disposed) toast.classList.remove('is-visible');
+  }, 2400);
 }
 
 function isCompact() {
@@ -9691,6 +10321,7 @@ function setPanel(panelId, open, { exclusive = false } = {}) {
   panel.classList.toggle('is-open', open);
   setPanelInert(panel, !open);
   updatePanelUI();
+  if (S.initialized && !UI.disposed) resizeScene();
 }
 
 function togglePanel(panelId) {
@@ -9701,6 +10332,7 @@ function togglePanel(panelId) {
 }
 
 function openModelModal() {
+  if (UI.disposed) return;
   const modal = document.getElementById('modelModal');
   if (!modal) return;
   UI.modalReturnFocus = document.activeElement;
@@ -9708,7 +10340,10 @@ function openModelModal() {
   setModalBackgroundInert();
   document.body.classList.add('modal-open');
   refreshSelfTests();
-  window.setTimeout(() => {
+  window.clearTimeout(UI.modalFocusTimer);
+  UI.modalFocusTimer = window.setTimeout(() => {
+    UI.modalFocusTimer = 0;
+    if (UI.disposed || modal.hidden) return;
     const items = modalFocusables(modal);
     const target = modal.querySelector('button[data-close-modal]') || items[0];
     if (target) target.focus();
@@ -9726,15 +10361,70 @@ function closeModelModal() {
   }
 }
 
+function cancelDynamicSelfTests() {
+  const cache = UI.selfTestCache;
+  cache.dynamicToken += 1;
+  if (cache.dynamicJob) cache.dynamicJob.cancel();
+  cache.dynamicJob = null;
+  cache.dynamicRunning = false;
+  cache.dynamicTests = null;
+  cache.dynamicRevision = 0;
+  UI.dynamicTests = [];
+}
+
+function startDynamicSelfTestJob(setup, { isCurrent, onDone, onDiscard }) {
+  const iterator = simDynamicSelfTestSteps(setup);
+  const tests = [];
+  let timer = 0;
+  let stopped = false;
+  const cancel = () => {
+    if (stopped) return;
+    stopped = true;
+    window.clearTimeout(timer);
+    if (typeof iterator.return === 'function') iterator.return();
+  };
+  const discard = () => {
+    cancel();
+    if (onDiscard) onDiscard();
+  };
+  const pump = () => {
+    timer = 0;
+    if (stopped) return;
+    if (!isCurrent()) {
+      discard();
+      return;
+    }
+    const startedAt = performance.now();
+    while (!stopped) {
+      if (!isCurrent()) {
+        discard();
+        return;
+      }
+      const step = iterator.next();
+      if (step.done) {
+        stopped = true;
+        if (onDone) onDone(step.value || tests);
+        return;
+      }
+      tests.push(step.value);
+      if (performance.now() - startedAt >= 50) {
+        timer = window.setTimeout(pump, 0);
+        return;
+      }
+    }
+  };
+  pump();
+  return { cancel };
+}
+
 function ensureStaticSelfTests({ force = false } = {}) {
   const revision = noteSetupChange(state);
   if (force || UI.selfTestCache.revision !== revision || !UI.selfTestCache.staticTests) {
     UI.selfTestCache.staticTests = runSelfTests(state);
     UI.selfTestCache.revision = revision;
     UI.selfTestCache.runs.static += 1;
-    if (UI.selfTestCache.dynamicRevision !== revision) {
-      UI.selfTestCache.dynamicTests = null;
-      UI.selfTestCache.dynamicRevision = 0;
+    if (UI.selfTestCache.dynamicRevision !== revision || UI.selfTestCache.dynamicRunning) {
+      cancelDynamicSelfTests();
     }
   }
   UI.selfTests = UI.selfTestCache.staticTests;
@@ -9742,34 +10432,58 @@ function ensureStaticSelfTests({ force = false } = {}) {
 }
 
 function ensureDynamicSelfTests({ force = false, onDone = null } = {}) {
+  if (UI.disposed) return null;
+  const cache = UI.selfTestCache;
   const revision = noteSetupChange(state);
-  if (!force && UI.selfTestCache.dynamicTests && UI.selfTestCache.dynamicRevision === revision) {
-    if (onDone) onDone(UI.selfTestCache.dynamicTests);
-    return UI.selfTestCache.dynamicTests;
+  if (!force && cache.dynamicTests && cache.dynamicRevision === revision) {
+    if (onDone) onDone(cache.dynamicTests);
+    return cache.dynamicTests;
   }
-  if (UI.selfTestCache.dynamicRunning) return null;
-  UI.selfTestCache.dynamicRunning = true;
-  UI.selfTestCache.dynamicTests = null;
+  if (!force && cache.dynamicRunning && cache.dynamicJob && cache.dynamicJob.revision === revision) return null;
+  if (cache.dynamicJob || cache.dynamicTests) cancelDynamicSelfTests();
+  const setup = cloneState(state);
   const startedRevision = revision;
-  runDynamicSelfTestsChunked(state, {
-    onTest: (test, count) => {
-      UI.dynamicTests = UI.dynamicTests || [];
-      UI.dynamicTests.push(test);
-    },
+  const token = cache.dynamicToken + 1;
+  cache.dynamicToken = token;
+  cache.dynamicRunning = true;
+  cache.dynamicSetupRevision = startedRevision;
+  cache.dynamicTests = null;
+  cache.dynamicRevision = 0;
+  UI.dynamicTests = [];
+  const isCurrent = () => !UI.disposed && cache.dynamicToken === token && noteSetupChange(state) === startedRevision;
+  const discard = () => {
+    if (cache.dynamicToken !== token) return;
+    cache.dynamicJob = null;
+    cache.dynamicRunning = false;
+    cache.dynamicTests = null;
+    cache.dynamicRevision = 0;
+    UI.dynamicTests = [];
+  };
+  const job = startDynamicSelfTestJob(setup, {
+    isCurrent,
+    onDiscard: discard,
     onDone: (tests) => {
-      UI.selfTestCache.dynamicRunning = false;
-      UI.selfTestCache.dynamicTests = tests;
-      UI.selfTestCache.dynamicRevision = startedRevision;
-      UI.selfTestCache.runs.dynamic += 1;
+      if (!isCurrent()) {
+        discard();
+        return;
+      }
+      cache.dynamicJob = null;
+      cache.dynamicRunning = false;
+      cache.dynamicTests = tests;
+      cache.dynamicRevision = startedRevision;
+      cache.runs.dynamic += 1;
       UI.dynamicTests = tests;
       if (onDone) onDone(tests);
       refreshSelfTests({ dynamic: false });
     }
   });
+  job.revision = startedRevision;
+  if (cache.dynamicRunning && cache.dynamicToken === token) cache.dynamicJob = job;
   return null;
 }
 
 function refreshSelfTests({ dynamic = true, force = false } = {}) {
+  if (UI.disposed) return UI.selfTests;
   const staticTests = ensureStaticSelfTests({ force });
   if (dynamic && (force || !UI.selfTestCache.dynamicTests || UI.selfTestCache.dynamicRevision !== UI.selfTestCache.revision)) {
     ensureDynamicSelfTests({ force, onDone: () => refreshSelfTests({ dynamic: false }) });
@@ -9780,16 +10494,19 @@ function refreshSelfTests({ dynamic = true, force = false } = {}) {
   const passed = tests.filter((test) => test.ok).length;
   const total = tests.length;
 
+  const dynamicState = dynamicTests.length
+    ? `动态 ${dynamicTests.filter((test) => test.ok).length} / ${dynamicTests.length}`
+    : (UI.selfTestCache.dynamicRunning ? '动态运行中' : '动态待运行');
   const rightStatus = document.getElementById('selfTestStatus');
-  if (rightStatus) rightStatus.textContent = `${passed} / ${total} 通过`;
+  if (rightStatus) rightStatus.textContent = `静力 ${staticTests.filter((test) => test.ok).length} / ${staticTests.length} · ${dynamicState}`;
 
   const solverState = UI.lastModel ? solverStateOf(UI.lastModel) : 'ok';
   const solverWarn = solverState !== 'ok';
   const solverText = solverState === 'failed' ? '求解失败' : solverState === 'degraded' ? '求解降级' : '求解正常';
   const summary = document.getElementById('selfTestSummary');
   if (summary) {
-    summary.textContent = `${passed} / ${total} 项通过 · 静态 ${staticTests.length} / 动态 ${dynamicTests.length}${solverWarn ? ' · ' + solverText : ''}`;
-    summary.style.color = passed === total && !solverWarn ? 'var(--ok)' : 'var(--warn)';
+    summary.textContent = `${passed} / ${total} 项通过 · 静态 ${staticTests.length} / ${dynamicState}${solverWarn ? ' · ' + solverText : ''}`;
+    summary.style.color = passed === total && !solverWarn && dynamicTests.length ? 'var(--ok)' : 'var(--warn)';
   }
 
   const list = document.getElementById('selfTestList');
@@ -9874,6 +10591,7 @@ function updateLabelPositions() {
   if (!UI.cornerLabels.length || !S.initialized) return;
   const showLoadLabels = Boolean(state.showLoads && state.showLabels);
   const anchors = S.labelAnchors || [];
+  const safe = cameraSafeArea();
   for (let i = 0; i < UI.cornerLabels.length; i += 1) {
     const label = UI.cornerLabels[i];
     const anchor = anchors[i];
@@ -9887,7 +10605,11 @@ function updateLabelPositions() {
       continue;
     }
     label.element.classList.remove('is-hidden');
-    label.element.style.transform = `translate(-50%, -50%) translate(${projected.x.toFixed(1)}px, ${projected.y.toFixed(1)}px)`;
+    const halfWidth = label.element.offsetWidth / 2;
+    const halfHeight = label.element.offsetHeight / 2;
+    const x = clamp(projected.x, safe.left + halfWidth + 3, safe.right - halfWidth - 3);
+    const y = clamp(projected.y, safe.top + halfHeight + 3, safe.bottom - halfHeight - 3);
+    label.element.style.transform = `translate(-50%, -50%) translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
   }
 
   if (UI.cgLabel) {
@@ -9936,7 +10658,8 @@ function updateLabelPositions() {
       return;
     }
     label.element.classList.remove('is-hidden');
-    const x = (projected.x + label.offsetX).toFixed(1);
+    const halfWidth = label.element.offsetWidth / 2;
+    const x = clamp(projected.x + label.offsetX, safe.left + halfWidth + 3, safe.right - halfWidth - 3).toFixed(1);
     label.element.style.transform = `translate(-50%, ${label.offset}%) translate(${x}px, ${projected.y.toFixed(1)}px)`;
   });
 }
@@ -10243,7 +10966,7 @@ function refreshTelemetry(model) {
     const dynamicPassed = dynamicTests.filter((test) => test.ok).length;
     setText(
       'selfTestStatus',
-      `静力 ${passed} / ${tests.length}${dynamicTests.length ? ` · 动态 ${dynamicPassed} / ${dynamicTests.length}` : ''} · ${solverStateOf(model) === 'failed' ? '求解失败' : solverStateOf(model) === 'degraded' ? '求解降级' : '求解正常'}`
+      `静力 ${passed} / ${tests.length}${dynamicTests.length ? ` · 动态 ${dynamicPassed} / ${dynamicTests.length}` : ' · 动态待运行'} · ${solverStateOf(model) === 'failed' ? '求解失败' : solverStateOf(model) === 'degraded' ? '求解降级' : '求解正常'}`
     );
   }
 
@@ -10300,7 +11023,9 @@ function refreshTelemetry(model) {
 
 function syncCameraButtonActive(name) {
   $$('[data-camera]').forEach((button) => {
-    button.classList.toggle('is-active', button.dataset.camera === name);
+    const selected = button.dataset.camera === name;
+    button.classList.toggle('is-active', selected);
+    button.setAttribute('aria-pressed', String(selected));
   });
 }
 
@@ -10324,6 +11049,7 @@ function resetInspectButton() {
   const button = document.getElementById('btnInspect');
   if (button) {
     button.classList.remove('is-active');
+    button.setAttribute('aria-pressed', 'false');
     button.innerHTML = '<span class="tool-glyph">⌬</span>机构';
   }
 }
@@ -10339,6 +11065,7 @@ function cycleInspectView() {
   const button = document.getElementById('btnInspect');
   if (button) {
     button.classList.add('is-active');
+    button.setAttribute('aria-pressed', 'true');
     button.innerHTML = `<span class="tool-glyph">⌬</span>机构 · ${view.label}`;
   }
   showToast(`${view.toast} · 按 R 返回总览`);
@@ -10360,7 +11087,7 @@ function bindControls() {
   $$('[data-param]').forEach((input) => {
     const param = input.dataset.param;
     if (input.type === 'checkbox') {
-      input.addEventListener('change', () => {
+      listenUI(input, 'change', () => {
         applyStateChange(param, input.checked, { rebuild: false });
         if (param === 'xray') {
           const button = document.getElementById('btnXray');
@@ -10372,7 +11099,7 @@ function bindControls() {
       });
       return;
     }
-    input.addEventListener('input', () => {
+    listenUI(input, 'input', () => {
       const value = Number(input.value);
       if (!Number.isFinite(value)) return;
       const rebuild = input.dataset.rebuild === '1';
@@ -10388,38 +11115,38 @@ function bindControls() {
   });
 
   $$('[data-road-preset]').forEach((button) => {
-    button.addEventListener('click', () => applyRoadPreset(button.dataset.roadPreset));
+    listenUI(button, 'click', () => applyRoadPreset(button.dataset.roadPreset));
   });
 
   $$('.unit-toggle button').forEach((button) => {
-    button.addEventListener('click', () => applyUnit(button.dataset.units));
+    listenUI(button, 'click', () => applyUnit(button.dataset.units));
   });
 
   const btnScreenshot = document.getElementById('btnScreenshot');
-  if (btnScreenshot) btnScreenshot.addEventListener('click', requestScreenshot);
+  if (btnScreenshot) listenUI(btnScreenshot, 'click', requestScreenshot);
   const btnScreenshotBottom = document.getElementById('btnScreenshotBottom');
-  if (btnScreenshotBottom) btnScreenshotBottom.addEventListener('click', requestScreenshot);
+  if (btnScreenshotBottom) listenUI(btnScreenshotBottom, 'click', requestScreenshot);
 
   const btnReset = document.getElementById('btnResetAll');
-  if (btnReset) btnReset.addEventListener('click', resetAll);
+  if (btnReset) listenUI(btnReset, 'click', resetAll);
   const btnCopy = document.getElementById('btnCopyConfig');
-  if (btnCopy) btnCopy.addEventListener('click', copyConfig);
+  if (btnCopy) listenUI(btnCopy, 'click', copyConfig);
   const btnLevel = document.getElementById('btnLevelSnapshot');
-  if (btnLevel) btnLevel.addEventListener('click', () => applyRoadPreset('level'));
+  if (btnLevel) listenUI(btnLevel, 'click', () => applyRoadPreset('level'));
 
   const btnXray = document.getElementById('btnXray');
-  if (btnXray) btnXray.addEventListener('click', () => setXray(!state.xray));
+  if (btnXray) listenUI(btnXray, 'click', () => setXray(!state.xray));
   const btnAuto = document.getElementById('btnAutoRotate');
-  if (btnAuto) btnAuto.addEventListener('click', () => setAutoRotate(!autoRotate));
+  if (btnAuto) listenUI(btnAuto, 'click', () => setAutoRotate(!autoRotate));
   const btnInspect = document.getElementById('btnInspect');
-  if (btnInspect) btnInspect.addEventListener('click', cycleInspectView);
+  if (btnInspect) listenUI(btnInspect, 'click', cycleInspectView);
 
   const btnSimToggle = document.getElementById('btnSimToggle');
-  if (btnSimToggle) btnSimToggle.addEventListener('click', simulationToggle);
+  if (btnSimToggle) listenUI(btnSimToggle, 'click', simulationToggle);
   const btnSimReset = document.getElementById('btnSimReset');
-  if (btnSimReset) btnSimReset.addEventListener('click', () => simulationReset({ settle: 0 }));
+  if (btnSimReset) listenUI(btnSimReset, 'click', () => simulationReset({ settle: 0 }));
   const btnSimSettle = document.getElementById('btnSimSettle');
-  if (btnSimSettle) btnSimSettle.addEventListener('click', () => simulationReset({ settle: 2, toast: '已回到静力平衡姿态' }));
+  if (btnSimSettle) listenUI(btnSimSettle, 'click', () => simulationReset({ settle: 2, toast: '已回到静力平衡姿态' }));
   const impulseButtons = [
     ['btnImpulseHeave', 'heave'],
     ['btnImpulseRoll', 'roll'],
@@ -10427,45 +11154,45 @@ function bindControls() {
   ];
   for (const [id, kind] of impulseButtons) {
     const button = document.getElementById(id);
-    if (button) button.addEventListener('click', () => simulationImpulse(kind));
+    if (button) listenUI(button, 'click', () => simulationImpulse(kind));
   }
 
   const btnResetView = document.getElementById('btnResetView');
-  if (btnResetView) btnResetView.addEventListener('click', () => {
+  if (btnResetView) listenUI(btnResetView, 'click', () => {
     resetCamera();
     resetInspectButton();
     showToast('相机已重置');
   });
 
   const btnOrtho = document.getElementById('btnOrtho');
-  if (btnOrtho) btnOrtho.addEventListener('click', () => {
+  if (btnOrtho) listenUI(btnOrtho, 'click', () => {
     setOrtho(CAMERA.projection !== 'orthographic');
   });
 
   $$('[data-camera]').forEach((button) => {
-    button.addEventListener('click', () => {
+    listenUI(button, 'click', () => {
       resetInspectButton();
       setCameraPreset(button.dataset.camera);
     });
   });
 
   const btnToggleControls = document.getElementById('btnToggleControls');
-  if (btnToggleControls) btnToggleControls.addEventListener('click', () => togglePanel('panelControls'));
+  if (btnToggleControls) listenUI(btnToggleControls, 'click', () => togglePanel('panelControls'));
   const btnToggleTelemetry = document.getElementById('btnToggleTelemetry');
-  if (btnToggleTelemetry) btnToggleTelemetry.addEventListener('click', () => togglePanel('panelTelemetry'));
+  if (btnToggleTelemetry) listenUI(btnToggleTelemetry, 'click', () => togglePanel('panelTelemetry'));
   $$('[data-close-panel]').forEach((button) => {
-    button.addEventListener('click', () => setPanel(button.dataset.closePanel, false));
+    listenUI(button, 'click', () => setPanel(button.dataset.closePanel, false));
   });
   const scrim = document.getElementById('mobileScrim');
-  if (scrim) scrim.addEventListener('click', () => {
+  if (scrim) listenUI(scrim, 'click', () => {
     setPanel('panelControls', false);
     setPanel('panelTelemetry', false);
   });
 
   const btnHelp = document.getElementById('btnHelp');
-  if (btnHelp) btnHelp.addEventListener('click', openModelModal);
+  if (btnHelp) listenUI(btnHelp, 'click', openModelModal);
   $$('[data-close-modal]').forEach((element) => {
-    element.addEventListener('click', closeModelModal);
+    listenUI(element, 'click', closeModelModal);
   });
 
   bindKeyboard();
@@ -10479,7 +11206,7 @@ function shortcutTargetBlocked(target) {
 }
 
 function bindKeyboard() {
-  window.addEventListener('keydown', (event) => {
+  listenUI(window, 'keydown', (event) => {
     const tag = event.target && event.target.tagName ? event.target.tagName.toLowerCase() : '';
     const isTyping = tag === 'input' || tag === 'textarea' || tag === 'select';
     const modal = document.getElementById('modelModal');
@@ -10583,20 +11310,19 @@ function bindWindowChrome() {
     }
     updatePanelUI();
   };
-  if (compactQuery.addEventListener) compactQuery.addEventListener('change', onCompactChange);
-  else if (compactQuery.addListener) compactQuery.addListener(onCompactChange);
+  listenUIMedia(compactQuery, onCompactChange);
 
-  let resizeTimer = 0;
-  window.addEventListener('resize', () => {
-    window.clearTimeout(resizeTimer);
-    resizeTimer = window.setTimeout(() => {
-      updatePanelUI();
+  listenUI(window, 'resize', () => {
+    window.clearTimeout(UI.resizeTimer);
+    UI.resizeTimer = window.setTimeout(() => {
+      UI.resizeTimer = 0;
+      if (!UI.disposed) updatePanelUI();
     }, 80);
   });
 }
 
 function initUI() {
-  if (UI.initialized) return;
+  if (UI.initialized || UI.disposed) return;
   createAnnotationLabels();
   bindControls();
   syncControlsFromState();
@@ -10614,6 +11340,38 @@ function initUI() {
   syncCameraButtonActive(CAMERA.preset || '');
   syncCameraModeButtons();
   UI.initialized = true;
+}
+
+function teardownUI() {
+  if (UI.disposed) return;
+  UI.disposed = true;
+  cancelDynamicSelfTests();
+  window.clearTimeout(UI.toastTimer);
+  window.clearTimeout(UI.modalFocusTimer);
+  window.clearTimeout(UI.resizeTimer);
+  UI.toastTimer = 0;
+  UI.modalFocusTimer = 0;
+  UI.resizeTimer = 0;
+  for (const entry of UI.listeners.splice(0)) {
+    entry.target.removeEventListener(entry.type, entry.handler, entry.options);
+  }
+  for (const entry of UI.mediaListeners.splice(0)) {
+    if (entry.query.removeEventListener) entry.query.removeEventListener('change', entry.handler);
+    else if (entry.query.removeListener) entry.query.removeListener(entry.handler);
+  }
+  const modal = document.getElementById('modelModal');
+  if (modal) modal.hidden = true;
+  document.body.classList.remove('modal-open');
+  restoreModalBackgroundInert();
+  UI.modalReturnFocus = null;
+  CAMERA.onChange = null;
+  if (UI.labelLayer) UI.labelLayer.textContent = '';
+  UI.labelLayer = null;
+  UI.cornerLabels = [];
+  UI.partLabels = [];
+  UI.cgLabel = null;
+  UI.projLabel = null;
+  UI.initialized = false;
 }
 
 UI.refreshTelemetry = refreshTelemetry;
@@ -10661,6 +11419,11 @@ let firstFrameRendered = false;
 let loaderShownAt = 0;
 let lastFrameTime = 0;
 let screenshotCount = 0;
+let frameRequest = 0;
+let loaderTimer = 0;
+let lastFrameDt = 0;
+let appDisposed = false;
+let appSuspended = false;
 
 function liveModel() {
   if (!SIM) return computeStatic(state);
@@ -10682,6 +11445,7 @@ function calibrateRack(sim, steerDeg) {
 }
 
 function updateSceneFromModel(model) {
+  if (appDisposed || !S.scene || !S.roadGroup || !S.carRoot) return;
   if (typeof applyXray === 'function') applyXray();
   S.roadGroup.quaternion.copy(model.frame.q);
   S.roadGroup.updateMatrixWorld(true);
@@ -10700,7 +11464,7 @@ function requestRebuild(reason = 'explicit') {
 }
 
 function processPendingRebuild(now) {
-  if (!PENDING.rebuild) return;
+  if (appDisposed || !booted || !PENDING.rebuild) return;
   if (now - PENDING.lastBuildAt < 85) return;
   PENDING.lastBuildAt = now;
   try {
@@ -10708,7 +11472,6 @@ function processPendingRebuild(now) {
     simReset(SIM, state, { settle: 0.5 });
     SIM.advanceCarry = 0;
     stampReference(SIM, state);
-    SIM.rackShift = calibrateRack(SIM, state.steer);
     const model = simBuildModel(SIM, state);
     buildCar(model);
     applyXray();
@@ -10736,7 +11499,7 @@ function processPendingRebuild(now) {
 }
 
 function refreshAll({ rebuild = false, reason = 'params' } = {}) {
-  if (!booted) return;
+  if (!booted || appDisposed) return;
   if (PENDING.rebuild) { PENDING.lastPolicy = 'pending'; return; }
   const staleGeometry = !SIM || geometryRevisionFor(state) !== SIM.geometryRevision;
   if (rebuild || staleGeometry) {
@@ -11137,6 +11900,12 @@ function bindGlobalAPI() {
         pendingRebuild: PENDING.rebuild,
         setupRevision: typeof SETUP_REVISION === 'number' ? SETUP_REVISION : 0,
         selfTestRuns: UI.selfTestCache && UI.selfTestCache.runs ? Object.assign({}, UI.selfTestCache.runs) : { static: 0, dynamic: 0 },
+        selfTestDynamic: {
+          running: Boolean(UI.selfTestCache.dynamicRunning),
+          revision: UI.selfTestCache.dynamicRevision,
+          setupRevision: UI.selfTestCache.dynamicSetupRevision,
+          token: UI.selfTestCache.dynamicToken
+        },
         geometry: {
           sceneRevision: CAR.geometryRevision || null,
           physicsRevision: SIM && SIM.reference ? SIM.reference.geometryRevision : null,
@@ -11158,7 +11927,13 @@ function bindGlobalAPI() {
           lastBuild: CAR.assets.lastBuild ? Object.assign({}, CAR.assets.lastBuild) : null,
           lastTeardown: CAR.assets.lastTeardown ? Object.assign({}, CAR.assets.lastTeardown) : null
         } : null,
-        frameCount: UI.frameCount || 0
+        frameCount: UI.frameCount || 0,
+        lifecycle: {
+          disposed: appDisposed,
+          suspended: appSuspended,
+          frameScheduled: Boolean(frameRequest),
+          lastFrameDt
+        }
       };
     },
     setState: (patch, options = {}) => {
@@ -11202,7 +11977,6 @@ function bindGlobalAPI() {
       simReset(SIM, state, { settle });
       SIM.advanceCarry = 0;
       stampReference(SIM, state);
-      SIM.rackShift = calibrateRack(SIM, state.steer);
       const model = simBuildModel(SIM, state);
       updateSceneFromModel(model);
       UI.refreshTelemetry(model);
@@ -11252,11 +12026,12 @@ function bindGlobalAPI() {
       loadArrowHeights: (S.loadArrows || []).map((entry) => entry.arrow.shaft.scale.y + entry.arrow.head),
       geometryRevision: CAR.geometryRevision || null,
       physicsRevision: SIM && SIM.reference ? SIM.reference.geometryRevision : null,
-      geometryMismatch: Boolean(CAR.diag.geometryMismatch)
+      geometryMismatch: Boolean(CAR.diag.geometryMismatch),
+      cameraFraming: cameraFramingProbe()
     }),
     runSelfTests: () => runSelfTests(state),
     runDynamicSelfTests: () => runDynamicSelfTests(state),
-    dispose: teardownScene,
+    dispose: disposeApp,
     getAssetStats: () => ({
       totals: CAR.assets ? Object.assign({}, CAR.assets.totals) : null,
       lastBuild: CAR.assets && CAR.assets.lastBuild ? Object.assign({}, CAR.assets.lastBuild) : null,
@@ -11269,18 +12044,30 @@ function bindGlobalAPI() {
   };
 }
 
+function scheduleFrame() {
+  if (frameRequest || appDisposed || appSuspended || !booted) return;
+  frameRequest = requestAnimationFrame(animate);
+}
+
+function cancelFrame() {
+  if (frameRequest) cancelAnimationFrame(frameRequest);
+  frameRequest = 0;
+}
+
 function animate(now) {
-  // requestAnimationFrame timestamps are monotonic frame-clock values, but the
-  // first callback may carry a timestamp from before the expensive boot. Never
-  // seed the frame clock with performance.now(), and clamp anomalous deltas.
+  frameRequest = 0;
+  if (appDisposed || appSuspended || !booted || !S.renderer || !S.scene || !S.camera) return;
+  // A BFCache restore starts a fresh frame clock instead of integrating the
+  // time spent outside the active page. The first callback therefore has dt=0.
   const frameDt = lastFrameTime ? Math.max(0, (now - lastFrameTime) / 1000) : 0;
   lastFrameTime = now;
+  lastFrameDt = frameDt;
 
   UI.frameCount = (UI.frameCount || 0) + 1;
   updateCamera(Math.min(frameDt, 0.05));
   processPendingRebuild(now);
 
-  if (booted && SIM) {
+  if (SIM) {
     const steps = simAdvance(SIM, frameDt);
     if (steps > 0 || !UI.lastDynamicUpdate) {
       const model = simBuildModel(SIM, state);
@@ -11293,16 +12080,16 @@ function animate(now) {
     }
   }
 
-  // Camera and scene matrices are current before projecting the DOM labels.
   S.scene.updateMatrixWorld(false);
   if (UI.initialized) UI.updateLabelPositions();
-
   S.renderer.render(S.scene, S.camera);
 
   if (!firstFrameRendered) {
     firstFrameRendered = true;
     const wait = Math.max(0, 480 - (now - loaderShownAt));
-    window.setTimeout(() => {
+    loaderTimer = window.setTimeout(() => {
+      loaderTimer = 0;
+      if (appDisposed) return;
       const loading = document.getElementById('loading');
       if (loading) loading.classList.add('is-done');
       document.documentElement.dataset.fsReady = '1';
@@ -11310,7 +12097,43 @@ function animate(now) {
     }, wait);
   }
 
-  requestAnimationFrame(animate);
+  scheduleFrame();
+}
+
+function onPageHide(event) {
+  if (event.persisted) {
+    appSuspended = true;
+    cancelFrame();
+    lastFrameTime = 0;
+    lastFrameDt = 0;
+    return;
+  }
+  disposeApp();
+}
+
+function onPageShow(event) {
+  if (!event.persisted || appDisposed) return;
+  appSuspended = false;
+  lastFrameTime = 0;
+  lastFrameDt = 0;
+  scheduleFrame();
+}
+
+function disposeApp() {
+  if (appDisposed) return CAR.assets.lastTeardown;
+  appDisposed = true;
+  appSuspended = false;
+  booted = false;
+  cancelFrame();
+  window.clearTimeout(loaderTimer);
+  loaderTimer = 0;
+  window.removeEventListener('pagehide', onPageHide);
+  window.removeEventListener('pageshow', onPageShow);
+  PENDING.rebuild = false;
+  teardownUI();
+  const result = teardownScene();
+  if (window.FSApp) window.FSApp.ready = false;
+  return result;
 }
 
 function boot() {
@@ -11323,7 +12146,6 @@ function boot() {
     initScene();
     SIM = simCreate(state, { settle: 1.8 });
     stampReference(SIM, state);
-    SIM.rackShift = calibrateRack(SIM, state.steer);
     const initialModel = simBuildModel(SIM, state);
     S.roadGroup.quaternion.copy(initialModel.frame.q);
     S.roadGroup.updateMatrixWorld(true);
@@ -11336,13 +12158,13 @@ function boot() {
     syncControlsFromState();
     persistState();
     bindGlobalAPI();
-    window.addEventListener('pagehide', () => {
-      if (typeof teardownScene === 'function') teardownScene();
-    }, { once: true });
+    window.addEventListener('pagehide', onPageHide);
+    window.addEventListener('pageshow', onPageShow);
 
     booted = true;
     lastFrameTime = 0;
-    requestAnimationFrame(animate);
+    lastFrameDt = 0;
+    scheduleFrame();
 
     console.info('[FS-01] stage 02 dynamic chassis v' + APP_VERSION + ' ready');
   } catch (error) {

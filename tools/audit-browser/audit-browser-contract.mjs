@@ -20,20 +20,59 @@ function numericDiff(a, b) {
   return max;
 }
 
-async function waitFrames(ctx, count = 2) {
-  await ctx.evaluate('new Promise(function (resolve) { var left = ' + count + '; function step() { left -= 1; if (left <= 0) resolve(true); else requestAnimationFrame(step); } requestAnimationFrame(step); })');
+function sceneWheelbase(scene) {
+  if (!scene || !Array.isArray(scene.wheelPos) || scene.wheelPos.length < 4) return NaN;
+  const frontX = (scene.wheelPos[0][0] + scene.wheelPos[1][0]) / 2;
+  const rearX = (scene.wheelPos[2][0] + scene.wheelPos[3][0]) / 2;
+  return Math.abs(rearX - frontX);
+}
+
+async function changeWheelbase(ctx, target, timeoutMs = 20000) {
+  const before = await ctx.evaluateJson('window.FSApp.getSnapshot()');
+  const requested = await ctx.evaluateJson('window.FSApp.setState({ wheelbase: ' + target + ' })');
+  const deadline = Date.now() + timeoutMs;
+  let after = null;
+  while (Date.now() < deadline) {
+    after = await ctx.evaluateJson('window.FSApp.getSnapshot()');
+    const geometry = after.geometry || {};
+    if (geometry.pending === false && geometry.commitCount > before.geometry.commitCount &&
+        Math.abs(after.state.wheelbase - target) < 1e-9) {
+      const afterScene = await ctx.evaluateJson('window.FSApp.getSceneProbe()');
+      const geometry = after.geometry;
+      const valid = requested.geometry && requested.geometry.pending === true &&
+        requested.geometry.commitCount === before.geometry.commitCount &&
+        geometry.commitCount === before.geometry.commitCount + 1 && geometry.mismatch === false &&
+        Number.isFinite(geometry.sceneRevision) && geometry.sceneRevision === geometry.physicsRevision &&
+        afterScene.geometryRevision === geometry.sceneRevision && afterScene.physicsRevision === geometry.physicsRevision &&
+        afterScene.geometryMismatch === false && Math.abs(sceneWheelbase(afterScene) - target) <= 1e-4;
+      if (!valid) throw new Error('invalid geometry commit for ' + target.toFixed(2) + ' m: ' + JSON.stringify({ before: before.geometry, requested: requested.geometry, after: geometry, sceneRevision: afterScene.geometryRevision, actualWheelbase: sceneWheelbase(afterScene) }));
+      return { before, requested, after, afterScene };
+    }
+    await sleep(50);
+  }
+  throw new Error('geometry rebuild did not commit ' + target.toFixed(2) + ' m: ' + JSON.stringify(after && after.geometry));
 }
 
 await runBrowserAudit({ audit: 'browser-contract', group: 'runtime', title: 'B5.2/B5.3/B5.4/O1 浏览器合同' }, async (audit, ctx) => {
   const snapshot = () => ctx.evaluateJson('window.FSApp.getSnapshot()');
   const scene = () => ctx.evaluateJson('window.FSApp.getSceneProbe()');
 
-  const before = await snapshot();
-  await ctx.evaluate("window.FSApp.setState({ wheelbase: 3.90 }, { rebuild: false })");
-  await sleep(2600);
-  await waitFrames(ctx, 2);
-  const after = await snapshot();
-  const afterScene = await scene();
+  const { before, requested, after, afterScene } = await (async () => {
+    const initial = await snapshot();
+    const request = await ctx.evaluateJson("window.FSApp.setState({ wheelbase: 3.90 }, { rebuild: false })");
+    const deadline = Date.now() + 20000;
+    let current = null;
+    while (Date.now() < deadline) {
+      current = await snapshot();
+      const geometry = current.geometry || {};
+      if (geometry.pending === false && geometry.commitCount > initial.geometry.commitCount &&
+          Math.abs(current.state.wheelbase - 3.90) < 1e-9) {
+        return { before: initial, requested: request, after: current, afterScene: await scene() };
+      }
+      await sleep(50);
+    }
+    throw new Error('geometry rebuild did not commit 3.90 m: ' + JSON.stringify(current && current.geometry));
+  })();
   const wheelGaps = [];
   for (let index = 0; index < afterScene.wheelPos.length; index += 1) {
     const scenePos = afterScene.wheelPos[index];
@@ -54,9 +93,20 @@ await runBrowserAudit({ audit: 'browser-contract', group: 'runtime', title: 'B5.
   const diagStretchMm = after.diag && typeof after.diag.maxSuspLinkStretchMm === 'number'
     ? after.diag.maxSuspLinkStretchMm
     : null;
+  const geometry = after.geometry || {};
+  const actualWheelbase = sceneWheelbase(afterScene);
+  const geometryCommitted = requested.geometry && requested.geometry.pending === true &&
+    requested.geometry.policy === 'geometry-forced' &&
+    requested.geometry.commitCount === before.geometry.commitCount &&
+    geometry.pending === false && after.pendingRebuild === false && geometry.mismatch === false &&
+    geometry.commitCount === before.geometry.commitCount + 1 &&
+    Number.isFinite(geometry.sceneRevision) && geometry.sceneRevision === geometry.physicsRevision &&
+    afterScene.geometryRevision === geometry.sceneRevision && afterScene.physicsRevision === geometry.physicsRevision &&
+    afterScene.geometryMismatch === false && Math.abs(after.state.wheelbase - 3.90) < 1e-9 &&
+    Math.abs(actualWheelbase - 3.90) <= 1e-4;
   audit.check(
     'B5.2/geometry-generation',
-    wheelGapMax <= 1e-6 && linkStretchMm <= 0.001 && (diagStretchMm === null || diagStretchMm <= 0.001),
+    Boolean(geometryCommitted) && wheelGapMax <= 1e-6 && linkStretchMm <= 0.001 && (diagStretchMm === null || diagStretchMm <= 0.001),
     {
       wheelGapMaxMm: wheelGapMax * 1000,
       linkStretchMm,
@@ -64,16 +114,22 @@ await runBrowserAudit({ audit: 'browser-contract', group: 'runtime', title: 'B5.
       stretch,
       beforeWheelbase: before.state.wheelbase,
       afterWheelbase: after.state.wheelbase,
+      actualWheelbase,
+      pending: geometry.pending,
+      sceneRevision: geometry.sceneRevision,
+      physicsRevision: geometry.physicsRevision,
+      commitBefore: before.geometry.commitCount,
+      commitAfter: geometry.commitCount,
+      requestedPending: requested.geometry && requested.geometry.pending,
+      policy: requested.geometry && requested.geometry.policy,
       sceneWheel0: afterScene.wheelPos[0],
       solvedWheel0: after.solved && after.solved[0] ? after.solved[0].wheelPos : null
     },
-    'wheel gap <= 1e-6 m and link stretch <= 0.001 mm',
+    'pending=false, matching revisions, commit +1, actual wheelbase, wheel gap <= 1e-6 m, link stretch <= 0.001 mm',
     'setState with rebuild=false must not mix geometry generations'
   );
 
-  await ctx.evaluate("window.FSApp.setState({ wheelbase: 3.55 })");
-  await sleep(2200);
-  await waitFrames(ctx, 2);
+  await changeWheelbase(ctx, 3.55);
 
   const observer = await ctx.evaluate("(function () { window.__auditNodeRebuilds = 0; window.__auditTextMutations = 0; if (window.__auditObserver) window.__auditObserver.disconnect(); if (window.__auditTextObserver) window.__auditTextObserver.disconnect(); var list = document.getElementById('checkList'); if (!list) return false; window.__auditObserver = new MutationObserver(function (records) { window.__auditNodeRebuilds += records.length; }); window.__auditObserver.observe(list, { childList: true, subtree: true }); window.__auditTextObserver = new MutationObserver(function (records) { window.__auditTextMutations += records.length; }); window.__auditTextObserver.observe(list, { subtree: true, characterData: true }); return true; })()");
   await sleep(1000);
@@ -90,9 +146,7 @@ await runBrowserAudit({ audit: 'browser-contract', group: 'runtime', title: 'B5.
   const threePresent = await ctx.evaluate("Boolean(window.THREE && window.THREE.Material && window.THREE.BufferGeometry)");
   if (threePresent) {
     await ctx.evaluate("(function () { if (window.__auditHooked) return; window.__auditMatDispose = 0; window.__auditGeomDispose = 0; var mp = THREE.Material.prototype; var md = mp.dispose; mp.dispose = function () { window.__auditMatDispose += 1; return md.call(this); }; var gp = THREE.BufferGeometry.prototype; var gd = gp.dispose; gp.dispose = function () { window.__auditGeomDispose += 1; return gd.call(this); }; window.__auditHooked = true; })()");
-    await ctx.evaluate("window.FSApp.setState({ wheelbase: 3.70 })");
-    await sleep(2600);
-    await waitFrames(ctx, 2);
+    await changeWheelbase(ctx, 3.70);
     const counts = await ctx.evaluateJson('({ material: window.__auditMatDispose, geometry: window.__auditGeomDispose })');
     audit.check(
       'B5.4/material-release',
@@ -101,8 +155,7 @@ await runBrowserAudit({ audit: 'browser-contract', group: 'runtime', title: 'B5.
       'materialDisposed >= 3 and geometryDisposed > 0',
       'rebuild must dispose owned materials as well as geometry'
     );
-    await ctx.evaluate("window.FSApp.setState({ wheelbase: 3.55 })");
-    await sleep(2200);
+    await changeWheelbase(ctx, 3.55);
   } else {
     audit.check(
       'B5.4/material-release',
